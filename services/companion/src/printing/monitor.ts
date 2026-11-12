@@ -17,6 +17,7 @@ export const MONITOR = {
   frameCapMs: 10_000,
   /** One camera check (#630) never runs longer than this; it runs beside the reads, never holding one back. */
   checkCapMs: 150_000,
+  checkTries: 3,
   /** With no report at all for this long, the monitor stops and says contact was lost. */
   giveUpAfterMs: 12 * 60 * 60_000,
 } as const;
@@ -213,6 +214,8 @@ export class PrintMonitorRunner {
   /** The camera check running now (one at a time), and the frames already judged or tried (one try each). */
   #check?: RunningCheck;
   #checked = new Set<string>();
+  /** Tries per frame whose check failed on the way (the session reconnecting, a timeout): a few more on later reads. */
+  #tries = new Map<string, number>();
   /** The empty frame was the first layer's: the words say so. In memory; after a restart the words are general. */
   #firstLayerEmpty = false;
   #evidence?: {frameId: string; jpeg: Buffer};
@@ -461,7 +464,13 @@ export class PrintMonitorRunner {
     signal.addEventListener('abort', abort, {once: true});
     const timer = setTimeout(abort, MONITOR.checkCapMs);
     const running: RunningCheck = {frameId: asked.frameId, controller, settled: false, done: Promise.resolve()};
-    running.done = this.#deps.check(structuredClone(asked), controller.signal).then(outcome => { if (!controller.signal.aborted) running.outcome = outcome; }, () => undefined)
+    // A check that failed on the way (not stopped) is tried again on a later read, up to three times: the MCP asks for
+    // an unobserved first-layer frame before any later one, so a frame left unobserved would stop every later check.
+    running.done = this.#deps.check(structuredClone(asked), controller.signal).then(outcome => { if (!controller.signal.aborted) running.outcome = outcome; }, () => {
+      const tries = (this.#tries.get(asked.frameId) ?? 0) + 1;
+      this.#tries.set(asked.frameId, tries);
+      if (!signal.aborted && tries < MONITOR.checkTries) this.#checked.delete(asked.frameId);
+    })
       .finally(() => { running.settled = true; clearTimeout(timer); signal.removeEventListener('abort', abort); });
     this.#check = running;
     return report;

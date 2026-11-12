@@ -111,8 +111,10 @@ export const PRINT_LOG: Record<string, string> = {
 };
 
 /** The print's log line for an event; a "done" after the camera showed nothing coming out says so instead. */
+/** A finished print whose camera showed nothing coming out: its log line and the card's line afterwards. */
+export const AFTER_CHECK_DONE = "The printer says it's done, but the camera showed nothing coming out of the nozzle. Check the plate.";
 export function printLogLine(type: string, data?: CounterpartEvent['data']): string | undefined {
-  if (type === 'print.done' && noExtrusion(data)) return "The printer says it's done, but the camera showed nothing coming out of the nozzle.";
+  if (type === 'print.done' && noExtrusion(data)) return AFTER_CHECK_DONE;
   return PRINT_LOG[type];
 }
 
@@ -222,7 +224,7 @@ export interface StatusSource extends TitleSource {
   passes?: {stages?: {words: string; endedAtMs?: number}[]; estimate?: {remainingSec: number}; endedAtMs?: number}[];
   print?: {destination?: {name: string}; dispatchedAt?: string; sentVia?: string;
     live?: {state: string; job?: {progress?: number; remainingSec?: number; layer?: number; stage?: string}; problems?: readonly {code: string; message: string}[]};
-    monitor?: {phase: string; endedAt?: string}};
+    monitor?: {phase: string; endedAt?: string; checkSent?: boolean}};
 }
 
 const formatDate = (iso: string) => new Intl.DateTimeFormat('en-US', {month: 'short', day: 'numeric'}).format(new Date(iso));
@@ -279,6 +281,8 @@ export function objectStatus(object: StatusSource, updatedAtMs?: number): Object
       return {phase: 'printing', text: joined(`${paused ? 'Paused' : 'Printing'} on ${printer}`, progress, paused ? undefined : left).slice(0, 300), symbol: 'printer.fill', tint: 'green'};
     }
     case 'printed': {
+      // #630: the printer said it finished, but its camera showed nothing coming out. The card keeps saying so.
+      if (object.print?.monitor?.checkSent) return {phase: 'printed', text: AFTER_CHECK_DONE, ...(rowDetail(AFTER_CHECK_DONE) ? {detail: rowDetail(AFTER_CHECK_DONE)} : {}), symbol: 'exclamationmark.triangle', tint: 'orange'};
       const at = object.print?.monitor?.endedAt ?? object.print?.dispatchedAt ?? (updatedAtMs ? new Date(updatedAtMs).toISOString() : undefined);
       return {phase: 'printed', text: at ? `Printed ${formatDate(at)}` : 'Printed', symbol: 'shippingbox', tint: 'secondary'};
     }

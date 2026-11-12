@@ -1079,4 +1079,7 @@ test("a print whose camera shows nothing coming out says so on its card and in i
   assert.equal(project.print?.live?.problems[0]?.message, doc.line);
   assert.equal(doc.event.type, "print.check");
   assert.equal(doc.event.body, doc.line);
+  // After the printer says it finished, the card keeps the warning.
+  assert.equal(words(doc.printedProject as Project), doc.printedProject.status.text);
+  assert.match(words(doc.printedProject as Project), /camera showed nothing coming out/);
 });

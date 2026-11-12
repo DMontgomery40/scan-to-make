@@ -1048,6 +1048,12 @@ final class DecodingTests: XCTestCase {
         XCTAssertEqual(decoded.status?.text, line)
         XCTAssertEqual(decoded.print?.live?.problems?.first?.message, line)
         XCTAssertTrue(CloudKitRecords.subscriptions.contains { $0.id == "ev-problem" && $0.types.contains("print.check") })
+        // After the printer says it finished, the card keeps the warning (the Mac's words win on the card).
+        var printed = try XCTUnwrap(object["printedProject"] as? [String: Any])
+        printed["createdAtMs"] = 1; printed["updatedAtMs"] = 2; printed["photos"] = [String](); printed["passes"] = [Any]()
+        let done = try JSONDecoder().decode(Project.self, from: JSONSerialization.data(withJSONObject: printed))
+        XCTAssertEqual(ProjectWords(done).line, done.status?.text)
+        XCTAssertTrue(done.status?.text.contains("camera showed nothing coming out") == true)
     }
 
     /// The Mac's control socket (`objects.list`) adds the project folder; `/v1/objects` doesn't.

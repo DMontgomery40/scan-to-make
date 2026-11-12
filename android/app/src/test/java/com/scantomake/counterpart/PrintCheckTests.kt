@@ -31,5 +31,10 @@ class PrintCheckTests {
         val project = requireNotNull(Project.decode(JsonObject(value + mapOf("createdAtMs" to JsonPrimitive(1), "updatedAtMs" to JsonPrimitive(2)))))
         assertEquals(line, ProjectWords(project).line)
         assertEquals(line, project.print?.live?.problems?.first()?.message)
+        // After the printer says it finished, the card keeps the warning.
+        val printedValue = fixture.getValue("printedProject").jsonObject
+        val printed = requireNotNull(Project.decode(JsonObject(printedValue + mapOf("createdAtMs" to JsonPrimitive(1), "updatedAtMs" to JsonPrimitive(2)))))
+        assertEquals(printedValue.getValue("status").jsonObject.getValue("text").jsonPrimitive.content, ProjectWords(printed).line)
+        assertTrue(ProjectWords(printed).line.contains("camera showed nothing coming out"))
     }
 }

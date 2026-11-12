@@ -346,3 +346,38 @@ test('the shared print.check fixture every client decodes is exactly what the co
   assert.equal(shared.project.status.text, shared.line);
   assert.equal(shared.project.print.events[0].message, printLogLine('print.check'));
 });
+
+test('a check that fails on the way (the session reconnecting) is tried again, so the later checkpoint still gets its look', async () => {
+  const first = savedFrame(EMPTY), later = savedFrame(EMPTY, {role: 'periodic', layer: 11, expectedHeightMm: 2.2});
+  const mcp = fakeMcp({frames: [first, later]});
+  const call = mcp.session.call.bind(mcp.session);
+  let failures = 1;
+  mcp.session.call = async (name, args) => {
+    if (name === 'counterpart_print_record' && failures-- > 0) throw new PrinterMcpError('printer-unreachable');
+    return call(name, args);
+  };
+  const now = m => {
+    const observed = new Set(m.observations.map(o => o.frame_id));
+    const pending = [first, later].find(f => !observed.has(f.id));
+    return {physical: {...m.verdict(), ...(pending ? {assessment: {...assessmentFor(pending), layer: pending.layer, expectedHeightMm: pending.expectedHeightMm}} : {})}};
+  };
+  const judge = async ({prompt}) => /layer 1,/.test(prompt) ? {visibility: 'clear', footprintVisible: true, deposition: 'unknown'} : EMPTY_PLATE;
+  const clock = {t: T0, now() { return this.t; }, async sleep(ms) { this.t += ms; }};
+  const events = [];
+  const monitor = new PrintMonitorRunner({projectId: randomUUID(), printId: randomUUID(), destinationId: 'current', printerName: 'Bambu Lab P1S', jobName: JOB, dispatchedAtMs: T0}, {
+    clock, read: async () => ({observedAt: new Date(clock.t).toISOString(), problems: [], source: 'counterpart', ...running(1 + Math.round((clock.t - T0) / 10_000), now(mcp))}),
+    milestones: () => [], check: (a, s) => checkPrintFrame(mcp.session, a, judge, s), save: async () => {}, end: async () => {}, emit: async d => { events.push(d); }});
+  const signal = new AbortController().signal;
+  for (let i = 0; i < 5; i++) { await monitor.step(signal); await monitor.checked(); clock.t += 10_000; }
+  assert.deepEqual(mcp.observations.map(o => [o.frame_id, o.deposition]), [[first.id, 'unknown'], [later.id, 'absent']]);
+  assert.equal(events.filter(e => e.type === 'print.check').length, 1);
+});
+
+test('after the printer says it finished, the card keeps saying the camera showed nothing coming out', () => {
+  const shared = JSON.parse(readFileSync(new URL('../../../packages/contracts/fixtures/print-check.json', import.meta.url), 'utf8'));
+  const status = objectStatus(shared.printedProject);
+  assert.deepEqual(status, shared.printedProject.status);
+  assert.deepEqual([status.phase, status.tint], ['printed', 'orange']);
+  assert.equal(status.text, "The printer says it's done, but the camera showed nothing coming out of the nozzle. Check the plate.");
+  assert.match(objectStatus({...shared.printedProject, print: {...shared.printedProject.print, monitor: {...shared.printedProject.print.monitor, checkSent: undefined}}}).text, /^Printed /);
+});

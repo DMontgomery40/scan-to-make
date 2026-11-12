@@ -81,5 +81,64 @@
       ]
     }
   },
-  "line": "Nothing seems to be coming out of the nozzle on Bambu Lab P1S: the first layer's area is empty in the camera. The printer doesn't detect this itself. Check the print."
+  "line": "Nothing seems to be coming out of the nozzle on Bambu Lab P1S: the first layer's area is empty in the camera. The printer doesn't detect this itself. Check the print.",
+  "printedProject": {
+    "id": "53a48b5e-d3f1-4b77-9e8e-aa2cad0a6157",
+    "title": "Forester",
+    "state": "printed",
+    "status": {
+      "phase": "printed",
+      "text": "The printer says it's done, but the camera showed nothing coming out of the nozzle. Check the plate.",
+      "detail": "The printer says it's done, but the camera showed nothing coming out of the…",
+      "symbol": "exclamationmark.triangle",
+      "tint": "orange"
+    },
+    "print": {
+      "bundleId": "b7a1c2d3-4e5f-4a6b-8c7d-9e0f1a2b3c4d",
+      "printId": "faf29c4d-f755-48ae-955b-e9ab323faab9",
+      "destination": {
+        "id": "current",
+        "name": "Bambu Lab P1S"
+      },
+      "dispatchedAt": "2026-11-11T19:01:00.000Z",
+      "monitor": {
+        "phase": "ended",
+        "startedAt": "2026-11-11T19:01:00.000Z",
+        "milestonesSent": [],
+        "firstLayerSent": false,
+        "checkSent": true,
+        "endState": "done",
+        "endedAt": "2026-11-11T20:35:00.000Z"
+      },
+      "live": {
+        "source": "counterpart",
+        "observedAt": "2026-11-11T19:22:00.000Z",
+        "state": "finished",
+        "job": {
+          "name": "Forester",
+          "progress": 100,
+          "remainingSec": 0,
+          "layer": 265,
+          "totalLayers": 265
+        },
+        "problems": [
+          {
+            "code": "physical-no-extrusion",
+            "severity": "error",
+            "message": "Nothing seems to be coming out of the nozzle on Bambu Lab P1S: the first layer's area is empty in the camera. The printer doesn't detect this itself. Check the print."
+          }
+        ]
+      },
+      "events": [
+        {
+          "atMs": 1794424912000,
+          "message": "The camera showed nothing coming out of the nozzle. Check the print."
+        },
+        {
+          "atMs": 1794429300000,
+          "message": "The printer says it's done, but the camera showed nothing coming out of the nozzle. Check the plate."
+        }
+      ]
+    }
+  }
 }
