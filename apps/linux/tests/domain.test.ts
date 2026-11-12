@@ -769,13 +769,13 @@ test("the code design engine row is reachable in Settings and shows the companio
   assert.deepEqual(codeEngineRow(undefined), { message: "Checking…", working: true });
 });
 
-// Q9, PRD §6.1: "Keep printer software up to date" is in Settings → Printers → Printer tools, on unless turned off,
+// Q9, PRD §6.1: "Keep printer software up to date" is in Settings → Printers → Printer software, on unless turned off,
 // and writes the companion's own setting (general.autoUpdateMcps) through settings.set.
 test("Keep printer software up to date is reachable in Settings → Printers and reads and writes the companion's setting", () => {
   const settings = readFileSync(new URL("../src/Settings.tsx", import.meta.url), "utf8");
   const printers = settings.slice(settings.indexOf("function Printers("));
-  const tools = printers.slice(printers.indexOf("<h3>Printer tools</h3>"));
-  assert.ok(tools.indexOf("{AUTO_UPDATE_LABEL}") > 0, "under Printer tools");
+  const tools = printers.slice(printers.indexOf("<h3>Printer software</h3>"));
+  assert.ok(printers.includes("<h3>Printer software</h3>") && tools.indexOf("{AUTO_UPDATE_LABEL}") > 0, "under Printer software, as on every layout (#775)");
   assert.ok(tools.indexOf("{AUTO_UPDATE_LABEL}") < tools.indexOf("{packages.map("), "above the MCPs and their Update buttons");
   assert.ok(tools.indexOf("{AUTO_UPDATE_WORDS}") > 0, "with its one sentence");
   // One set of words on every layout: the Swift apps' (CounterpartKit) and Android's copies are these, exactly.
