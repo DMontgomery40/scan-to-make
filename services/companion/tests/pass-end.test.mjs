@@ -49,6 +49,8 @@ test('the next request continues a session only from an ended, resumable pass wi
   assert.equal(passResume({...ended, dir: undefined}), undefined);
   assert.equal(passResume(endPass(running({sessionId: 's', dir: '/p'}), {status: 'done'}, 50)), undefined);
   assert.equal(passResume(undefined), undefined);
+  // The engine it ran on goes with it: a pass on another engine starts fresh rather than continue it (#609).
+  assert.deepEqual(passResume({...ended, engine: 'blender'}), {sessionId: 's', passDir: '/p', sessionCwd: '/w', engine: 'blender'});
 });
 
 test('only the named pass is closed', () => {
