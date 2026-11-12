@@ -37,7 +37,7 @@ export async function runCleanup(runner:ScanRunner,root:string,job:ScanProcessin
   const receipt=receiptFromConvertedBytes(snapshot.source,mesh,reportBytes),report=JSON.parse(reportBytes.toString('utf8'));
   if(!Array.isArray(report.outputs)||report.outputs.length>256)throw Error('Missing converter output manifest');
   for(const artifact of report.outputs){
-   if(typeof artifact.path!=='string'||!/^mesh(?:\.obj|\.mtl|_basecolor_[0-9]+\.png)$/.test(artifact.path))throw Error('Invalid converter output path');
+   if(typeof artifact.path!=='string'||!/^mesh(?:\.obj|\.mtl|_(?:basecolor|normal|occlusion)_[0-9]+\.png)$/.test(artifact.path))throw Error('Invalid converter output path');
    const bytes=await readBoundedCaptureFile(join(ctx.imported,artifact.path),64*1024*1024);
    if(bytes.length!==artifact.bytes||sha(bytes)!==artifact.sha256)throw Error('Converter output mismatch');
   }

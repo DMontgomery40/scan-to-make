@@ -581,6 +581,27 @@ final class LayoutParityUITests: XCTestCase {
     /// this on the next build, that will confirm the root problem(s) are not solved". A copy whose scan is really the thing
     /// a case must fit: the page offers Make something else from this scan without scrolling, New opens holding that scan
     /// and asks first what it becomes, and Send lands on a new fit project made from the same scan. The source stays.
+    func testMadeFromAnotherProjectShowsItsRequestUnderFromWithProjectsPresent() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-CounterpartFixtures", NSTemporaryDirectory() + "no-assets", "-CounterpartFixtureSet", "inherited-history",
+                               "-CounterpartOpen", "counterpart://project/6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a02", "-CounterpartSection", "inputs"]
+        app.launch()
+        let tab = app.buttons["What you sent"]
+        XCTAssertTrue(tab.waitForExistence(timeout: 20))
+        scrollProjectPage(app, until: tab)
+        tab.tap()
+        let from = app.buttons["From “Forester phone mount”"]
+        scrollProjectPage(app, until: from)
+        XCTAssertTrue(from.waitForExistence(timeout: 5))
+        let request = app.staticTexts["A mount for my phone."]
+        scrollProjectPage(app, until: request)
+        XCTAssertTrue(request.exists, app.debugDescription)
+        XCTAssertLessThan(from.frame.minY, request.frame.minY)
+        let shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = "What you sent — inherited history"; shot.lifetime = .keepAlways
+        add(shot)
+    }
+
     func testACopysScanMakesAFitFromItsPageWithoutScanningAgainWithProjectsPresent() {
         let source = "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01"
         let app = XCUIApplication()
@@ -947,6 +968,49 @@ final class LayoutParityUITests: XCTestCase {
                 let home = XCTAttachment(screenshot: XCUIScreen.main.screenshot()); home.name = "away-home"; home.lifetime = .keepAlways; add(home)
             }
             app.terminate()
+        }
+    }
+
+    /// Review of #527 part 4, S5: at the largest text sizes even the shortest stage leaves "Did it fit?" under the bar, so
+    /// the page opens scrolled to it: both answers whole above the bar, without the person scrolling.
+    func testAtLargeTextThePageOpensScrolledToDidItFit() {
+        let app = launch(largeText: true, screen: "printed")
+        let works = app.buttons["it-works"], changes = app.buttons["needs-changes"]
+        XCTAssertTrue(works.waitForExistence(timeout: 20), app.debugDescription)
+        let ask = app.descendants(matching: .any)["ask-for-changes"]
+        XCTAssertTrue(ask.waitForExistence(timeout: 5))
+        let settled = Date().addingTimeInterval(4)
+        while Date() < settled, changes.frame.maxY > ask.frame.minY || !changes.isHittable { RunLoop.current.run(until: Date().addingTimeInterval(0.2)) }
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot()); shot.name = "did-it-fit-large-text"; shot.lifetime = .keepAlways; add(shot)
+        for answer in [works, changes] {
+            XCTAssertTrue(answer.isHittable, "\(answer.label) can be pressed: \(answer.frame)")
+            XCTAssertLessThanOrEqual(answer.frame.maxY, ask.frame.minY + 1, "\(answer.label) \(answer.frame) is above the bar \(ask.frame)")
+        }
+    }
+
+    /// Review S5: how real pictures read on the short stage, for choosing `ProjectView.recognisable`. Runs only with
+    /// `TEST_RUNNER_STM_REAL_PICTURES=<folder of the Mac's own part pictures>`; the gate has none and skips it.
+    func testRealPicturesOnTheShortStage() throws {
+        guard let source = ProcessInfo.processInfo.environment["STM_REAL_PICTURES"] else { throw XCTSkip("no real pictures given") }
+        let pictures = try FileManager.default.contentsOfDirectory(atPath: source).filter { $0.hasSuffix(".png") }.sorted()
+        for name in pictures {
+            let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(at: folder) }
+            try FileManager.default.copyItem(atPath: source + "/" + name, toPath: folder.appendingPathComponent("thumb-potato.png").path)
+            for height in [160, 200, 240, 280] {
+                let app = XCUIApplication()
+                app.launchArguments = ["-CounterpartFixtures", folder.path, "-CounterpartFixtureSet", "all", "-CounterpartScreen", "printed",
+                                       "-CounterpartStageHeight", "\(height)"]
+                app.launch()
+                XCTAssertTrue(app.buttons["it-works"].waitForExistence(timeout: 20))
+                let picture = app.images["gallery-stage-picture"]
+                _ = XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "shown"), object: picture)], timeout: 10)
+                RunLoop.current.run(until: Date().addingTimeInterval(1))
+                let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+                shot.name = "real-\(name.replacingOccurrences(of: ".png", with: ""))-\(height)"; shot.lifetime = .keepAlways; add(shot)
+                app.terminate()
+            }
         }
     }
 
@@ -1344,6 +1408,12 @@ final class LayoutParityUITests: XCTestCase {
         XCTAssertTrue(print.exists)
         XCTAssertEqual(print.label, "Print Another")
         XCTAssertEqual(app.buttons.matching(NSPredicate(format: "label MATCHES %@", "Print( .*)?")).count, 1, "printing is offered once")
+        // On a phone's width a plain Print Another was as large as It Works and the card started under the bar
+        // (captures, Nov 10). Not the main action: the symbol alone, still named for VoiceOver. And the page opens
+        // with the card that holds the main action in view, its button ready to press.
+        XCTAssertLessThan(print.frame.width, 80, "the bar's Print is the symbol alone when it does not lead")
+        XCTAssertTrue(app.buttons["it-works"].isHittable, "the page opens with the main action in view")
+        XCTAssertGreaterThan(app.buttons["it-works"].frame.width, print.frame.width * 2, "the main action is the larger control")
     }
 
     /// Nov 11, David: "we now have 'ar' AND 'see it in your space' so there are TWO options". One AR control, on the stage,
@@ -1432,6 +1502,44 @@ final class LayoutParityUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter().wait(for: [arrived], timeout: 40), .completed, "AR once the model is here: \(String(describing: ar.value))")
     }
 
+    /// #606, David, Nov 11: "you can't rotate the thing and zoom in on the 3d thing anymore". On the iPhone and the iPad a
+    /// drag on the part's stage opens it in 3D (`model-stage` reads "live" once RealityKit has drawn it), with the
+    /// off-screen still drawn or not: #539 let 3D start only after that still had rendered, so a phone whose still failed
+    /// kept a picture that never turned.
+    func testADragOnTheStageTurnsThePartInThreeD() throws { try checkDragTurnsThePart(posterFails: false) }
+    func testADragOnTheStageTurnsThePartInThreeDWhenItsStillFails() throws { try checkDragTurnsThePart(posterFails: true) }
+
+    private func checkDragTurnsThePart(posterFails: Bool) throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try Self.boxSTL().write(to: folder.appendingPathComponent("mic.stl"))
+        let app = XCUIApplication()
+        // The stage stays live 30 s after a touch here (3 s for a person), so the test reads it after XCUITest's drag returns.
+        app.launchArguments = ["-CounterpartFixtures", folder.path, "-CounterpartFixtureSet", "ar-stage", "-CounterpartScreen", "printed",
+                               "-CounterpartStageIdle", "30"] + (posterFails ? ["-CounterpartFailPoster", "YES"] : [])
+        app.launch()
+        let result = app.buttons["gallery-result"]
+        XCTAssertTrue(result.waitForExistence(timeout: 20))
+        result.tap()
+        let stage = app.descendants(matching: .any)["model-stage"]
+        XCTAssertTrue(stage.waitForExistence(timeout: 30), "the part's stage is a model stage once its model came")
+        // The model is here and checked (its still drawn or not): the stage shows its still and a drag can turn it.
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value IN %@", ["still", "failed"]), object: stage)
+        XCTAssertEqual(XCTWaiter().wait(for: [ready], timeout: 40), .completed, "the model loaded: \(String(describing: stage.value))")
+        XCTAssertEqual(stage.value as? String, "still", "a model that loaded is never called failed because its off-screen still failed")
+        let area = stage.frame
+        XCTAssertGreaterThan(area.height, 100, "\(area)")
+        let origin = app.coordinate(withNormalizedOffset: .zero)
+        let from = origin.withOffset(CGVector(dx: area.midX - area.width * 0.2, dy: area.midY - area.height * 0.1))
+        let to = origin.withOffset(CGVector(dx: area.midX + area.width * 0.2, dy: area.midY))
+        from.press(forDuration: 0.05, thenDragTo: to)
+        let live = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "live"), object: stage)
+        XCTAssertEqual(XCTWaiter().wait(for: [live], timeout: 40), .completed, "a drag opens the model in 3D: \(String(describing: stage.value))")
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = posterFails ? "stage-live-still-failed" : "stage-live"; shot.lifetime = .keepAlways; add(shot)
+    }
+
     static func boxSTL() -> Data {
         let size = SIMD3<Float>(146, 40, 20)
         let c: [SIMD3<Float>] = (0..<8).map { i in SIMD3(Float(i & 1), Float((i >> 1) & 1), Float((i >> 2) & 1)) * size }
@@ -1490,6 +1598,11 @@ final class LayoutParityUITests: XCTestCase {
         let last = labels.element(boundBy: 5)
         // A plate off the edge has no hit point: swipe the row on a label that is on screen until the last one is.
         let window = plates.windows.firstMatch.frame
+        // This project's answer card (the print didn't finish) sits below six plates, so the page opens scrolled to it
+        // (ProjectView: the page opens on its main action) and the labels sit under the bar or above the screen: scroll
+        // the page back to the top first. Dragged low on the page, never on the stage, whose drag turns the model.
+        let page = plates.scrollViews.firstMatch
+        for _ in 0..<3 { page.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.55)).press(forDuration: 0.05, thenDragTo: page.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.95))) }
         for _ in 0..<5 where !window.contains(last.frame) {
             guard let shown = (0..<6).map({ labels.element(boundBy: $0) }).first(where: { window.contains($0.frame) }) else { break }
             shown.swipeLeft()
@@ -1575,6 +1688,9 @@ final class LayoutParityUITests: XCTestCase {
         XCTAssertTrue(host.waitForExistence(timeout: 5))
         XCTAssertEqual(host.value as? String, "192.168.1.42", "the address comes from discovery")
         XCTAssertEqual(app.textFields["add-printer-serial"].value as? String, "01P00A451601106", "so does the serial number")
+        // Only the fields its MCP declares for this kind (bambu-printer-mcp's has no port); the fixture companion refuses a
+        // Check or Add that sends anything else, or lacks a required field.
+        XCTAssertFalse(app.textFields["add-printer-port"].exists, "no port: the MCP declares none for this kind")
         XCTAssertTrue(app.staticTexts["On the printer: Settings → Device"].exists || app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Settings → Device")).firstMatch.exists,
                       "the MCP's own hint")
         let add = app.buttons["add-printer-add"]
@@ -1604,6 +1720,9 @@ final class LayoutParityUITests: XCTestCase {
         octo.tap()
         let approve = app.buttons["add-printer-obtain"]
         XCTAssertTrue(approve.waitForExistence(timeout: 5))
+        // OctoPrint's own fields: a port, and no serial number or model (the fixture companion refuses either).
+        XCTAssertEqual(app.textFields["add-printer-port"].value as? String, "80", "the port discovery found")
+        XCTAssertFalse(app.textFields["add-printer-serial"].exists)
         XCTAssertEqual(approve.label, "Approve in OctoPrint", "the MCP's words")
         let add = app.buttons["add-printer-add"]
         XCTAssertFalse(add.isEnabled)
@@ -1640,6 +1759,44 @@ final class LayoutParityUITests: XCTestCase {
     func testCompletedPrinterMoveKeepsItsResultAfterItsButtonDisappears() throws { try checkCopyMove(completes: true) }
 
     func testPrinterMoveCompletionSurvivesDismissingPrinters() throws { try checkCopyMove(completes: true, reopen: true) }
+
+    /// PRD §8.10 on the iPhone and iPad: the Mac answered "waiting" and its finishing event never came (the canned Mac
+    /// serves no events, as after a companion restart). The Move asked the companion for that install, said it waits,
+    /// and after the clock ran out says so and offers the Move again, rather than staying disabled forever.
+    func testAMoveThatNeverHearsBackSaysSoAndCanBePressedAgain() throws {
+        let folder = try copyFixtures(["mcp-profile-copies.json", "mcp-update-waiting.json"])
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let app = XCUIApplication()
+        app.launchArguments = ["-CounterpartFixtures", folder.path, "-CounterpartFixtureSet", "all"]
+        app.launchEnvironment["COUNTERPART_MCP_WAIT_SECONDS"] = "3"
+        app.launch()
+        XCTAssertTrue(app.buttons["new-project"].waitForExistence(timeout: 20), "with projects present")
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Printers")).firstMatch.tap()
+        let move = app.buttons["mcp-move-mcp-0000000000000002"]
+        XCTAssertTrue(move.waitForExistence(timeout: 5), app.debugDescription)
+        reveal(move, in: app.collectionViews.firstMatch)
+        move.tap()
+        let waiting = app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] %@", "finishes its work on this printer")).firstMatch
+        XCTAssertTrue(waiting.waitForExistence(timeout: 5))
+        XCTAssertFalse(move.isEnabled, "no second Move while the first one waits")
+        let requests = try String(contentsOf: folder.appendingPathComponent("mcp-update-requests.log"), encoding: .utf8)
+        XCTAssertTrue(requests.hasPrefix("/v1/printers/mcp/mcp-0000000000000002/update "), requests)
+        XCTAssertTrue(requests.contains("\"fresh\":true"), "a Move asks for Counterpart's copy: \(requests)")
+        XCTAssertTrue(app.staticTexts["Counterpart didn’t say whether this updated. Try Update again."].waitForExistence(timeout: 10))
+        XCTAssertFalse(waiting.exists, "the wait no longer claims to be waiting")
+        XCTAssertTrue(move.isEnabled, "the Move can be pressed again")
+    }
+
+    private func copyFixtures(_ names: [String]) throws -> URL {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { root.deleteLastPathComponent() }
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        for name in names {
+            try FileManager.default.copyItem(at: root.appendingPathComponent("packages/contracts/fixtures/" + name), to: folder.appendingPathComponent(name))
+        }
+        return folder
+    }
 
     private func checkCopyMove(completes: Bool, reopen: Bool = false) throws {
         var root = URL(fileURLWithPath: #filePath)
@@ -1748,6 +1905,22 @@ final class LayoutParityUITests: XCTestCase {
         XCTAssertTrue(setUp.exists)
         setUp.tap()
         XCTAssertTrue(app.staticTexts["Setting up… 0 s so far."].waitForExistence(timeout: 10))
+    }
+
+    /// On-device library (docs/design/overhaul/on-device-library.md), PRD §6.1: Settings → Keep on this iPhone (iPad) is
+    /// reachable with projects present, offers the three choices, and says how much space it uses with Clear beside it.
+    func testKeepOnThisDeviceIsInSettingsWithProjectsPresent() {
+        let app = launch(screen: "settings")
+        XCTAssertTrue(app.descendants(matching: .any)["mac-status"].waitForExistence(timeout: 20))
+        let keep = app.descendants(matching: .any)["library-keep"]
+        for _ in 0..<12 where !(keep.exists && keep.isHittable) { app.swipeUp() }
+        XCTAssertTrue(keep.isHittable, "Keep on this \(regular ? "iPad" : "iPhone") is reachable")
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Uses ")).firstMatch.exists, "how much space it uses")
+        XCTAssertTrue(app.buttons["library-clear"].exists, "and Clear")
+        keep.tap()
+        for choice in ["Pictures only", "Pictures and 3D models", "Everything, scans included"] {
+            XCTAssertTrue(app.buttons[choice].waitForExistence(timeout: 5) || app.staticTexts[choice].exists, "offers \(choice)")
+        }
     }
 
     /// Q9, PRD §6.1: "Keep printer software up to date" sits in Settings → Printer software, above the MCP copies and
@@ -2072,6 +2245,249 @@ final class LayoutParityUITests: XCTestCase {
         app.buttons["Done"].tap()
     }
 
+}
+
+/// The phone's own library (docs/design/overhaul/on-device-library.md). David, Nov 11: "Never seen app in my life, since
+/// 2009 or so, struggle showing images it just had, 10 minutes later, because of a dependency on some Mac mini". The list
+/// loads, the library fills by itself, the link drops completely, the app is relaunched: every project's picture is still
+/// there, on Home and on its page, where the stage shows it ("shown", never "loading" or a symbol).
+final class OnDeviceLibraryUITests: XCTestCase {
+    override func setUp() { continueAfterFailure = false }
+
+    /// A picture that is not one flat colour (the blank check flags those), as PNG.
+    private func picture(_ hue: CGFloat) -> Data {
+        UIGraphicsImageRenderer(size: CGSize(width: 320, height: 240), format: { let f = UIGraphicsImageRendererFormat(); f.scale = 1; return f }()).pngData { context in
+            UIColor(hue: hue, saturation: 0.5, brightness: 0.4, alpha: 1).setFill(); context.fill(CGRect(x: 0, y: 0, width: 320, height: 240))
+            UIColor.white.setFill(); context.cgContext.fillEllipse(in: CGRect(x: 90, y: 50, width: 140, height: 140))
+        }
+    }
+
+    /// A binary STL of `triangles` small triangles: a model of a known size.
+    private func model(triangles: Int) -> Data {
+        var data = Data(count: 80)
+        var count = UInt32(triangles).littleEndian
+        data.append(Data(bytes: &count, count: 4))
+        for index in 0..<triangles {
+            var floats: [Float32] = [0, 0, 1, Float32(index), 0, 0, Float32(index) + 1, 0, 0, Float32(index), 1, 0]
+            data.append(Data(bytes: &floats, count: 48)); data.append(Data(count: 2))
+        }
+        return data
+    }
+
+    private func folder() throws -> URL {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: folder) }
+        try picture(0.1).write(to: folder.appendingPathComponent("thumb-mic.png"))
+        try picture(0.6).write(to: folder.appendingPathComponent("thumb-potato.png"))
+        try picture(0.3).write(to: folder.appendingPathComponent("bed.jpg"))
+        try picture(0.8).write(to: folder.appendingPathComponent("render-live.png"))
+        try model(triangles: 4_000).write(to: folder.appendingPathComponent("mic.stl"))
+        return folder
+    }
+
+    private func launch(_ folder: URL, _ more: [String] = []) -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchArguments = ["-CounterpartFixtures", folder.path, "-CounterpartFixtureSet", "all", "-CounterpartFixtureKeepsLibrary", "YES"] + more
+        app.launch()
+        return app
+    }
+
+    /// What the app's library index says it holds (the app writes it into the test's fixture folder).
+    private struct Entry: Decodable { var project: String; var name: String; var kind: String; var bytes: Int64 }
+    private func entries(_ folder: URL) -> [Entry] {
+        let library = folder.appendingPathComponent("library")
+        guard let mac = try? FileManager.default.contentsOfDirectory(atPath: library.path).first(where: { !$0.hasPrefix(".") }),
+              let data = try? Data(contentsOf: library.appendingPathComponent(mac).appendingPathComponent("index.json")),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let rows = object["entries"] as? [String: Any] else { return [] }
+        return rows.values.compactMap { try? JSONDecoder().decode(Entry.self, from: JSONSerialization.data(withJSONObject: $0)) }
+    }
+
+    private func waitFor(_ timeout: TimeInterval, _ condition: () -> Bool) -> Bool {
+        let end = Date().addingTimeInterval(timeout)
+        while Date() < end { if condition() { return true }; RunLoop.current.run(until: Date().addingTimeInterval(0.5)) }
+        return condition()
+    }
+
+    func testEveryProjectsPictureShowsAfterARelaunchWithTheMacAwayWithProjectsPresent() throws {
+        let folder = try folder()
+        var app = launch(folder)
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Mic mount")).firstMatch.waitForExistence(timeout: 20), "the list has loaded")
+        // The library fills by itself: nobody opened a page.
+        XCTAssertTrue(waitFor(30) { Set(entries(folder).filter { $0.kind == "picture" }.map(\.project)).count >= 4 },
+                      "every project's picture comes without a page asking: \(entries(folder).map { "\($0.project.suffix(2)) \($0.name)" })")
+        // The pages to check: projects the phone keeps a picture the Mac drew for (`pictures/`, `renders/`), which is what
+        // a stage shows. A project whose only kept picture is its question's photo (the plush) has no Mac picture of its
+        // scan yet, so its stage honestly says the picture is coming.
+        let kept = Set(entries(folder).filter { $0.kind == "picture" && ($0.name.hasPrefix("pictures/") || $0.name.hasPrefix("renders/")) }.map(\.project))
+        XCTAssertGreaterThanOrEqual(kept.count, 4, "the Mac's pictures of every project that has one")
+        // The saved list is written a moment after the list arrives (ProjectsStore.saveKnownSoon, 2 s): wait for it, as a
+        // person's phone does, before the app goes.
+        XCTAssertTrue(waitFor(10) { FileManager.default.fileExists(atPath: folder.appendingPathComponent("known-projects.json").path) }, "the saved list is written")
+        app.terminate()
+
+        // The link drops completely, and the app starts again.
+        try Data().write(to: folder.appendingPathComponent("offline"))
+        app = launch(folder)
+        XCTAssertTrue(app.buttons["connection-try-again"].waitForExistence(timeout: 20), "the Mac isn't answering")
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Mic mount")).firstMatch.waitForExistence(timeout: 10),
+                      "Home has the projects it had: \(app.debugDescription)")
+        let home = XCTAttachment(screenshot: app.screenshot()); home.name = "home-away"; home.lifetime = .keepAlways; add(home)
+        app.terminate()
+
+        // Every project the library holds a picture for: its page, the Mac away, shows the Mac's picture on the stage.
+        for id in kept.sorted() {
+            app = launch(folder, ["-CounterpartOpen", "counterpart://project/\(id)"])
+            // The stage shows the Mac's picture the phone keeps ("shown"), or, for a recent project whose model the phone
+            // also keeps, that model drawn (its Explore in 3D control). Never "loading", "not available" or a bare stage.
+            let stage = app.images["gallery-stage-picture"], model = app.buttons["Explore in 3D"]
+            XCTAssertTrue(waitFor(20) { (stage.exists && stage.value as? String == "shown") || model.exists },
+                          "\(id): the stage shows what the phone keeps, not \(stage.exists ? String(describing: stage.value) : "nothing"): \(app.debugDescription)")
+            let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "page-away-\(id.suffix(2))"; shot.lifetime = .keepAlways; add(shot)
+            app.terminate()
+        }
+    }
+
+    /// Issue #720. David, Nov 11: "if i just saw it 2 seconds ago, how is it having to come from my mac again?" A project
+    /// opened once, left, and opened again: with the Mac answering, then with it not answering at all, then after a
+    /// relaunch still away. Each time its model is on the stage from the phone (a drag turns it live, `model-stage`) and
+    /// nothing says it is coming from the Mac.
+    func testAProjectSeenOnceDrawsFromThePhoneWhenTheMacIsAwayWithProjectsPresent() throws {
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            XCUIDevice.shared.orientation = .landscapeLeft
+            addTeardownBlock { XCUIDevice.shared.orientation = .portrait }
+        }
+        let folder = try folder()
+        // A model the stage can draw (a 40 mm cube), so the 3D path is checked too, not only the picture.
+        try cube(40).write(to: folder.appendingPathComponent("mic.stl"))
+        let mic = "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01"
+        var app = launch(folder, ["-CounterpartOpen", "counterpart://project/\(mic)", "-CounterpartStageIdle", "30"])
+        assertTurnsFromThePhone(app, "first visit, Mac answering")
+        XCTAssertTrue(waitFor(20) { entries(folder).contains { $0.project == mic && $0.kind == "model" } }, "and the phone keeps it")
+        XCTAssertTrue(waitFor(10) { FileManager.default.fileExists(atPath: folder.appendingPathComponent("known-projects.json").path) }, "the saved list is written")
+
+        // Leave the page and come back with the Mac answering...
+        leaveAndComeBack(app)
+        assertTurnsFromThePhone(app, "back on the page, Mac answering")
+        // ...then the Mac stops answering entirely, and again.
+        try Data().write(to: folder.appendingPathComponent("offline"))
+        if app.collectionViews["Sidebar"].exists {
+            // The iPad: every project the phone had stays in the sidebar while the Mac is away, reachable by scrolling it
+            // (#720: the away banner, pinned above the list, left four rows and hid Mic mount below them).
+            let sidebar = app.collectionViews["Sidebar"], row = app.descendants(matching: .any)["sidebar-project-\(mic)"]
+            XCTAssertTrue(app.descendants(matching: .any)["connection-try-again"].waitForExistence(timeout: 20), "the Mac isn't answering")
+            for _ in 0..<8 where !(row.exists && row.isHittable) { sidebar.swipeUp() }
+            XCTAssertTrue(row.exists && row.isHittable, "Mic mount is in the sidebar with the Mac away: \(app.debugDescription)")
+            for _ in 0..<8 { sidebar.swipeDown() }
+        }
+        leaveAndComeBack(app)
+        assertTurnsFromThePhone(app, "back on the page, Mac away")
+        let again = XCTAttachment(screenshot: app.screenshot()); again.name = "720-page-again-away"; again.lifetime = .keepAlways; add(again)
+        app.terminate()
+
+        // A relaunch, the Mac still away: the same page draws the same way.
+        app = launch(folder, ["-CounterpartOpen", "counterpart://project/\(mic)", "-CounterpartStageIdle", "30"])
+        assertTurnsFromThePhone(app, "after a relaunch, Mac away")
+        let relaunched = XCTAttachment(screenshot: app.screenshot()); relaunched.name = "720-page-relaunch-away"; relaunched.lifetime = .keepAlways; add(relaunched)
+        app.terminate()
+    }
+
+    /// Back to Home and into Mic mount again (iPhone), or to another project and back by the sidebar (iPad). The iPad finds
+    /// each row with the sidebar's own search, which also says how many projects the list holds: a project missing from
+    /// the list while the Mac is away is told apart from a row scrolled out of view.
+    private func leaveAndComeBack(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
+        let search = app.textFields["project-search"]
+        if app.collectionViews["Sidebar"].exists, search.exists {
+            pick(app, search, "Crochet potato", "sidebar-project-6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a02", file: file, line: line)
+            pick(app, search, "Mic mount", "sidebar-project-6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01", file: file, line: line)
+        } else {
+            let back = app.navigationBars.buttons.firstMatch
+            XCTAssertTrue(back.waitForExistence(timeout: 5), app.debugDescription, file: file, line: line)
+            back.tap()
+            let row = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@ AND NOT (label BEGINSWITH %@)", "Mic mount", "Mic mount v")).firstMatch
+            XCTAssertTrue(row.waitForExistence(timeout: 10), app.debugDescription, file: file, line: line)
+            for _ in 0..<6 where !row.isHittable { app.swipeUp() }
+            row.tap()
+        }
+        XCTAssertTrue(app.buttons["project-title"].waitForExistence(timeout: 10), app.debugDescription, file: file, line: line)
+        XCTAssertEqual(app.buttons["project-title"].label, "Mic mount", file: file, line: line)
+    }
+
+    /// Types `query` into the sidebar's search and taps the row `identifier`; the search's summary goes into the failure.
+    private func pick(_ app: XCUIApplication, _ search: XCUIElement, _ query: String, _ identifier: String, file: StaticString, line: UInt) {
+        search.tap()
+        let old = (search.value as? String) ?? ""
+        if !old.isEmpty && old != search.placeholderValue { search.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: old.count)) }
+        search.typeText(query)
+        let row = app.descendants(matching: .any)[identifier]
+        let found = row.waitForExistence(timeout: 10)
+        let summary = app.descendants(matching: .any)["project-search-summary"]
+        let said = summary.exists ? summary.label : "no summary"
+        let note = XCTAttachment(string: "search \(query): \(said)"); note.name = "sidebar search: \(query)"; note.lifetime = .keepAlways; add(note)
+        XCTAssertTrue(found, "\(query) is in the sidebar's list (search says: \(said)): \(app.debugDescription)", file: file, line: line)
+        row.tap()
+    }
+
+    /// The stage has the model from the phone (its still, "still") within a few seconds, a drag turns it live, and nothing
+    /// says "coming from your Mac" meanwhile.
+    private func assertTurnsFromThePhone(_ app: XCUIApplication, _ when: String, file: StaticString = #filePath, line: UInt = #line) {
+        let coming = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS[c] %@", "coming from your Mac"))
+        let stage = app.descendants(matching: .any)["model-stage"]
+        let end = Date().addingTimeInterval(20)
+        var ready = false
+        while Date() < end {
+            XCTAssertEqual(coming.count, 0, "\(when): \(coming.firstMatch.exists ? coming.firstMatch.label : "")", file: file, line: line)
+            if stage.exists, ["still", "failed"].contains(stage.value as? String ?? "") { ready = true; break }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        }
+        if !ready || stage.value as? String != "still" {
+            let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "not-drawn: \(when)"; shot.lifetime = .keepAlways; add(shot)
+            let tree = XCTAttachment(string: app.debugDescription); tree.name = "not-drawn tree: \(when)"; tree.lifetime = .keepAlways; add(tree)
+        }
+        XCTAssertEqual(stage.value as? String, "still", "\(when): the model is on the stage from the phone (\(stage.exists ? String(describing: stage.value) : "no model stage"))", file: file, line: line)
+        let area = stage.frame
+        let origin = app.coordinate(withNormalizedOffset: .zero)
+        origin.withOffset(CGVector(dx: area.midX - area.width * 0.2, dy: area.midY - area.height * 0.1))
+            .press(forDuration: 0.05, thenDragTo: origin.withOffset(CGVector(dx: area.midX + area.width * 0.2, dy: area.midY)))
+        let live = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "live"), object: stage)
+        XCTAssertEqual(XCTWaiter().wait(for: [live], timeout: 40), .completed, "\(when): a drag turns it: \(String(describing: stage.value))", file: file, line: line)
+        XCTAssertEqual(coming.count, 0, when, file: file, line: line)
+    }
+
+    /// A binary STL cube of `size` mm: 12 triangles.
+    private func cube(_ size: Float32) -> Data {
+        let v: [[Float32]] = [[0,0,0],[1,0,0],[1,1,0],[0,1,0],[0,0,1],[1,0,1],[1,1,1],[0,1,1]].map { $0.map { $0 * size } }
+        let faces = [[0,2,1],[0,3,2],[4,5,6],[4,6,7],[0,1,5],[0,5,4],[1,2,6],[1,6,5],[2,3,7],[2,7,6],[3,0,4],[3,4,7]]
+        var data = Data(count: 80)
+        var count = UInt32(faces.count).littleEndian
+        data.append(Data(bytes: &count, count: 4))
+        for face in faces {
+            var floats: [Float32] = [0, 0, 0] + face.flatMap { v[$0] }
+            data.append(Data(bytes: &floats, count: 48)); data.append(Data(count: 2))
+        }
+        return data
+    }
+
+    /// Past the ceiling, models go before pictures: the library keeps every project's picture and lets the models go.
+    func testFillingPastTheCeilingEvictsModelsBeforePicturesWithProjectsPresent() throws {
+        let folder = try folder()
+        var app = launch(folder)
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Mic mount")).firstMatch.waitForExistence(timeout: 20))
+        // With no ceiling to speak of, every picture and the recent projects' models (200 KB each) come by themselves.
+        XCTAssertTrue(waitFor(30) { Set(entries(folder).filter { $0.kind == "picture" }.map(\.project)).count >= 4 && entries(folder).contains { $0.kind == "model" } },
+                      "pictures and models came: \(entries(folder).map(\.name))")
+        app.terminate()
+        let pictures = Set(entries(folder).filter { $0.kind == "picture" }.map(\.project))
+        // A ceiling with room for the pictures and not for one model.
+        let ceiling = entries(folder).filter { $0.kind == "picture" }.reduce(0) { $0 + $1.bytes } * 2 + 20_000
+        XCTAssertLessThan(ceiling, 200_000)
+        app = launch(folder, ["-CounterpartLibraryCeiling", String(ceiling)])
+        XCTAssertTrue(waitFor(30) { !entries(folder).contains { $0.kind == "model" } }, "models are evicted first: \(entries(folder).map(\.name))")
+        XCTAssertEqual(Set(entries(folder).filter { $0.kind == "picture" }.map(\.project)), pictures, "every project's picture stays")
+        XCTAssertLessThanOrEqual(entries(folder).reduce(0) { $0 + $1.bytes }, ceiling)
+        app.terminate()
+    }
 }
 
 extension XCUIElement {

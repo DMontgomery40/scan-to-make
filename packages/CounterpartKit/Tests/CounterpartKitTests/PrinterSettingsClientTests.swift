@@ -134,7 +134,7 @@ final class PrinterFormSerialTests: XCTestCase {
     """.utf8))
 
     func testACorrectedSerialPicksItsModelAgain() {
-        var form = PrinterForm(); var inferred = false
+        var form = PrinterForm(); form.backend = "bambu-printer-mcp"; form.printerType = "bambu"; var inferred = false
         inferred = form.setSerial("01P00A", options: options, inferred: inferred)
         XCTAssertEqual(form.model, "p1s"); XCTAssertTrue(inferred)
         inferred = form.setSerial("01S00A", options: options, inferred: inferred)
@@ -144,7 +144,7 @@ final class PrinterFormSerialTests: XCTestCase {
     }
 
     func testAModelThePersonChoseStays() {
-        var form = PrinterForm(); form.model = "p1p"
+        var form = PrinterForm(); form.backend = "bambu-printer-mcp"; form.printerType = "bambu"; form.model = "p1p"
         let inferred = form.setSerial("01P00A", options: options, inferred: false)
         XCTAssertEqual(form.model, "p1p"); XCTAssertFalse(inferred)
     }

@@ -32,6 +32,8 @@ import kotlinx.coroutines.launch
  */
 class AppState(private val app: Counterpart) {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    /** What this phone keeps of the computer's projects (docs/design/overhaul/on-device-library.md). */
+    val library by lazy { LibraryFill(app, scope) }
 
     val status = MutableStateFlow<PairingStatus?>(null)
     val projects = MutableStateFlow<List<Project>>(emptyList())
@@ -63,6 +65,32 @@ class AppState(private val app: Counterpart) {
         val result: com.scantomake.counterpart.api.McpUpdate? = null, val problem: String? = null)
     // Keep the original operation ID when its screen leaves composition or the copy mapping changes.
     val mcpUpdateAttempts = MutableStateFlow<Map<String, McpUpdateAttempt>>(emptyMap())
+    /**
+     * PRD §8.10: an update that hears nothing more from the companion says so, as on the Mac and iPhone. A wait for
+     * Counterpart's own work: the companion waits up to 60 s, then admits the update after one claim and one npm lookup
+     * (~97 s at most before `started`).
+     */
+    var mcpWaitLimitMs = 120_000L
+    /** An update under way: three install steps of up to 10 minutes each plus the MCP's restart. */
+    var mcpStartedLimitMs = 35 * 60_000L
+    /** Installs whose update heard nothing more: their words become [MCP_UNHEARD], until the next word about them. */
+    val mcpUnheard = MutableStateFlow<Set<String>>(emptySet())
+    private val mcpWaits = mutableMapOf<String, Job>()
+
+    /**
+     * Every change of an install's update state (`waiting`, `started`, `done`, …), from an event or an Update reply:
+     * waiting or started starts that clock, anything else (or null) stops it.
+     */
+    fun noteMcpUpdate(mcpId: String, state: String?) {
+        mcpWaits.remove(mcpId)?.cancel()
+        mcpUnheard.update { it - mcpId }
+        val limit = when (state) { "waiting" -> mcpWaitLimitMs; "started" -> mcpStartedLimitMs; else -> return }
+        mcpWaits[mcpId] = scope.launch {
+            delay(limit)
+            mcpWaits.remove(mcpId)
+            mcpUnheard.update { it + mcpId }
+        }
+    }
     /** A project to open, from a notification tap. */
     val route = MutableStateFlow<String?>(null)
     /** A `scantomake://pair` link waiting for the pairing screen. */
@@ -75,7 +103,9 @@ class AppState(private val app: Counterpart) {
     private val knownLock = Any()
     // Kept on this phone only (noBackupFilesDir is never in Auto Backup), keyed by who the computer is (its pin).
     private val knownFile get() = java.io.File(app.noBackupFilesDir, "known-projects.json")
-    private val knownMac: String? get() = status.value?.takeIf { it.state == PairingStatus.State.Paired }?.let { it.pin?.let { pin -> "pin:$pin" } ?: it.baseUrl }
+    /** Who the computer is (its pin, else its address), also while its credential is expired: the same computer's saved list
+     *  stays until Forget or another computer (audit row 6, X115). */
+    private val knownMac: String? get() = status.value?.takeIf { it.state != PairingStatus.State.Disconnected }?.let { it.pin?.let { pin -> "pin:$pin" } ?: it.baseUrl }
 
     private var following: Job? = null
     private var foreground = false
@@ -96,7 +126,12 @@ class AppState(private val app: Counterpart) {
 
     val needsMac: Boolean get() = status.value?.state != PairingStatus.State.Paired
 
-    fun readStatus() { status.value = try { app.pairingStore.status() } catch (_: Exception) { PairingStatus.disconnected } }
+    fun readStatus() {
+        val read = try { app.pairingStore.status() } catch (_: Exception) { null }
+        status.value = read ?: PairingStatus.disconnected
+        // Only a pairing that was read says which computer's library to keep; a failed read clears nothing.
+        library.paired(read)
+    }
 
     fun project(id: String) = projects.value.firstOrNull { it.id == id }
 
@@ -106,6 +141,7 @@ class AppState(private val app: Counterpart) {
         if (projects.value.isNotEmpty()) return
         val saved = KnownProjects.decode(runCatching { knownFile.readText() }.getOrNull(), mac) ?: return
         known = saved; projects.value = saved.projects; heard.value = saved.heard
+        library.fill(saved.projects, fromComputer = false)
     }
 
     private fun remember(change: (KnownProjects, Long) -> KnownProjects) {
@@ -114,7 +150,12 @@ class AppState(private val app: Counterpart) {
         val next = change(known?.takeIf { it.mac == mac } ?: KnownProjects(mac), now)
         known = next; heard.value = next.heard
         // The newest copy wins: each write takes what is current when it runs, one at a time.
-        scope.launch(Dispatchers.IO) { synchronized(knownLock) { known?.let { latest -> runCatching { knownFile.writeText(latest.encode()) } } } }
+        // Written whole beside it, then renamed over it, so a reader never sees half a list (review of #556, Cursor P2.3).
+        scope.launch(Dispatchers.IO) { synchronized(knownLock) { known?.let { latest -> runCatching {
+            val temp = java.io.File(knownFile.parentFile, knownFile.name + ".part")
+            temp.writeText(latest.encode())
+            if (!temp.renameTo(knownFile)) temp.delete()
+        } } } }
     }
     fun printerName(p: Project): String? = p.print?.destination?.name ?: catalog.value?.resolved(p.printerDestinationId)?.name
     /** The page's words, with what this computer can keep (review S1: an older one without `projectSettings` asks nothing after a print). */
@@ -134,6 +175,7 @@ class AppState(private val app: Counterpart) {
             val listed = app.companion.list()
             projects.value = listed
             error.value = null; link.value = link.value.answered()
+            library.fill(listed, fromComputer = true)
             remember { k, now -> k.heard(listed, now) }
         } catch (e: CancellationException) { throw e } catch (e: CompanionException) {
             // The list couldn't be read: the banner says why, whatever the reason.
@@ -179,11 +221,13 @@ class AppState(private val app: Counterpart) {
         projects.value = emptyList(); loaded.value = false; error.value = null; catalog.value = null; link.value = MacLink.Checking
         capabilities.value = emptySet(); eventsSupported.value = null; sendFailures.value = emptyMap()
         mcpUpdateAttempts.value = emptyMap()
+        mcpWaits.values.forEach { it.cancel() }; mcpWaits.clear(); mcpUnheard.value = emptySet()
         mcpUpdateEvents.value = emptyMap(); mcpCopies.value = null; mcpCopiesProblem.value = null
         known = null; heard.value = emptyMap()
         // A pairing reset shows nothing from before it; a copy for no pairing or another computer goes.
         val owner = runCatching { knownFile.readText() }.getOrNull()?.let { text -> KnownProjects.decode(text, knownMac ?: "") }
-        if (owner == null) runCatching { knownFile.delete() }
+        // Only a pairing that was read says so: no status (an unreadable store) is not Forget.
+        if (owner == null && status.value != null) runCatching { knownFile.delete() }
     }
 
     /** Projects whose page or Printing screen is showing, counted (a push then a pop never loses one). */
@@ -216,7 +260,7 @@ class AppState(private val app: Counterpart) {
                                 val pid = e.projectId
                                 if (pid != null) { if (e.type == "project.deleted") remove(pid) else reload(pid) }
                                 else if (e.type.startsWith("mcp.update.")) {
-                                    e.data?.mcpId?.let { mcpUpdateEvents.value = mcpUpdateEvents.value + (it to e) }
+                                    e.data?.mcpId?.let { mcpUpdateEvents.value = mcpUpdateEvents.value + (it to e); noteMcpUpdate(it, e.type.removePrefix("mcp.update.")) }
                                     loadPrinters()
                                 }
                             }
@@ -252,6 +296,7 @@ class AppState(private val app: Counterpart) {
 
     fun forgetMac() {
         try { app.pairing.forget() } catch (_: Exception) {}
+        library.forgot()
         app.prefs.edit().remove(MAC_NAME_KEY).apply(); macName.value = null
         readStatus()
     }
@@ -262,6 +307,7 @@ class AppState(private val app: Counterpart) {
     }
 
     companion object {
+        const val MCP_UNHEARD = "Counterpart didn’t say whether this updated. Try Update again."
         const val MAC_NAME_KEY = "CounterpartMacName"
         fun of(context: Context) = (context.applicationContext as Counterpart).state
     }

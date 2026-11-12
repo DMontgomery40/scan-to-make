@@ -198,8 +198,7 @@ struct AddPrinterSheet: View {
     private var models: [PrinterSetupOptions.Model] { options?.models[form.backend] ?? [] }
     private var missingMcp: PrinterMcpPackage? { setup.package(form.backend).flatMap { $0.installed ? nil : $0 } }
     private var formReady: Bool {
-        guard !form.host.trimmingCharacters(in: .whitespaces).isEmpty, missingMcp == nil else { return false }
-        if type?.serial == true && (form.serial.isEmpty || form.model == nil) { return false }
+        guard !form.host.trimmingCharacters(in: .whitespaces).isEmpty, missingMcp == nil, form.lacks(type).isEmpty else { return false }
         return type?.secret?.required != true || !form.secret.isEmpty
     }
 
@@ -251,9 +250,10 @@ struct AddPrinterSheet: View {
         }
         if let problem { Section { Text(problem).font(.caption).foregroundStyle(.red) } }
         Section {
-            Button("Enter Address…") { start(PrinterForm()) }.disabled(options == nil)
-            Button("Other Brand…") { var other = PrinterForm(); other.printerType = "octoprint"; other.backend = "mcp-3d-printer-server"; start(other) }
-                .disabled(options == nil)
+            Button("Enter Address…") { start(PrinterForm()) }.disabled(options?.types.isEmpty != false)
+            // The next kind the MCPs list after the first: start() picks the MCP that drives it.
+            Button("Other Brand…") { var other = PrinterForm(); other.printerType = options?.types.dropFirst().first?.printerType ?? ""; start(other) }
+                .disabled((options?.types.count ?? 0) < 2)
         } footer: {
             Text("Bambu Lab printers use bambu-printer-mcp; other brands use mcp-3D-printer-server. Settings for anything else live in each printer’s .env.")
                 .font(.caption).foregroundStyle(.secondary)
@@ -262,17 +262,19 @@ struct AddPrinterSheet: View {
 
     private func candidateRow(_ candidate: PrinterCandidate) -> some View {
         HStack(spacing:12) {
-            Image(systemName:candidate.folder != nil ? "folder" : candidate.printerType == "bambu" ? "printer.fill" : "printer").font(.title3).frame(width:26)
+            Image(systemName:candidate.folder != nil ? "folder" : "printer.fill").font(.title3).frame(width:26)
             VStack(alignment:.leading, spacing:2) {
                 Text(candidate.name).font(.body.weight(.medium))
                 Text([PrinterSetupModel.label(candidate.backend), candidate.host, candidate.folder.map { ($0 as NSString).abbreviatingWithTildeInPath }]
                     .compactMap { $0 }.joined(separator:" · ")).font(.caption).foregroundStyle(.secondary)
-                if candidate.folder != nil { SettingsGapNote(missing:candidate.missing ?? [], fill:fill(for:candidate)) }
+                if candidate.folder != nil {
+                    SettingsGapNote(missing:candidate.missing ?? [], fill:fill(for:candidate), modelSetting:candidate.modelSetting(options), route:candidate.route == true)
+                }
             }
             Spacer()
             if candidate.added { Text("Added").font(.caption).foregroundStyle(.secondary) }
             else if let folder = candidate.folder {
-                if candidate.needsModel {
+                if candidate.needsModel(options) {
                     Picker("Model", selection:Binding(get: { folderModels[candidate.id] ?? "" }, set: { folderModels[candidate.id] = $0.isEmpty ? nil : $0 })) {
                         Text("Model…").tag("")
                         ForEach(options?.models[candidate.backend] ?? []) { Text($0.label).tag($0.value) }
@@ -282,10 +284,10 @@ struct AddPrinterSheet: View {
                 // Configured already: it runs where it is, with its own settings (plus only what its MCP lacks).
                 Button(saving == candidate.id ? "Adding…" : "Add") {
                     // Exactly what the row says it will add: the chosen model, else the one Counterpart found.
-                    var value = PrinterForm(folder:folder); value.model = folderModels[candidate.id] ?? candidate.fill?["BAMBU_MODEL"]
+                    var value = PrinterForm(folder:folder); value.model = folderModels[candidate.id] ?? candidate.filledModel(options)
                     save(value, id:candidate.id)
                 }
-                .buttonStyle(.glassProminent).disabled(saving != nil || (candidate.needsModel && folderModels[candidate.id] == nil))
+                .buttonStyle(.glassProminent).disabled(saving != nil || (candidate.needsModel(options) && folderModels[candidate.id] == nil))
             } else {
                 Button("Set Up…") { start(prefilled(candidate)) }.disabled(saving != nil)
             }
@@ -295,7 +297,7 @@ struct AddPrinterSheet: View {
     /// What Add writes to a found folder's settings: what it would fill, or the model chosen here.
     private func fill(for candidate: PrinterCandidate) -> [String: String] {
         var fill = candidate.fill ?? [:]
-        if let chosen = folderModels[candidate.id] { fill["BAMBU_MODEL"] = chosen }
+        if let chosen = folderModels[candidate.id], let setting = candidate.modelSetting(options) { fill[setting] = chosen }
         return fill
     }
 
@@ -318,13 +320,13 @@ struct AddPrinterSheet: View {
             Picker("Brand", selection:Binding(get: { form.printerType }, set: { value in
                 form.printerType = value
                 form.backend = options?.types.first { $0.printerType == value }?.backends.first ?? form.backend
-                // A slicer choice belongs to the MCP that offered it.
-                form.model = nil; form.slicer = nil; check = nil
+                // A slicer choice belongs to the MCP that offered it; values the new kind's MCP doesn't read go.
+                form.model = nil; form.slicer = nil; form.keepFields(of:type); check = nil
             })) {
                 ForEach(options?.types ?? []) { Text($0.label).tag($0.printerType) }
             }
-            if type?.serial == true {
-                Picker("Model", selection:Binding(get: { form.model ?? "" }, set: { form.model = $0.isEmpty ? nil : $0; check = nil })) {
+            if let field = type?.field("model") {
+                Picker(field.label, selection:Binding(get: { form.model ?? "" }, set: { form.model = $0.isEmpty ? nil : $0; check = nil })) {
                     if form.model == nil { Text("Choose…").tag("") }
                     ForEach(models) { Text($0.label).tag($0.value) }
                 }
@@ -334,15 +336,15 @@ struct AddPrinterSheet: View {
                 TextField("Address", text:$form.host, prompt:Text(address.prompt))
                 if let hint = address.hint { Text(hint).font(.caption).foregroundStyle(.secondary) }
             }
-            if form.printerType != "bambu" {
+            if type?.field("port") != nil {
                 TextField("Port (optional)", text:Binding(get: { form.port ?? "" }, set: { form.port = $0.isEmpty ? nil : $0 }), prompt:Text("Default"))
             }
-            if type?.serial == true {
-                TextField("Serial number", text:Binding(get: { form.serial }, set: { value in
+            if let serialField = type?.field("serial") {
+                TextField(serialField.label, text:Binding(get: { form.serial }, set: { value in
                     form.serial = value
-                    // The serial names the model (bambu-printer-mcp's table): filled unless one was chosen.
+                    // The serial names the model (the MCP's own table): filled unless one was chosen.
                     if form.model == nil, let model = options?.model(forSerial:value), models.contains(where: { $0.value == model }) { form.model = model }
-                }), prompt:Text("On the printer: Settings → Device"))
+                }), prompt:Text(serialField.hint ?? ""))
             }
             if let secret = type?.secret {
                 VStack(alignment:.leading, spacing:4) {
@@ -450,7 +452,7 @@ struct AddPrinterSheet: View {
             Label("Counterpart couldn’t reach the printer. Check the address\(type?.secret == nil ? "" : " and \(type!.secret!.label.lowercased())").",
                   systemImage:"exclamationmark.triangle.fill").foregroundStyle(.orange)
         } else {
-            Text("Check asks the printer for its status\(form.printerType == "bambu" ? " and a camera picture" : ""). It never starts a print.")
+            Text("Check asks the printer for its status\(type?.checksCamera(form.backend) == true ? " and a camera picture" : ""). It never starts a print.")
                 .font(.caption).foregroundStyle(.secondary)
         }
         if check?.reached != true && !checking && formReady {
@@ -468,10 +470,12 @@ struct AddPrinterSheet: View {
 
     private func start(_ value: PrinterForm) {
         form = value
-        // The MCP that drives this kind on this Mac, from the MCPs' own fields: never one that isn't installed.
+        // A kind the MCPs list (the first, when none is chosen), and the MCP that drives it on this Mac: never one that isn't installed.
+        if let first = options?.types.first, options?.types.contains(where: { $0.printerType == form.printerType }) != true { form.printerType = first.printerType }
         if let backends = options?.types.first(where: { $0.printerType == form.printerType })?.backends,
            !backends.contains(form.backend), let first = backends.first { form.backend = first; form.slicer = nil }
-        if form.printerType == "bambu", form.model == nil, models.count == 1 { form.model = models.first?.value }
+        form.keepFields(of:type)
+        if type?.field("model") != nil, form.model == nil, models.count == 1 { form.model = models.first?.value }
         check = nil; problem = nil; editing = true
     }
 
@@ -549,23 +553,26 @@ struct PrinterMcpPicker: View {
 }
 
 /// What a found or added printer's `.env` lacks, and what Counterpart adds to it (only the model; never a secret).
+/// `modelSetting` is the variable its MCP reads the model from; `route` says the fill copies another MCP's route.
 struct SettingsGapNote: View {
     let missing: [String]
     let fill: [String: String]
+    let modelSetting: String?
+    let route: Bool
 
     var body: some View {
         let unfilled = missing.filter { fill[$0] == nil }
-        let others = unfilled.filter { $0 != "BAMBU_MODEL" }
+        let others = unfilled.filter { $0 != modelSetting }
         VStack(alignment:.leading, spacing:2) {
             if !fill.isEmpty {
                 Text("Counterpart will add " + fill.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator:", ") + " to its settings.")
                     .font(.caption).foregroundStyle(Color.filament).textSelection(.enabled)
             }
-            if fill["BAMBU_DEFAULT_CONNECTION_MODE"] != nil {
+            if route {
                 Text("The connection settings are the authenticated route bambu-printer-mcp uses for this printer.")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            if unfilled.contains("BAMBU_MODEL") { Text("Choose its model: its MCP needs one.").font(.caption).foregroundStyle(.secondary) }
+            if let modelSetting, unfilled.contains(modelSetting) { Text("Choose its model: its MCP needs one.").font(.caption).foregroundStyle(.secondary) }
             if !others.isEmpty {
                 Text("Its settings have no " + others.joined(separator:", ") + ". Add \(others.count == 1 ? "it" : "them") in its .env.")
                     .font(.caption).foregroundStyle(.orange)
@@ -584,14 +591,15 @@ struct AddedPrinterActions: View {
     @State private var model = ""
     @State private var completing = false
 
-    private var needsModel: Bool { printer.incomplete?.missing.contains("BAMBU_MODEL") == true && printer.incomplete?.fill["BAMBU_MODEL"] == nil }
+    private var needsModel: Bool { printer.incomplete?.needsModel == true }
     /// Anything to add: a model (filled or chosen here), or settings Counterpart found for this printer.
-    private var canComplete: Bool { printer.incomplete.map { $0.missing.contains("BAMBU_MODEL") || !$0.fill.isEmpty } ?? false }
+    private var canComplete: Bool { printer.incomplete.map { incomplete in incomplete.modelSetting.map(incomplete.missing.contains) == true || !incomplete.fill.isEmpty } ?? false }
 
     var body: some View {
         VStack(alignment:.leading, spacing:6) {
             if let incomplete = printer.incomplete {
-                SettingsGapNote(missing:incomplete.missing, fill:model.isEmpty ? incomplete.fill : incomplete.fill.merging(["BAMBU_MODEL": model]) { $1 })
+                SettingsGapNote(missing:incomplete.missing, fill:model.isEmpty || incomplete.modelSetting == nil ? incomplete.fill : incomplete.fill.merging([incomplete.modelSetting!: model]) { $1 },
+                                modelSetting:incomplete.modelSetting, route:incomplete.route == true)
                 if canComplete {
                     HStack(spacing:8) {
                         if needsModel {

@@ -216,13 +216,15 @@ export interface SetupCandidate {
   /** A folder whose `.env` lacks settings its MCP needs (names only), and what Counterpart adds on Add (only the model). */
   missing?: string[];
   fill?: Record<string, string>;
+  /** Add also copies another MCP's authenticated route for this printer (lines in `fill`). */
+  route?: true;
 }
 export interface CheckResult {
   /** get_printer_status answered and said the printer is connected. */
   reached: boolean;
+  /** `not-supported` when the MCP doesn't read this kind's camera from its settings (its setup fields' `cameraSnapshot`). */
   camera: 'connected' | 'failed' | 'not-supported';
   image?: {mimeType: 'image/jpeg'; base64: string};
-  model?: string;
 }
 type ProbeClient = Pick<PrinterMcpClient, 'connect' | 'callTool' | 'close'>;
 
@@ -591,7 +593,7 @@ export class PrinterSetup {
       found.push({id: `folder:${folder.dir}`, source: 'folder', name: this.#nameFor(options, read.printerType, model, read.host, folder.package),
         backend: folder.package, printerType: read.printerType, host: read.host, ...(read.serial ? {serial: read.serial} : {}),
         ...(model ? {model} : {}), folder: folder.dir, added: false,
-        ...(gap.missing.length || Object.keys(gap.fill).length ? {missing: gap.missing, fill: gap.fill} : {})});
+        ...(gap.missing.length || Object.keys(gap.fill).length ? {missing: gap.missing, fill: gap.fill, ...(gap.route ? {route: true as const} : {})} : {})});
     }
     const listed = new Set<string>();
     for (const {package: pkg, printer} of announced) {
@@ -624,17 +626,18 @@ export class PrinterSetup {
     throw new PrinterSetupError('unavailable', `Download ${this.#label(pkg)} first, then add the printer.`);
   }
 
-  async #config(input: PrinterForm, options: {budgetMs?: number} = {}): Promise<PrinterHandoffConfig> {
+  /** How Check runs the MCP, and the kind its own fields say this printer is (undefined for a folder it can't tell). */
+  async #config(input: PrinterForm, options: {budgetMs?: number} = {}): Promise<{config: PrinterHandoffConfig; kind?: SetupKind}> {
     if ('folder' in input) {
-      const {found} = await this.#folder(input.folder, options);
-      return {backend: found.package, process: {command: this.#node, args: [join(found.dir, 'dist', 'index.js')], cwd: found.dir}};
+      const {found, kind} = await this.#folder(input.folder, options);
+      return {config: {backend: found.package, process: {command: this.#node, args: [join(found.dir, 'dist', 'index.js')], cwd: found.dir}}, kind};
     }
     // Check runs the MCP with these settings and no .env (its working directory has none); nothing is written.
     const cwd = join(this.deps.env.appPrinters, 'profiles');
     await mkdir(cwd, {recursive: true, mode: 0o700});
     const entry = await this.#entry(input.backend);
     const {kind, setup} = await this.#kindForForm(input, options);
-    return {backend: input.backend, process: {command: this.#node, args: [entry], cwd, env: envFor(input, kind, setup.slicer)}};
+    return {config: {backend: input.backend, process: {command: this.#node, args: [entry], cwd, env: envFor(input, kind, setup.slicer)}}, kind};
   }
 
   /**
@@ -662,18 +665,16 @@ export class PrinterSetup {
   }
 
   /**
-   * `printers.check`: starts the chosen MCP with these settings and asks get_printer_status, then (a Bambu printer,
-   * when the MCP has it) camera_snapshot. Never a print, heating, motion or settings tool. Only this projection is
-   * returned: no telemetry, MCP error text or credentials (KAN-163's check).
+   * `printers.check`: starts the chosen MCP with these settings and asks get_printer_status, then camera_snapshot when
+   * that MCP says it reads this kind's camera (`cameraSnapshot` in its setup fields). Never a print, heating, motion or settings
+   * tool. Only this projection is returned: no telemetry, MCP error text or credentials (KAN-163's check).
    */
   check(input: PrinterForm): Promise<CheckResult> { return this.#tracked(() => this.#check(input)); }
   async #check(input: PrinterForm): Promise<CheckResult> {
     // One budget for the whole check, inside local-control's 60 s: reading the MCP's fields comes out of it too.
     const total = this.deps.checkBudgetMs ?? 55_000;
     const until = Date.now() + total, remainingMs = () => Math.max(0, Math.floor(until - Date.now()));
-    const config = await this.#config(input, {budgetMs: Math.floor(total * 10 / 55)});
-    const bambuKind = config.backend === 'bambu-printer-mcp' || ('printerType' in input && input.printerType === 'bambu')
-      || ('folder' in input && (await this.#folder(input.folder, {cachedOnly: true})).printerType === 'bambu');
+    const {config, kind} = await this.#config(input, {budgetMs: Math.floor(total * 10 / 55)});
     const result: CheckResult = {reached: false, camera: 'not-supported'};
     const client = this.deps.client?.(config) ?? new PrinterMcpClient(config);
     // The budget holds even for an MCP that ignores its timeouts: whatever is still pending when it runs out is dropped.
@@ -686,11 +687,8 @@ export class PrinterSetup {
       const status = toolResultJson(await within(client.callTool('get_printer_status', {}, {timeoutMs: Math.min(20_000, remainingMs())})));
       if (config.backend === 'bambu-printer-mcp') {
         result.reached = status.connected === true && status.status !== 'error';
-        const model = String(status.model ?? '').toLowerCase().replace(/^bambu lab\s+|\s+/g, '');
-        const kind = 'printerType' in input ? (await this.#setupOf(config.backend, {cachedOnly: true}))?.kinds.find(item => item.kind === input.printerType) : undefined;
-        if (field(kind, 'model')?.choices?.some(choice => choice.value === model)) result.model = model;
       } else result.reached = status.error === undefined && status.status !== 'error' && status.connected !== false && Object.keys(status).length > 0;
-      if (result.reached && bambuKind && catalog.tools.some(tool => tool.name === 'camera_snapshot') && remainingMs() >= 2_000) {
+      if (result.reached && kind?.cameraSnapshot === true && catalog.tools.some(tool => tool.name === 'camera_snapshot') && remainingMs() >= 2_000) {
         result.camera = 'failed';
         try {
           const frame = toolResultJson(await within(client.callTool('camera_snapshot', {timeout_ms: Math.min(8000, remainingMs() - 1000)}, {timeoutMs: Math.min(12_000, remainingMs())})));

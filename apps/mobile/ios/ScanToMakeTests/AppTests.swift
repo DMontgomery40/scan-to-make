@@ -215,9 +215,16 @@ import CounterpartKit
         let project = Project(id: "p", createdAtMs: 1, updatedAtMs: 2, state: .ready)
         XCTAssertNil(ImageMemory.shared.anySize(project, "pictures/part-0123456789abcdef.png"))
         let image = UIGraphicsImageRenderer(size: CGSize(width: 4, height: 4)).image { $0.fill(CGRect(x: 0, y: 0, width: 4, height: 4)) }
-        ImageMemory.shared.store(image, "p#\(Int64(project.mediaVersion))#pictures/part-0123456789abcdef.png#300")
+        ImageMemory.shared.store(image, ImageMemory.key(project, "pictures/part-0123456789abcdef.png", 300))
         XCTAssertTrue(ImageMemory.shared.anySize(project, "pictures/part-0123456789abcdef.png") === image)
         XCTAssertNil(ImageMemory.shared.anySize(project, nil))
+        // #720: a Mac picture is named by what it draws, so a newer project version finds it decoded already.
+        let later = Project(id: "p", createdAtMs: 9_000, updatedAtMs: 9_001, state: .ready)
+        XCTAssertNotEqual(later.mediaVersion, project.mediaVersion)
+        XCTAssertTrue(ImageMemory.shared.anySize(later, "pictures/part-0123456789abcdef.png") === image)
+        // A render is per version: the last one decoded stands in while the newer version's comes.
+        ImageMemory.shared.store(image, ImageMemory.key(project, "renders/front.png", 300), project: "p", path: "renders/front.png")
+        XCTAssertTrue(ImageMemory.shared.anySize(later, "renders/front.png") === image)
     }
 
     func testAnEstimateShowsOnlyForItsOwnSettings() throws {
@@ -335,6 +342,161 @@ import CounterpartKit
         let uses = store.mcpCopies?.first?.uses.filter { $0.printerId == selected }
         XCTAssertEqual(uses?.count, 1, "the new canonical printer retains its software row")
         XCTAssertEqual(uses?.first?.canMove, true, "its explicit move action remains available")
+    }
+
+    /// #720, on the device: a newer project version with the same model bytes asks the Mac with the kept file's tag, gets 304,
+    /// and keeps the same file. The bytes come once.
+    func testAnUnchangedModelIsNotDownloadedTwiceOnThisDevice() async throws {
+        let mac = TaggedMac()
+        let pairing = PairingClient(store: PairingStore(store: Fixtures.store()), transport: mac)
+        let base = FileManager.default.temporaryDirectory.appending(path: "tagged-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: base) }
+        let library = OnDeviceLibrary(base: base.appending(path: "library"))
+        library.use(mac: "m")
+        let keep = OnDeviceLibrary.Keep.chosen
+        OnDeviceLibrary.Keep.chosen = .models
+        defer { OnDeviceLibrary.Keep.chosen = keep }
+        let client = CompanionClient(pairing: pairing, transport: mac, cache: base.appending(path: "cache"), library: library)
+        func project(_ ended: Int) throws -> Project {
+            try JSONDecoder().decode(Project.self, from: Data(#"{"id":"d79d4c15-d786-461c-b76e-ec687c8e2dad","createdAtMs":1,"updatedAtMs":2,"state":"ready","kind":"fit","photos":[],"passes":[{"startedAtMs":1,"endedAtMs":\#(ended),"status":"done"}],"current":{"model":"current/model.stl","renders":[]}}"#.utf8))
+        }
+        let first = try await client.download(project(1000), "model.stl")
+        let second = try await client.download(project(2000), "model.stl")
+        XCTAssertEqual(first, second, "the same file on disk, so its mesh and still are reused")
+        XCTAssertEqual(mac.bodies, 1, "the model's bytes came once")
+        XCTAssertEqual(mac.tags, [nil, "\"m1\""])
+    }
+
+    // MARK: The library's fill (review of #741)
+
+    private func filler(_ mac: FileMac) -> (LibraryFiller, OnDeviceLibrary, URL) {
+        let base = FileManager.default.temporaryDirectory.appending(path: "fill-\(UUID().uuidString)")
+        let library = OnDeviceLibrary(base: base.appending(path: "library"))
+        library.use(mac: "m")
+        let pairing = PairingClient(store: PairingStore(store: Fixtures.store()), transport: mac)
+        let client = CompanionClient(pairing: pairing, transport: mac, cache: base.appending(path: "cache"), library: library)
+        return (LibraryFiller(client: client, watchesLink: false), library, base)
+    }
+    private func keptProject(_ id: String = "d79d4c15-d786-461c-b76e-ec687c8e2dad") throws -> Project {
+        try JSONDecoder().decode(Project.self, from: Data(#"{"id":"\#(id)","createdAtMs":1,"updatedAtMs":2,"state":"ready","kind":"fit","photos":[],"passes":[{"startedAtMs":1,"endedAtMs":1000,"status":"done"}],"current":{"model":"current/model.stl","renders":[]},"picture":"pictures/part-0123456789abcdef.png","pictures":{"part":"pictures/part-0123456789abcdef.png"}}"#.utf8))
+    }
+
+    /// P1: the Mac's list is the truth even when it is empty (every project deleted): every kept file goes. A saved list
+    /// that is empty never prunes.
+    func testAnEmptyListFromTheMacLetsEveryKeptFileGoAndASavedOneDoesNot() throws {
+        let (filler, library, base) = filler(FileMac())
+        defer { try? FileManager.default.removeItem(at: base) }
+        let file = base.appending(path: "arrived"); try Data("png".utf8).write(to: file)
+        try library.commit(file, project: "0b6f0f43-7c35-4b8a-9a3c-8f0b4c4b2a11", name: "pictures/a.png", version: 1, file: "a.png")
+        filler.fill([], fromMac: false)
+        XCTAssertNotNil(library.latest(project: "0b6f0f43-7c35-4b8a-9a3c-8f0b4c4b2a11", name: "pictures/a.png"), "a saved empty list prunes nothing")
+        filler.fill([], fromMac: true)
+        XCTAssertNil(library.latest(project: "0b6f0f43-7c35-4b8a-9a3c-8f0b4c4b2a11", name: "pictures/a.png"), "the Mac's empty list: the deleted project's files go")
+    }
+
+    /// P2: a model queued on an unmetered link is not started once the link is metered (5G through David's tunnel); its
+    /// picture still comes, and the model is released to be queued again on Wi-Fi.
+    func testAQueuedModelWaitsWhenTheLinkTurnsMetered() async throws {
+        let keep = OnDeviceLibrary.Keep.chosen
+        OnDeviceLibrary.Keep.chosen = .models
+        defer { OnDeviceLibrary.Keep.chosen = keep }
+        let mac = FileMac()
+        let (filler, _, base) = filler(mac)
+        defer { try? FileManager.default.removeItem(at: base) }
+        filler.linkChanged(expensive: false, constrained: false)
+        filler.fill([try keptProject()], fromMac: true)
+        XCTAssertTrue(filler.pending.contains { $0.contains("#model.stl#") }, "queued on Wi-Fi: \(filler.pending)")
+        filler.linkChanged(expensive: true, constrained: false)
+        for _ in 0..<50 where filler.isFilling { try await Task.sleep(for: .milliseconds(100)) }
+        XCTAssertFalse(filler.isFilling)
+        XCTAssertFalse(mac.paths.contains { $0.hasSuffix("/model.stl") }, "no model fetched on the metered link: \(mac.paths)")
+        XCTAssertTrue(mac.paths.contains { $0.contains("/pictures/") }, "pictures come on any link: \(mac.paths)")
+        XCTAssertFalse(filler.pending.contains { $0.contains("#model.stl#") }, "released, to be queued again on Wi-Fi")
+    }
+
+    /// P2: Clear releases what was queued, so the next list queues those files again.
+    func testClearReleasesWhatWasQueued() throws {
+        let keep = OnDeviceLibrary.Keep.chosen
+        OnDeviceLibrary.Keep.chosen = .models
+        defer { OnDeviceLibrary.Keep.chosen = keep }
+        let (filler, _, base) = filler(FileMac())
+        defer { try? FileManager.default.removeItem(at: base) }
+        let project = try keptProject()
+        filler.fill([project], fromMac: true)
+        XCTAssertFalse(filler.pending.isEmpty)
+        filler.clear()
+        XCTAssertTrue(filler.pending.isEmpty, "Clear leaves no queued key behind: \(filler.pending)")
+        filler.fill([project], fromMac: true)
+        XCTAssertFalse(filler.pending.isEmpty, "the next list queues them again")
+    }
+
+    /// P1: a gallery switch never shows the previous entry's picture: a kept picture counts only for its own key, also
+    /// after the new entry's fetch failed.
+    func testAGalleryEntryNeverShowsAnotherEntrysPicture() {
+        let plate1 = UIGraphicsImageRenderer(size: CGSize(width: 4, height: 4)).image { $0.fill(CGRect(x: 0, y: 0, width: 4, height: 4)) }
+        let kept = (key: "p#renders/plate_1.png#1200", image: plate1)
+        let key2 = "p#renders/plate_2.png#1200"
+        func decide(_ load: PictureLoad<UIImage>, kept: (key: String, image: UIImage)?) -> StagePicture.Shows {
+            StagePicture.decide(still: .picture("renders/plate_2.png"), key: key2, load: load, memory: nil, kept: kept, earlier: nil,
+                                libraryHas: false, missing: nil, unavailableLine: "No picture of this plate came with the file.")
+        }
+        var load = PictureLoad<UIImage>()
+        load.start(key2, cached: nil)
+        guard case .loading(nil) = decide(load, kept: kept) else { return XCTFail("plate 2 while it comes: never plate 1's picture") }
+        load.decoded(nil, for: key2)
+        guard case .notAvailable = decide(load, kept: kept) else { return XCTFail("plate 2 failed: says so, never shows plate 1") }
+        guard case .shown(let shown) = decide(load, kept: (key2, plate1)), shown === plate1 else { return XCTFail("its own kept picture shows") }
+    }
+
+    /// #720: a launch into one project's page reads that project alone, before (or without) the list. That one project is
+    /// not the Mac's list, so the library must not take every other project as deleted and let its files go.
+    func testOneProjectReadAloneIsNotTheMacsListForTheLibrary() {
+        let mac = SettingsMac()
+        let pairing = PairingClient(store: PairingStore(store: Fixtures.store()), transport: mac)
+        let store = ProjectsStore(mac: MacConnection(client: CompanionClient(pairing: pairing, transport: mac)), pairing: pairing)
+        let project = Project(id: "d79d4c15-d786-461c-b76e-ec687c8e2dad", createdAtMs: 1, updatedAtMs: 2, state: .ready)
+        XCTAssertTrue(store.replace(project, ticket: store.startRequest()))
+        XCTAssertEqual(store.projects.map(\.id), [project.id])
+        XCTAssertFalse(store.listedFromMac, "one project read alone never prunes the library")
+        let library = OnDeviceLibrary(base: FileManager.default.temporaryDirectory.appending(path: "prune-\(UUID().uuidString)"))
+        library.use(mac: "m")
+        let other = "0b6f0f43-7c35-4b8a-9a3c-8f0b4c4b2a11"
+        let file = FileManager.default.temporaryDirectory.appending(path: "kept-\(UUID().uuidString)")
+        try? Data("png".utf8).write(to: file)
+        _ = try? library.commit(file, project: other, name: "pictures/a.png", version: 1, file: "a.png")
+        let filler = LibraryFiller(client: CompanionClient(pairing: pairing, transport: mac, library: library))
+        filler.fill(store.projects, fromMac: store.listedFromMac)
+        XCTAssertNotNil(library.latest(project: other, name: "pictures/a.png"), "another project's kept picture stays")
+        try? FileManager.default.removeItem(at: library.base)
+    }
+
+    /// PRD §8.10: an update the Mac said waits, whose finishing event never came, stops claiming to wait and lets Update
+    /// and Move be pressed again; word from the Mac before then (it started) is kept as it is.
+    func testAWaitThatNeverHearsBackBecomesASentenceAndUpdateComesBack() async throws {
+        let mac = SettingsMac()
+        let pairing = PairingClient(store: PairingStore(store: Fixtures.store()), transport: mac)
+        let store = ProjectsStore(mac: MacConnection(client: CompanionClient(pairing: pairing, transport: mac)), pairing: pairing)
+        store.mcpWaits.waitingLimit = .milliseconds(50)
+        func event(_ type: String, _ mcpId: String) throws -> CounterpartEvent {
+            try JSONDecoder().decode(CounterpartEvent.self, from: Data(#"{"v":1,"seq":1,"id":"e","at":"2026-11-07T19:52:31Z","type":"\#(type)","title":"t","body":"","notify":"none","data":{"mcpId":"\#(mcpId)"}}"#.utf8))
+        }
+        await store.receive(try event("mcp.update.waiting", "mcp-0000000000000001"))
+        let reply = try JSONDecoder().decode(MCPUpdate.self, from: Data(#"{"mcpId":"mcp-0000000000000002","state":"waiting"}"#.utf8))
+        store.recordMCPUpdate("mcp-0000000000000002", MCPUpdateProgress(reply))
+        XCTAssertEqual(store.mcpUpdates["mcp-0000000000000002"]?.isRunning, true, "Update and Move are held while it waits")
+        await store.receive(try event("mcp.update.started", "mcp-0000000000000002"))
+        try await Task.sleep(for: .milliseconds(400))
+        XCTAssertEqual(store.mcpUpdates["mcp-0000000000000001"], .unheard)
+        XCTAssertEqual(store.mcpUpdates["mcp-0000000000000001"]?.words, "Counterpart didn’t say whether this updated. Try Update again.")
+        XCTAssertEqual(store.mcpUpdates["mcp-0000000000000001"]?.isRunning, false, "Update and Move can be pressed again")
+        XCTAssertEqual(store.mcpUpdates["mcp-0000000000000002"]?.state, "started", "an update that started is left alone")
+        // An update under way has its own, longer clock (35 min: the companion's three install steps and the restart).
+        XCTAssertEqual(store.mcpWaits.startedLimit, .seconds(35 * 60))
+        store.mcpWaits.startedLimit = .milliseconds(50)
+        await store.receive(try event("mcp.update.started", "mcp-0000000000000002"))
+        try await Task.sleep(for: .milliseconds(400))
+        XCTAssertEqual(store.mcpUpdates["mcp-0000000000000002"], .unheard, "a start that never finishes says so too")
+        XCTAssertEqual(store.mcpUpdates["mcp-0000000000000002"]?.isRunning, false)
     }
 
     func testRemoteDeletionEvictsProjectAndRejectsOlderReplies() async throws {
@@ -523,6 +685,34 @@ private actor ResyncMac: HTTPTransport {
 }
 
 /// A Mac that serves settings, can stop answering, and can refuse an AI choice.
+/// A Mac that answers every file with a few bytes and records what was asked for (review of #741).
+private final class FileMac: HTTPTransport, @unchecked Sendable {
+    private let lock = NSLock()
+    private var _paths: [String] = []
+    var paths: [String] { lock.withLock { _paths } }
+    func send(_ request: URLRequest, trust: TrustPolicy, limit: Int, resourceTimeout: TimeInterval) async throws -> HTTPReply {
+        lock.withLock { _paths.append(request.url?.path ?? "") }
+        return HTTPReply(status: 200, body: Data("file".utf8))
+    }
+}
+
+/// A Mac that tags its model `"m1"` and answers 304 to a request that has it (#720).
+private final class TaggedMac: HTTPTransport, @unchecked Sendable {
+    private let lock = NSLock()
+    private var _bodies = 0, _tags: [String?] = []
+    var bodies: Int { lock.withLock { _bodies } }
+    var tags: [String?] { lock.withLock { _tags } }
+    func send(_ request: URLRequest, trust: TrustPolicy, limit: Int, resourceTimeout: TimeInterval) async throws -> HTTPReply {
+        let tag = request.value(forHTTPHeaderField: "If-None-Match")
+        return lock.withLock {
+            _tags.append(tag)
+            if tag == "\"m1\"" { return HTTPReply(status: 304, body: Data(), headers: ["ETag": "\"m1\""]) }
+            _bodies += 1
+            return HTTPReply(status: 200, body: Data("solid".utf8), headers: ["ETag": "\"m1\""])
+        }
+    }
+}
+
 private final class SettingsMac: HTTPTransport, @unchecked Sendable {
     static let refusal = "The AI choice changed on another device. Choose again."
     private let lock = NSLock()

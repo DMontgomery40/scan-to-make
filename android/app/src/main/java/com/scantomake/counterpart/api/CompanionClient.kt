@@ -58,6 +58,8 @@ class CompanionClient(
     deviceModel: String?,
     deviceName: String?,
     val cache: File,
+    /** What this phone keeps of the computer's projects (`OnDeviceLibrary`): read first, written once a file has fully arrived. */
+    val library: OnDeviceLibrary? = null,
 ) {
     /** `X-Scan-Device-Model`: the hardware model ("Pixel 8"), shown in the Mac's device list. */
     val deviceModel: String? = deviceModel?.takeIf { Pattern("[A-Za-z0-9,._ -]{1,64}").matches(it) }
@@ -376,7 +378,10 @@ class CompanionClient(
 
     private val allowed = Pattern("""original/[0-9]+|model\.stl|renders/[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.png|asks/[a-f0-9-]{36}\.(jpg|png)|prints/[a-f0-9-]{36}/frames/[a-f0-9-]{36}\.jpg|(?:photos|capture|scan)/[A-Za-z0-9][A-Za-z0-9._ -]{0,127}|pictures/[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.png""")
 
-    /** Downloads one project file into the cache, once per project version, and returns where it is. */
+    /** The newest copy of this file the phone keeps, of any version: drawn at once, before (and whether or not) the computer answers. */
+    fun stored(project: Project, name: String): File? = library?.latest(project.id, name)?.first
+
+    /** Downloads one project file into the library (or the cache, for kinds not kept), once per project version, and returns where it is. */
     suspend fun download(project: Project, name: String): File {
         if (!Pattern(UUID).matches(project.id) || !allowed.matches(name) || name.contains("..")) throw CompanionException.transport("invalid-request")
         val version = project.mediaVersion.toString()
@@ -393,21 +398,83 @@ class CompanionClient(
                 if (index >= 0) resource = "original/$index"
             }
         }
+        // The library first: its copy of this version is the file, with no network.
+        val active = library?.takeIf { it.isActive }
+        val kept = active?.takeIf { it.keep.keeps(OnDeviceLibrary.Kind.of(name)) }
+        kept?.file(project.id, name, project.mediaVersion, filename)?.let { return it }
+        // A refusal for size is remembered for any file, kept or not, so it is never asked for again.
+        if (active?.isTooLarge(project.id, name, project.mediaVersion, filename) == true) throw CompanionException("file-too-large", "This file is too large for this phone.")
         val target = File(folder, filename)
-        if (target.exists()) return target
+        if (target.exists()) {
+            if (kept == null) return target
+            // Fetched before this kind was kept: into the library as it is, never over the network again.
+            runCatching { return kept.commit(target.readBytes(), project.id, name, project.mediaVersion, filename) }
+            return target
+        }
         val path = "/v1/objects/${project.id}/${encodePath(resource)}"
-        val reply = send("GET", path, limit = SCAN_LIMIT)
+        // The validator of the copy the phone has: the library's for a kept kind, else an older version's cached copy
+        // and its `<file>.etag` (as the iPhone's CompanionClient). An unchanged file is answered 304 and never sent
+        // twice (#720), kept or not: with Keep set to pictures only, a model is still not fetched again after every pass.
+        val older = if (kept == null) olderCopy(filename, folder) else null
+        val validator = kept?.validator(project.id, name, filename) ?: older?.let(::cachedValidator)
+        var reply = send("GET", path, limit = SCAN_LIMIT, ifNoneMatch = validator)
+        if (reply.status == 304) {
+            kept?.revalidated(project.id, name, project.mediaVersion, filename)?.let { return it }
+            if (kept == null && older != null && (folder.mkdirs() || folder.isDirectory) && (older.renameTo(target) || target.exists())) {
+                validator?.let { setCachedValidator(it, target) }
+                pruneOlder(filename, folder)
+                return target
+            }
+            // The copy went meanwhile (Clear, eviction): the file itself.
+            reply = send("GET", path, limit = SCAN_LIMIT)
+        }
+        if (reply.status == 413 && active != null && reply.body.decodeToString().contains("file-too-large")) {
+            active.markTooLarge(project.id, name, project.mediaVersion, filename)
+            throw CompanionException("file-too-large", "This file is too large for this phone.")
+        }
         if (reply.status != 200 || reply.body.isEmpty()) {
             throw if (reply.status == 404) CompanionException("not-found", "This is no longer on your computer.")
             else CompanionException("download-failed", "That file couldn't be saved on this phone.")
         }
-        // Older versions of this project are no longer shown.
-        folder.parentFile?.listFiles()?.filter { it.name != version }?.forEach { it.deleteRecursively() }
+        if (kept != null) {
+            // Whole, then into the library; that one file's older copy goes only now.
+            return try { kept.commit(reply.body, project.id, name, project.mediaVersion, filename, reply.header("ETag")) } catch (_: Exception) {
+                throw CompanionException("download-failed", "That file couldn't be saved on this phone.")
+            }
+        }
+        // Older versions of this one file are no longer shown; the project's other files stay in their folders until
+        // their own next fetch (each can still be answered 304 from its copy).
+        pruneOlder(filename, folder)
         folder.mkdirs()
         val temp = File(folder, "$filename.part")
         try { temp.writeBytes(reply.body); temp.renameTo(target) } catch (_: Exception) {
             throw CompanionException("download-failed", "That file couldn't be saved on this phone.")
         }
+        reply.header("ETag")?.let { setCachedValidator(it, target) }
         return target
+    }
+
+    // Validators beside cached files (files the library doesn't keep), as CounterpartKit's CompanionClient.
+
+    /** The computer's `ETag` for a cached file, kept beside it (`<file>.etag`). */
+    private fun cachedValidator(file: File): String? = runCatching { File(file.path + ".etag").readText() }.getOrNull()?.takeIf { it.isNotEmpty() }
+    private fun setCachedValidator(etag: String, file: File) { runCatching { File(file.path + ".etag").writeText(etag) } }
+
+    /** The newest older version's copy of [filename] beside [folder], if it has a validator to ask the computer with. */
+    private fun olderCopy(filename: String, folder: File): File? {
+        val mine = folder.name.toLongOrNull() ?: Long.MAX_VALUE
+        return folder.parentFile?.listFiles().orEmpty().mapNotNull { dir -> dir.name.toLongOrNull()?.let { dir to it } }
+            .filter { it.second < mine }.sortedByDescending { it.second }
+            .map { File(it.first, filename) }.firstOrNull { it.exists() && cachedValidator(it) != null }
+    }
+
+    /** Removes [filename] (and its validator) from the project's version folders older than [folder], and any folder left empty. */
+    private fun pruneOlder(filename: String, folder: File) {
+        val mine = folder.name.toLongOrNull() ?: 0
+        for (other in folder.parentFile?.listFiles().orEmpty()) {
+            if ((other.name.toLongOrNull() ?: Long.MIN_VALUE) >= mine) continue
+            File(other, filename).delete(); File(other, "$filename.etag").delete()
+            if (other.listFiles().isNullOrEmpty()) other.delete()
+        }
     }
 }

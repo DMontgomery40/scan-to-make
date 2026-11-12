@@ -2,6 +2,8 @@ package com.scantomake.counterpart
 
 import kotlinx.serialization.json.jsonObject
 import com.scantomake.counterpart.api.withSerial
+import com.scantomake.counterpart.api.keepFields
+import com.scantomake.counterpart.api.lacks
 import com.scantomake.counterpart.api.ColourMapping
 import com.scantomake.counterpart.api.CompanionClient
 import com.scantomake.counterpart.api.ModelColourFilament
@@ -154,6 +156,34 @@ class CompanionClientTests {
         val store = PairingStore(MemoryStore())
         store.save(record, false)
         return CompanionClient(PairingClient(store, fake), fake, "Pixel 8", "David’s Pixel", File(System.getProperty("java.io.tmpdir"), "cp-test-${System.nanoTime()}"))
+    }
+
+    /** #741 review (Codex P1): a file the library doesn't keep (Keep → pictures only, a model) carries its validator in
+     *  the cache, so the next version asks with If-None-Match and a 304 reuses the copy instead of downloading it again. */
+    @Test fun anUnchangedModelTheLibraryDoesNotKeepIsNotDownloadedAgainAfterANewVersion() = kotlinx.coroutines.runBlocking {
+        val etag = "\"sha256-abc\""
+        val fake = FakeTransport { request, _ ->
+            when {
+                !request.url.endsWith("/model.stl") -> json(200, emptyMap<String, Any>())
+                request.headers.entries.any { it.key.equals("If-None-Match", true) && it.value == etag } -> HttpReply(304, ByteArray(0), mapOf("ETag" to etag))
+                else -> HttpReply(200, "solid model".toByteArray(), mapOf("ETag" to etag))
+            }
+        }
+        val companion = client(fake)
+        val pid = "0b6f0f43-7c35-4b8a-9a3c-8f0b4c4b2a11"
+        fun version(endedAt: Int) = Project.decode(parseObject("""{"id":"$pid","createdAtMs":1,"updatedAtMs":2,"state":"ready","photos":[],"passes":[{"startedAtMs":${endedAt - 1},"endedAtMs":$endedAt,"status":"done"}]}""")!!)!!
+        val first = companion.download(version(10), "model.stl")
+        val second = companion.download(version(20), "model.stl")
+        val asks = fake.calls.map { it.request }.filter { it.url.endsWith("/model.stl") }
+        assertEquals(2, asks.size)
+        assertEquals(null, asks[0].headers.entries.firstOrNull { it.key.equals("If-None-Match", true) }?.value)
+        assertEquals(etag, asks[1].headers.entries.firstOrNull { it.key.equals("If-None-Match", true) }?.value)
+        assertEquals("solid model", second.readText())
+        assertEquals("20", second.parentFile!!.name)
+        assertEquals(false, first.exists())
+        assertEquals(false, java.io.File(first.parentFile, "model.stl.etag").exists())
+        // The next version again: still one copy, still asked by its validator.
+        assertEquals("solid model", companion.download(version(30), "model.stl").readText())
     }
 
     @Test fun scopes() {
@@ -414,7 +444,7 @@ class ContractTests {
                     "limit-absolute" to "Stopped at the absolute time limit of 2 hours",
                     "limit-tool-calls" to "Stopped at the 120 tool-call limit"
                 ).getValue(name)
-                assertEquals("$reason. Try again or review the saved checkpoint.", words.status)
+                assertEquals("$reason. Trying again carries on from where it stopped.", words.status)
                 assertFalse(words.line.lowercase().contains("cancelled"))
             }
             val actions = words.actions
@@ -547,7 +577,7 @@ class PrinterFormSerialTests {
         serialModels = mapOf("01P" to "p1s", "01S" to "p1p"))
 
     @org.junit.Test fun aCorrectedSerialPicksItsModelAgain() {
-        var form = com.scantomake.counterpart.api.PrinterForm().withSerial("01P00A", options)
+        var form = com.scantomake.counterpart.api.PrinterForm(backend = "bambu-printer-mcp", printerType = "bambu").withSerial("01P00A", options)
         org.junit.Assert.assertEquals("p1s", form.model)
         form = form.withSerial("01S00A", options)
         org.junit.Assert.assertEquals("the corrected serial names another model", "p1p", form.model)
@@ -556,7 +586,7 @@ class PrinterFormSerialTests {
     }
 
     @org.junit.Test fun aModelThePersonChoseStays() {
-        val form = com.scantomake.counterpart.api.PrinterForm(model = "p1p").withSerial("01P00A", options)
+        val form = com.scantomake.counterpart.api.PrinterForm(backend = "bambu-printer-mcp", printerType = "bambu", model = "p1p").withSerial("01P00A", options)
         org.junit.Assert.assertEquals("p1p", form.model)
     }
 
@@ -564,6 +594,27 @@ class PrinterFormSerialTests {
         val found = com.scantomake.counterpart.api.PrinterDiscovery(labels = mapOf("mcp-3d-printer-server" to "mcp-3D-printer-server"))
         org.junit.Assert.assertEquals("mcp-3D-printer-server", found.label("mcp-3d-printer-server"))
         org.junit.Assert.assertEquals("an MCP the companion didn't name keeps its own name", "some-new-mcp", found.label("some-new-mcp"))
+    }
+}
+
+/** The form sends what the chosen kind's MCP declares, known only by its fields' roles: nothing keys on a kind called "bambu". */
+class PrinterFormFieldsTests {
+    private fun field(name: String, env: String, label: String, required: Boolean) = com.scantomake.counterpart.api.PrinterSetupOptions.Field(name, env, label, required = required)
+    private val octoprint = com.scantomake.counterpart.api.PrinterSetupOptions.PrinterType("octoprint", "OctoPrint", listOf("mcp-3d-printer-server"),
+        fields = listOf(field("host", "PRINTER_HOST", "Address", true), field("port", "PRINTER_PORT", "Port", false), field("secret", "API_KEY", "API key", true)))
+    private val acme = com.scantomake.counterpart.api.PrinterSetupOptions.PrinterType("acme", "Acme", listOf("mcp-3d-printer-server"), serial = true,
+        fields = listOf(field("host", "PRINTER_HOST", "Address", true), field("serial", "ACME_SN", "Serial", true), field("model", "ACME_KIND", "Kind", true)))
+
+    @org.junit.Test fun eachKindSendsOnlyItsOwnFields() {
+        val typed = com.scantomake.counterpart.api.PrinterForm(backend = "mcp-3d-printer-server", printerType = "octoprint", host = "octopi.local", port = "80", serial = "ignored", model = "p1s")
+        val octo = typed.keepFields(octoprint).json().mapValues { (it.value as kotlinx.serialization.json.JsonPrimitive).content }
+        org.junit.Assert.assertEquals(mapOf("backend" to "mcp-3d-printer-server", "printerType" to "octoprint", "host" to "octopi.local", "port" to "80"), octo)
+        val other = typed.copy(printerType = "acme", serial = "", model = null).keepFields(acme)
+        org.junit.Assert.assertEquals("its required fields, in its MCP's words and order", listOf("Serial", "Kind"), other.lacks(acme).map { it.label })
+        val sent = other.copy(serial = " sn-1 ", model = "k2").json().mapValues { (it.value as kotlinx.serialization.json.JsonPrimitive).content }
+        org.junit.Assert.assertEquals(mapOf("backend" to "mcp-3d-printer-server", "printerType" to "acme", "host" to "octopi.local", "serial" to "sn-1", "model" to "k2"), sent)
+        org.junit.Assert.assertEquals("unknown fields: kept", typed, typed.keepFields(null))
+        org.junit.Assert.assertEquals("", com.scantomake.counterpart.api.PrinterForm().printerType)
     }
 }
 

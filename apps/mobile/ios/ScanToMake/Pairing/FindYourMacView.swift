@@ -293,6 +293,7 @@ struct FindYourMacView: View {
         if nearbyOwned { app.nearby.cancel(); nearbyOwned = false }
         do {
             try app.pairing.forget()
+            app.library.forgot()
             app.showPairing = false
             app.readStatus()
             dismiss()

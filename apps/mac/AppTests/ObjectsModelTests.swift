@@ -486,6 +486,44 @@ private func project(_ item: [String: Any]) throws -> Project {
         XCTAssertEqual(ControlClient.timeout(for: "printers.obtain"), 70)
     }
 
+    /// Add printer…'s fields, its camera line and its Other Brand… come from the MCPs' own setup fields with projects present
+    /// (the phones' shared fixture: setupOptions() over bambu-printer-mcp 1.1.82's and mcp-3d-printer-server 1.2.63's
+    /// counterpart_setup_fields). Nothing keys on a kind called "bambu" or on BAMBU_MODEL (handoff item 4).
+    func testAddPrinterFieldsAndCameraLineComeFromTheMCPsWithProjectsPresent() async throws {
+        let companion = FakeObjects()
+        await companion.set([item("caliper", "ready")])
+        let model = ObjectsModel(companion: companion)
+        await model.refresh()
+        XCTAssertFalse(model.objects.isEmpty, "projects are present")
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<4 { root.deleteLastPathComponent() }
+        let fixture = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: root.appendingPathComponent("packages/contracts/fixtures/printer-setup-phone.json"))) as? [String: Any])
+        let discovery = try JSONDecoder().decode(PrinterDiscovery.self, from: JSONSerialization.data(withJSONObject: try XCTUnwrap(fixture["discover"])))
+        let options = discovery.options
+        // Enter Address… opens on the first kind the MCPs list; Other Brand… on the next.
+        XCTAssertEqual(options.types.prefix(2).map(\.printerType), ["bambu", "octoprint"])
+        let bambu = try XCTUnwrap(options.types.first), octoprint = try XCTUnwrap(options.types.dropFirst().first)
+        // The P1S on bambu-printer-mcp: a serial and model, no port, and Check says it asks for a camera picture.
+        XCTAssertNotNil(bambu.field("serial")); XCTAssertNotNil(bambu.field("model")); XCTAssertNil(bambu.field("port"))
+        XCTAssertTrue(bambu.checksCamera("bambu-printer-mcp"))
+        XCTAssertFalse(bambu.checksCamera("mcp-3d-printer-server"), "mcp-3D-printer-server says it can't read a Bambu camera")
+        // OctoPrint on mcp-3D-printer-server: a port, no serial or model, and status only, as before.
+        XCTAssertNotNil(octoprint.field("port")); XCTAssertNil(octoprint.field("serial")); XCTAssertNil(octoprint.field("model"))
+        XCTAssertFalse(octoprint.checksCamera("mcp-3d-printer-server"))
+        // Choosing OctoPrint after typing a Bambu serial and model sends neither.
+        var form = PrinterForm()
+        form.printerType = "bambu"; form.backend = "bambu-printer-mcp"; form.host = "192.168.1.42"; form.serial = "01P00A451601106"; form.model = "p1s"
+        XCTAssertEqual(form.lacks(bambu).map(\.name), [])
+        form.printerType = "octoprint"; form.backend = "mcp-3d-printer-server"; form.model = nil; form.keepFields(of: octoprint)
+        XCTAssertEqual(form.json, .object(["backend": .string("mcp-3d-printer-server"), "printerType": .string("octoprint"), "host": .string("192.168.1.42")]))
+        // A found folder asks for the model by its MCP's own model variable.
+        let folder = try JSONDecoder().decode(PrinterCandidate.self, from: Data("""
+        {"id":"folder:/x","source":"folder","name":"P","backend":"mcp-3d-printer-server","printerType":"bambu","folder":"/x","added":false,"missing":["BAMBU_MODEL"],"fill":{}}
+        """.utf8))
+        XCTAssertEqual(folder.modelSetting(options), bambu.field("model")?.env)
+        XCTAssertTrue(folder.needsModel(options))
+    }
+
     /// Add printer…'s address offers a web address only where the MCP's own host field takes one (mcp-3d-printer-server
     /// 1.2.55's `input: "url"` on OctoPrint), with projects present.
     func testAddPrinterAddressOffersAWebAddressOnlyWhereTheMCPTakesOneWithProjectsPresent() async throws {
@@ -532,6 +570,23 @@ private func project(_ item: [String: Any]) throws -> Project {
     /// Design §3.3 on the Mac, with projects present (AGENTS.md "Every layout"): a copy whose scan should become a case.
     /// Its page offers Make something else from this scan; New opens holding the scan; the new fit project is selected,
     /// says where its scan came from, and the source is still listed and says what was made from it.
+    func testMadeFromAnotherProjectShowsItsSourceConversationWithProjectsPresent() async throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let data = try Data(contentsOf: root.appending(path: "packages/contracts/fixtures/inherited-history.json"))
+        let rows = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [[String: Any]])
+        let companion = FakeObjects()
+        await companion.set(rows)
+        let model = ObjectsModel(companion: companion)
+        await model.refresh()
+        let copy = try XCTUnwrap(model.objects.first { $0.title == "Swivel phone mount" })
+        model.selection = copy.id
+        let conversation = ProjectConversation(project: try XCTUnwrap(model.selected), projects: model.objects)
+        XCTAssertEqual(conversation.inheritedLine, "From “Forester phone mount”")
+        XCTAssertEqual(conversation.inheritedEntries.first?.text, "A mount for my phone.")
+        XCTAssertEqual(conversation.inheritedEntries.count, 4)
+        XCTAssertEqual(conversation.entries.first?.text, "Add a swivel.")
+    }
+
     func testMakeSomethingElseFromACopysScanWithProjectsPresent() async throws {
         let companion = FakeObjects()
         await companion.set([item("source", "ready", ["kind": "copy", "title": "Leatherman Wave+ replica", "scan": "scan.usdz"]),

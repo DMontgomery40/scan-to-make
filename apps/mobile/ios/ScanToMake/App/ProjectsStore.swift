@@ -8,6 +8,10 @@ import CounterpartKit
     let pairingClient: PairingClient
     var projects: [Project] = []
     var loaded = false
+    /// The Mac's whole list arrived in this session (not the saved copy, not one project read on its own): only then may a
+    /// project missing from `projects` be taken as deleted (#720: a launch into one project's page read that project alone,
+    /// and the library let every other project's files go).
+    private(set) var listedFromMac = false
     var error: CompanionError?
     var catalog: PrinterCatalog?
     var printerProblem: String?
@@ -76,10 +80,12 @@ import CounterpartKit
     var macCapabilities: Set<String> = []
     /// Bumped by `settings.changed`: Settings reads again.
     var settingsChanges = 0
-    /// What each printer MCP's update is doing, from `mcp.update.*` events and the Update reply.
     var mcpCopies: [MCPPackageCopies]?
     var mcpCopiesProblem: String?
-    var mcpUpdates: [String: MCPUpdateProgress] = [:]
+    /// What each printer MCP's update is doing, from `mcp.update.*` events and the Update reply. Set through `recordMCPUpdate`.
+    private(set) var mcpUpdates: [String: MCPUpdateProgress] = [:]
+    /// A wait (120 s) or an update under way (35 min) that hears nothing more says so and offers Update again (the Mac's clock, CounterpartKit).
+    @ObservationIgnored let mcpWaits = MCPUpdateWaits()
     var attemptedMcpMoves: [String: String] = [:]
     /// What each printer last reported loaded, from a print sheet (the Mac reports spools per project).
     var spools: [String: [PrinterFilament]] = [:]
@@ -92,13 +98,30 @@ import CounterpartKit
 
     init(mac: MacConnection, pairing: PairingClient) {
         self.mac = mac; self.pairingClient = pairing
-        models = ModelFiles { project, path in
+        models = ModelFiles(stored: { [client = mac.client] project, path in client.stored(project, path) }) { project, path in
             guard let file = try await mac.download(project, path) else { throw CompanionError(code: "download-failed", message: "That file couldn't be saved on this phone.") }
             return file
         }
         mac.onSendProgress = { [weak self] id, share in
             guard let self, self.sending.contains(id) else { return }
             self.sendProgress[id] = share
+        }
+        #if DEBUG
+        // UI tests: a wait that never hears from the canned Mac expires within the test.
+        if Fixtures.folder != nil, let seconds = ProcessInfo.processInfo.environment["COUNTERPART_MCP_WAIT_SECONDS"].flatMap(Double.init) {
+            mcpWaits.waitingLimit = .milliseconds(Int(seconds * 1000))
+        }
+        #endif
+    }
+
+    /// Every change of an MCP update's state, from an event or an Update reply. A wait or an update under way that hears
+    /// nothing more becomes a sentence and Update and Move are offered again (PRD §8.10: nothing in an update waits forever).
+    func recordMCPUpdate(_ mcpId: String, _ progress: MCPUpdateProgress?) {
+        mcpUpdates[mcpId] = progress
+        let phase: MCPUpdateWaits.Phase? = progress?.state == "waiting" ? .waiting : progress?.state == "started" ? .started : nil
+        mcpWaits.note(mcpId, phase) { [weak self] in
+            guard let self, self.mcpUpdates[mcpId]?.isRunning == true else { return }
+            self.recordMCPUpdate(mcpId, .unheard)
         }
     }
 
@@ -171,16 +194,20 @@ import CounterpartKit
     var heard: [String: Date] = [:]
     @ObservationIgnored private var known: KnownProjects?
     nonisolated static var knownFile: URL {
-        URL.applicationSupportDirectory.appending(path: "Counterpart/known-projects.json")
+        #if DEBUG
+        if Fixtures.keepsLibrary, let folder = Fixtures.folder { return folder.appending(path: "known-projects.json") }
+        #endif
+        return URL.applicationSupportDirectory.appending(path: "Counterpart/known-projects.json")
     }
     /// The paired Mac, so one Mac's copy is never shown as another's. The canned Mac of the UI tests
     /// (`-CounterpartFixtures`) keeps it in memory only, so one test's projects never reach the next.
     private var knownMac: String? {
         #if DEBUG
-        if Fixtures.folder != nil { return nil }
+        if Fixtures.folder != nil { return Fixtures.keepsLibrary ? "fixture" : nil }
         #endif
-        guard let status = connection, status.state == .paired else { return nil }
-        return KnownProjects.key(for: status)
+        // Who the Mac is, not whether its credential works today: an expired pairing is still this Mac (audit row 6,
+        // X115), so its saved list stays until Forget or another Mac.
+        return KnownProjects.key(for: connection)
     }
 
     /// Before the first list arrives: the projects this phone last heard from this Mac, so Home and a project page open
@@ -220,11 +247,13 @@ import CounterpartKit
     }
 
     /// Nothing paired, or another Mac paired now: the saved copy is not this Mac's, so it goes (unpair, a new pairing).
+    /// Only a pairing that was read says so: a Keychain read that failed (a locked phone) is not Forget (board X96).
     private func forgetOtherMacsCopy() {
-        guard let owner = KnownProjects.owner(of: Self.knownFile), owner != knownMac else { return }
         #if DEBUG
         if Fixtures.folder != nil { return }
         #endif
+        guard let owner = KnownProjects.owner(of: Self.knownFile), let status = try? pairingClient.store.status(),
+              owner != KnownProjects.key(for: status) else { return }
         pendingSave?.cancel(); known = nil
         try? FileManager.default.removeItem(at: Self.knownFile)
     }
@@ -238,6 +267,7 @@ import CounterpartKit
             let latest = try await mac.list()
             guard !Task.isCancelled, reads.isCurrent(ticket) else { return }
             projects = reads.merge(latest, ticket: ticket, current: projects); error = nil; answered()
+            listedFromMac = true
             remember(listed: latest)
             refreshStoppedScans()
             for project in projects where corrections.pending(project.id) != nil { sendQueuedNote(project) }
@@ -279,7 +309,7 @@ import CounterpartKit
             if event.type == "project.deleted" { remove(project) }
             else { await reload(project) }
         } else if event.type.hasPrefix("mcp.update.") {
-            if let id = event.data?.mcpId { mcpUpdates[id] = MCPUpdateProgress(event) }
+            if let id = event.data?.mcpId { recordMCPUpdate(id, MCPUpdateProgress(event)) }
             await loadPrinters()
             await loadMCPCopies()
         } else if event.type == "settings.changed" { settingsChanges += 1 }
@@ -403,7 +433,7 @@ import CounterpartKit
         reads.reset()
         models.reset()
         known = nil; heard = [:]
-        projects = []; loaded = false; error = nil; catalog = nil; printerProblem = nil; link = .checking; events = nil; spools = [:]; macCapabilities = []; mcpUpdates = [:]; attemptedMcpMoves = [:]; mcpCopies = nil; mcpCopiesProblem = nil
+        projects = []; loaded = false; listedFromMac = false; error = nil; catalog = nil; printerProblem = nil; link = .checking; events = nil; spools = [:]; macCapabilities = []; mcpUpdates = [:]; mcpWaits.forget(); attemptedMcpMoves = [:]; mcpCopies = nil; mcpCopiesProblem = nil
         stoppedScans = [:]; readyScans = []; sendFailures = [:]
         restoredUnconfirmed = false
         // A pairing reset shows nothing from before it. The next load restores this Mac's own copy, if it has one, and
@@ -503,7 +533,7 @@ import CounterpartKit
 
 /// A printer MCP's update, in words (PRD §8.10).
 struct MCPUpdateProgress: Equatable {
-    /// started, waiting, done, failed, current, unresolved
+    /// started, waiting, done, failed, current, unresolved, and unheard (a wait that heard nothing more)
     var state: String
     var fromVersion: String?
     var toVersion: String?
@@ -515,6 +545,9 @@ struct MCPUpdateProgress: Equatable {
         fromVersion = event.data?.fromVersion; toVersion = event.data?.toVersion; log = event.data?.log
     }
     init(_ update: MCPUpdate) { state = update.state; fromVersion = update.fromVersion; toVersion = update.toVersion; found = update.found }
+    private init(state: String) { self.state = state }
+    /// A wait the companion never ended: its event went missing (MCPUpdateWaits).
+    static let unheard = MCPUpdateProgress(state: "unheard")
 
     var words: String {
         let versions = [fromVersion, toVersion].compactMap { $0 }.joined(separator: " → ")
@@ -525,6 +558,7 @@ struct MCPUpdateProgress: Equatable {
         case "current": return "Already the latest version"
         case "unresolved": return "Counterpart couldn't tell how this is installed" + (found.map { " (found \($0))" } ?? "") + "."
         case "failed": return "The update didn't finish."
+        case "unheard": return MCPUpdateWaits.unheard
         default: return state
         }
     }
@@ -552,16 +586,22 @@ struct MCPUpdateProgress: Equatable {
     /// The waits before each new try after a dropped link or a timeout.
     @ObservationIgnored var pauses: [Duration] = [.seconds(2), .seconds(8)]
 
-    init(download: @escaping (Project, String) async throws -> URL) { self.download = download }
+    /// The newest copy this phone keeps of a file (`CompanionClient.stored`), drawn while this version comes or when it can't.
+    @ObservationIgnored private let stored: (Project, String) -> URL?
+
+    init(stored: @escaping (Project, String) -> URL? = { _, _ in nil }, download: @escaping (Project, String) async throws -> URL) {
+        self.stored = stored; self.download = download
+    }
 
     static func key(_ project: Project, _ path: String) -> String {
         "\(project.id)#\(Int64(project.mediaVersion))#\(path)#\(path == "model.stl" ? project.current?.model ?? "" : "")"
     }
     func traceContext(_ project: Project, _ path: String) -> MediaTrace.Context? { contexts[Self.key(project, path)] }
     func fetch(_ project: Project, _ path: String) -> Fetch? { fetches[Self.key(project, path)] }
+    /// This version's file once it has come; until then (or if it can't), the copy this phone keeps of an earlier one.
     func file(_ project: Project, _ path: String) -> URL? {
         if case .ready(let url) = fetch(project, path) { return url }
-        return nil
+        return stored(project, path)
     }
 
     /// Starts the file's download unless it is running, done or refused as too large, and returns at once: the page

@@ -67,9 +67,20 @@ private struct RequestTab: View {
                     }
                 }
             }
-            let conversation = ProjectConversation(project: object, queued: model.corrections.messages[object.id] ?? [],
+            let conversation = ProjectConversation(project: object, projects: model.objects, queued: model.corrections.messages[object.id] ?? [],
                                                    queueFailed: model.corrections.failures[object.id] != nil)
             LazyVStack(alignment: .leading, spacing: 16) {
+                if let line = conversation.inheritedLine, let from = conversation.inheritedFrom {
+                    if from.exists {
+                        Button(line) { model.selection = from.id }.buttonStyle(.plain).font(.subheadline).foregroundStyle(.secondary)
+                    } else {
+                        Text(line).font(.subheadline).foregroundStyle(.secondary)
+                    }
+                    ForEach(conversation.inheritedEntries) { entry in
+                        ConversationBubble(entry: entry) { EmptyView() }.opacity(0.72)
+                    }
+                    Divider()
+                }
                 ForEach(conversation.entries) { entry in
                     ConversationBubble(entry: entry) {
                         pictures(entry.photos)

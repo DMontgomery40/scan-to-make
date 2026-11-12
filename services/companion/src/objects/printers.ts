@@ -27,7 +27,7 @@ export interface PrinterDestination {
   /** A printer added in Counterpart: the folder its MCP runs in, whose `.env` holds its settings. */
   folder?: string;
   /** A printer added in Counterpart whose `.env` lacks settings its MCP needs (names only), and what Complete Settings would add. */
-  incomplete?: {missing: string[]; fill: Record<string, string>};
+  incomplete?: {missing: string[]; fill: Record<string, string>; modelSetting?: string; route?: true};
 }
 
 export type PrinterOrigin = 'printer-handoff' | 'counterpart' | 'claude-code' | 'claude-desktop' | 'cursor' | 'codemode' | 'codex';
@@ -234,7 +234,7 @@ interface Candidate {
   serial?: string;
   config: PrinterHandoffConfig;
   folder?: string;
-  incomplete?: {missing: string[]; fill: Record<string, string>};
+  incomplete?: {missing: string[]; fill: Record<string, string>; modelSetting?: string; route?: true};
   /** A Counterpart profile's recorded model. */
   profileModel?: string;
 }
@@ -411,7 +411,8 @@ async function buildCatalog(current: PrinterHandoffConfig, options: PrinterCatal
         candidates.flatMap(other => other === candidate ? [] : envPaths(other.config)).filter(path => path !== own));
     }
     const gap = settingsGap(candidate.backend, env, kindFor(setups.get(candidate.backend), env), {...(candidate.profileModel ? {model: candidate.profileModel} : {}), ...(route ? {route} : {})});
-    if (gap.missing.length || Object.keys(gap.fill).length) candidate.incomplete = {missing: gap.missing, fill: gap.fill};
+    if (gap.missing.length || Object.keys(gap.fill).length) candidate.incomplete = {missing: gap.missing, fill: gap.fill,
+      ...(gap.modelSetting ? {modelSetting: gap.modelSetting} : {}), ...(gap.route ? {route: true as const} : {})};
   }
   const {chosen, groups} = winners(candidates, saved?.choices);
   const configs = new Map(candidates.map(candidate => [candidate.id, candidate.config] as const));

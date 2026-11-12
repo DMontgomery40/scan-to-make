@@ -44,15 +44,29 @@ struct ModelStage: View {
     @State private var failed = false
     @State private var posterIdentity: String?
     @State private var retryGeneration = 0
+    /// The model for this identity loaded with geometry (the stage's state for VoiceOver and UI tests).
+    @State private var meshReady = false
+    /// The live view has had a scene update with the model in it.
+    @State private var liveDrawn = false
+    /// The model this stage wants drawn now, and its load (#720: the load outlives a cancelled task, never a newer model).
+    @State private var wantedIdentity: String?
+    /// This stage's own tag in the media trace (which instance began, published, appeared).
+    @State private var instance = String(UUID().uuidString.prefix(8))
+    @State private var loadJob: Task<Void, Never>?
 
     private var identity: String { "\(url?.absoluteString ?? "empty")#\(tint?.description ?? "default")#\(twoTone)#\(yaw)#\(pitch)#\(fit)#\(object?.absoluteString ?? "")#\(seats.count)" }
 
     var body: some View {
         ZStack {
             if let backdrop { backdrop } else { StageBackground() }
-            if live && poster != nil && scenePhase == .active && interactive {
+            Color.clear.allowsHitTesting(false)
+                .accessibilityElement().accessibilityLabel(url == nil ? "No model yet" : "3D model. Drag to turn it, pinch to zoom.")
+                .accessibilityValue(stageState).accessibilityIdentifier("model-stage")
+            // Live 3D needs the model, not this phone's own still of it (#606: 6e976504 had made it wait on that still,
+            // so a model whose still failed never turned).
+            if live && scenePhase == .active && interactive {
                 realityView
-            } else if let poster {
+            } else if let poster = poster ?? cachedPoster {
                 Image(decorative: poster, scale: 1).resizable().scaledToFit()
             } else if let placeholder {
                 placeholder
@@ -62,7 +76,7 @@ struct ModelStage: View {
             if failed, placeholder != nil {
                 VStack { Spacer(); Button("Try 3D Again") { retryGeneration += 1 }.stageButton() }.padding(16)
             }
-            if interactive && url != nil && poster != nil && !live && !failed {
+            if interactive && url != nil && !live && !failed {
                 VStack { HStack { Spacer(); Button("Explore in 3D", systemImage: "rotate.3d") { touch() }.stageButton() }; Spacer() }.padding(16)
             }
         }
@@ -82,35 +96,83 @@ struct ModelStage: View {
             }, isEnabled: interactive)
         .task(id: "\(identity)#\(scenePhase)#\(retryGeneration)") {
             guard scenePhase == .active else { return }
-            live = false; failed = false
+            let wanted = identity
+            wantedIdentity = wanted
+            live = false; failed = false; meshReady = false
             if posterIdentity != identity { poster = nil }
+            // The still this phone already drew of this model: on the stage at once on a revisit (#720).
+            if poster == nil, let hit = ModelPoster.cached(key: wanted, yaw: yaw, pitch: pitch, fit: fit) {
+                poster = hit; posterIdentity = wanted; MediaTrace.record("poster.hit", ["at": "stage-start"])
+            }
             turn = .zero; settled = .zero; zoom = 1; settledZoom = 1
             guard let url, scenePhase == .active else { return }
-            await MediaTrace.$context.withValue(MediaTrace.Context(file: url, scene: String(describing: scenePhase))) {
-                MediaTrace.record("stage.begin", ["scene": String(describing: scenePhase)])
-                defer { MediaTrace.record(Task.isCancelled ? "stage.cancelled" : "stage.end", ["scene": String(describing: scenePhase)]) }
-                let loaded = await Self.load(url, tint: tint, twoTone: twoTone, object: object, seats: seats)
-                guard !Task.isCancelled, scenePhase == .active else { return }
-                guard let entity = loaded else { failed = true; undrawable?(); return }
-                let e = entity.visualBounds(relativeTo: nil).extents
-                measured?([Double(e.x), Double(e.z), Double(e.y)].map { ($0 * 10_000).rounded() / 10 })
-                let image = await ModelPoster.image(key: identity, model: entity, yaw: yaw, pitch: pitch, fit: fit)
-                guard !Task.isCancelled, scenePhase == .active else { return }
-                if let image { poster = image; posterIdentity = identity; drawn?() }
-                failed = image == nil
-                if image == nil { undrawable?() }
-                MediaTrace.record("stage.published", ["picture": String(image != nil)])
+            // The load belongs to the stage, not to this task. A page pushed onto a NavigationStack can have its tasks
+            // cancelled as it appears and not run again: #720, the iPhone's revisited model sat at "loading" (trace:
+            // stage.begin, then mesh.cancelled and stage.cancelled 20 ms later, nothing after). It runs to the end and
+            // publishes while this stage still wants the same model; a newer model's load replaces it.
+            loadJob?.cancel()
+            let (tint, twoTone, object, seats, yaw, pitch, fit, interactive, hasPlaceholder) = (self.tint, self.twoTone, self.object, self.seats, self.yaw, self.pitch, self.fit, self.interactive, self.placeholder != nil)
+            let stillWanted = { [self] in wantedIdentity == wanted }
+            let job = Task { @MainActor in
+                await MediaTrace.$context.withValue(MediaTrace.Context(file: url, scene: "active")) {
+                    MediaTrace.record("stage.begin", ["scene": "active", "stage": instance, "identity": String(String(UInt(bitPattern: wanted.hashValue), radix: 16).prefix(8))])
+                    defer { MediaTrace.record(stillWanted() ? "stage.end" : "stage.superseded", ["scene": "active"]) }
+                    let loaded = await Self.load(url, tint: tint, twoTone: twoTone, object: object, seats: seats)
+                    guard stillWanted() else { return }
+                    guard let entity = loaded else { failed = true; undrawable?(); return }
+                    meshReady = true
+                    let e = entity.visualBounds(relativeTo: nil).extents
+                    measured?([Double(e.x), Double(e.z), Double(e.y)].map { ($0 * 10_000).rounded() / 10 })
+                    var image = await ModelPoster.image(key: wanted, model: entity, yaw: yaw, pitch: pitch, fit: fit)
+                    #if DEBUG
+                    // `-CounterpartFailPoster YES` (UI tests, #606): the off-screen still fails, as it can on a phone.
+                    if UserDefaults.standard.bool(forKey: "CounterpartFailPoster") { image = nil }
+                    #endif
+                    guard stillWanted() else { return }
+                    if let image { poster = image; posterIdentity = wanted; drawn?() }
+                    // The model loaded, so it turns live; the Mac's picture stays until then (#606). Only a stage with no other
+                    // picture that never turns (the starters') says it couldn't be shown.
+                    if image == nil, !hasPlaceholder, !interactive { failed = true; undrawable?() }
+                    MediaTrace.record("stage.published", ["picture": String(image != nil), "stage": instance])
+                }
             }
+            loadJob = job
         }
         .task(id: lastTouch) {
             guard live else { return }
-            do { try await Task.sleep(for: .seconds(3)) } catch { return }
+            do { try await Task.sleep(for: .seconds(Self.idle)) } catch { return }
             live = false
         }
-        .onChange(of: scenePhase) { _, phase in if phase != .active { live = false; holder.pivot = nil; Self.cache.removeAll(); ModelPoster.deferPending() } }
-        .onDisappear { live = false; holder.pivot = nil }
+        .onChange(of: scenePhase) { _, phase in if phase != .active { live = false; holder.pivot = nil; loadJob?.cancel(); wantedIdentity = nil; Self.cache.removeAll(); ModelPoster.deferPending() } }
+        .onDisappear { live = false; holder.pivot = nil; MediaTrace.record("stage.disappear", ["stage": instance]) }
+        .onAppear { MediaTrace.record("stage.appear", ["stage": instance, "identity": String(String(UInt(bitPattern: identity.hashValue), radix: 16).prefix(8)), "url": String(url != nil)]) }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel(url == nil ? "No model yet" : "3D model. Drag to turn it, pinch to zoom.")
+    }
+
+    /// The stage's state for VoiceOver and UI tests (`model-stage`): loading, still, opening (3D asked for, not drawn
+    /// yet), live (3D drawn), failed.
+    private var stageState: String {
+        if url == nil { return "empty" }
+        if live && scenePhase == .active && interactive { return liveDrawn ? "live" : "opening" }
+        if failed { return "failed" }
+        return meshReady || cachedPoster != nil ? "still" : "loading"
+    }
+
+    /// The still this process already drew for this model (ModelPoster's cache), whatever this instance's own load did:
+    /// a page pushed again can be drawn by a stage whose task never ran (#720, the iPhone's revisit).
+    private var cachedPoster: CGImage? {
+        guard url != nil else { return nil }
+        return ModelPoster.cached(key: identity, yaw: yaw, pitch: pitch, fit: fit)
+    }
+
+    /// Seconds after the last touch before the stage goes back to its still.
+    private static var idle: Double {
+        #if DEBUG
+        // `-CounterpartStageIdle <seconds>` (UI tests): long enough for a test to read the live state after its drag.
+        let seconds = UserDefaults.standard.double(forKey: "CounterpartStageIdle")
+        if seconds > 0 { return seconds }
+        #endif
+        return 3
     }
 
     private func touch() {
@@ -130,13 +192,17 @@ struct ModelStage: View {
                 holder.pivot?.orientation = orientation
                 holder.pivot?.scale = SIMD3(repeating: zoom)
                 content.add(scene.root)
+                holder.firstFrame = content.subscribe(to: SceneEvents.Update.self) { _ in
+                    holder.firstFrame?.cancel(); holder.firstFrame = nil
+                    Task { @MainActor in liveDrawn = true }
+                }
             }
         } update: { _ in
             holder.pivot?.orientation = orientation
             holder.pivot?.scale = SIMD3(repeating: zoom)
         }
         .id(identity)
-        .onDisappear { holder.pivot = nil }
+        .onDisappear { holder.pivot = nil; holder.firstFrame?.cancel(); holder.firstFrame = nil; liveDrawn = false }
     }
 
     private var orientation: simd_quatf {
@@ -251,7 +317,10 @@ extension View {
 }
 
 /// Keeps the pivot between RealityView's make and update closures.
-private final class PivotHolder { var pivot: Entity? }
+private final class PivotHolder {
+    var pivot: Entity?
+    var firstFrame: EventSubscription?
+}
 
 /// STL triangles from binary or ASCII data.
 enum STLMesh {
