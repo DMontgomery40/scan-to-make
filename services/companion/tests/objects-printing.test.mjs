@@ -1574,3 +1574,29 @@ test('an estimate that runs out of time, or whose MCP call never finishes, says 
   f.deps.print.services.runner.estimate = async () => { throw new PrinterMcpError('tool-failed', undefined, 'Update bambu-printer-mcp in Settings → Printers.'); };
   await assert.rejects(f.service.estimate(f.object.id, {quality: 'draft'}), {message: "Couldn't slice it for an estimate: Update bambu-printer-mcp in Settings → Printers."});
 });
+
+test('make, print, monitor done, Works, then change preserves the printed design and every attempt', async t => {
+  const f = await setup(t, {reports: [status('RUNNING', 3), status('FINISH', 100)]});
+  let round = 0;
+  f.deps.runTouchup = async () => {
+    const dir = join(f.root, `design-${++round}`), out = join(dir, 'out'); await mkdir(out, {recursive: true});
+    await writeFile(join(out, 'touched.stl'), Buffer.concat([STL, Buffer.from(`\nround${round}`)]));
+    await writeFile(join(out, 'front.png'), `render-${round}`);
+    return {status: 'done', model: join(out, 'touched.stl'), renders: [join(out, 'front.png')], summary: `Holder ${round}`,
+      stats: {seconds: 1, toolCalls: 1}, checkpoints: [], passDir: dir};
+  };
+  await f.service.correct(f.object.id, 'Make the first holder.'); await f.service.settled(f.object.id);
+  const first = (await f.store.get(f.object.id)).versions[0];
+  const bytes = await readFile(join(f.store.dir(f.object.id), first.result.model));
+  await f.service.print(f.object.id); await f.approve(); await f.service.settled(f.object.id);
+  for (let i = 0; i < 3; i++) await f.tick();
+  await until(async () => (await f.service.get(f.object.id)).print?.monitor?.endState === 'done');
+  await f.service.setStatus(f.object.id, 'works');
+  await f.service.correct(f.object.id, 'Make it wider.'); await f.service.settled(f.object.id);
+  const object = await f.store.get(f.object.id);
+  assert.equal(object.versions.length, 2);
+  assert.equal(object.versions[0].outcome, 'works');
+  assert.equal(object.prints[0].versionId, first.id);
+  assert.equal(object.prints[0].monitor.endState, 'done');
+  assert.deepEqual(await readFile(join(f.store.dir(f.object.id), first.result.model)), bytes);
+});

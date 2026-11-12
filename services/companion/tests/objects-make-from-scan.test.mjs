@@ -415,3 +415,21 @@ test('a project made from one that was itself made from another says which proje
   assert.deepEqual(ready.inherited.fit, MEASURED, 'the measured sizes reach the third generation');
   assert.match(brief, /Width 75\.1 mm, Height 158 mm\. Treat these as measured\./);
 });
+
+// #616: a sealed design's own files are readable by a client with read access, and nothing else under versions/ is.
+test('a sealed design serves its own model and renders, and nothing else under versions/', async t => {
+  const {call, service, store, scopes} = await fixture(t);
+  const project = await service.create('A hook.', 'fit');
+  await service.start(project.id); await service.settled(project.id);
+  const object = await store.get(project.id);
+  const version = object.versions[0];
+  const model = await call('GET', `/v1/objects/${project.id}/${version.result.model}`);
+  assert.equal(model.status, 200, version.result.model);
+  assert.ok(scopes.includes('projects:read'));
+  assert.equal((await call('GET', `/v1/objects/${project.id}/${version.result.renders[0]}`)).status, 200);
+  const folder = version.result.model.split('/').slice(0, 2).join('/');
+  await writeFile(join(store.dir(project.id), folder, 'secret.txt'), 'not a design file');
+  assert.equal((await call('GET', `/v1/objects/${project.id}/${folder}/secret.txt`)).status, 404);
+  assert.equal((await call('GET', `/v1/objects/${project.id}/versions/00000000-0000-4000-8000-000000000000/model.stl`)).status, 404);
+  assert.equal((await call('POST', `/v1/objects/${project.id}/${version.result.model}`, {})).status, 405);
+});

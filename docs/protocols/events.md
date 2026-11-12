@@ -43,7 +43,7 @@ type CounterpartEvent = {
 |---|---|---|---|---|---|
 | `pass.started` | A pass starts (new project, Ask for changes, a late photo, an Ask answered) | "Your Mac is working on *Title*" | "About *N* min. You can put your phone down." / without an estimate "You can put your phone down. We'll let you know when it's ready." | none | |
 | `pass.stage` | The pass moves to its next stage | *Title* | "*stage words* · about *N* min" | none | |
-| `pass.ready` | A pass ends with a model | "*Title* is ready to print" | "*W* × *D* × *H* mm" / "Ready to print" | active | |
+| `pass.ready` | A pass ends with a model | "*Title* is ready to print"; a new design of something already printed (#616): "Your new *Title* design is ready" | "*W* × *D* × *H* mm" / "Ready to print"; for a new design of something printed: "The printed one is unchanged · *W* × *D* × *H* mm" | active | |
 | `pass.ask` | A pass ends needing a close-up | "*Title*: *question*" | "Take a photo, choose one, or let your Mac make its best guess." | active | |
 | `pass.failed` | A pass ends without a model | "*Title* didn't finish" | what happened and what to do | active | |
 | `print.preparing` | Print was tapped; each preparation step | "Getting *Title* ready" | the step: "Slicing the model", "Checking the printer", … | none | |

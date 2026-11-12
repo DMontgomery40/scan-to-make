@@ -33,7 +33,7 @@ async function setup(t, outcomes) {
     await writeFile(join(passDir, 'photos', 'photo-01.jpg'), JPEG);
     await writeFile(join(out, 'view.png'), Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64'));
     const model = join(out, 'touched.stl');
-    await writeFile(model, STL);
+    await writeFile(model, outcome.stl ?? STL);
     let parts;
     if (outcome.parts) { parts = join(out, 'touched.3mf'); await writeFile(parts, Buffer.from('PK\x03\x04 two parts')); }
     let design;
@@ -289,7 +289,8 @@ test('a project from before titles gets one the first time it is listed, once, a
 });
 
 test('a changed model is not Done yet: a correction on a Works project clears it, so its next print asks again', async t => {
-  const f = await setup(t, [{result: {summary: 'Made it.'}}, {result: {summary: 'Made it 5 mm longer.'}}]);
+  const longer = STL.replace('vertex 1 0 0', 'vertex 6 0 0');
+  const f = await setup(t, [{result: {summary: 'Made it.'}}, {stl: longer, result: {summary: 'Made it 5 mm longer.'}}]);
   const object = await f.service.create('A hook for the rail');
   await f.service.start(object.id);
   await f.service.settled(object.id);
@@ -300,6 +301,19 @@ test('a changed model is not Done yet: a correction on a Works project clears it
   assert.deepEqual([changed.state, changed.outcome], ['ready', undefined]);
   const {projectStatus} = await import('../dist/objects/service.js');
   assert.equal(projectStatus(changed), 'not-printed');
+  // #616: the answer belonged to the first design, and it stays with it beside the new one.
+  assert.deepEqual(changed.versions.map(v => v.outcome), ['works', undefined]);
+});
+
+test('a pass that reports done but returns the same model bytes seals no new design, so Done stays Done (#616)', async t => {
+  const f = await setup(t, [{result: {summary: 'Made it.'}}, {result: {summary: 'Checked it; same part.'}}]);
+  const object = await f.service.create('A hook for the rail');
+  await f.service.start(object.id);
+  await f.service.settled(object.id);
+  await f.service.setStatus(object.id, 'works');
+  await f.service.correct(object.id, 'Does it still fit?');
+  const kept = await f.service.settled(object.id);
+  assert.deepEqual([kept.state, kept.outcome, kept.versions.length, kept.versions[0].outcome], ['confirmed', 'works', 1, 'works']);
 });
 
 test('a correction that changes nothing keeps a Done project Done', async t => {

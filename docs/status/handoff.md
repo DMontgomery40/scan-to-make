@@ -112,6 +112,15 @@ The first Fable lead's own list is below under "What the removed lead got wrong"
 - Open PRs: #600 (new), #556, #533, #532, #413, #410, #404. Board rows X127 to X141 are today's; the audit's rows are not on the board.
 - A small control-socket client used today is at `~/scan-to-make-work/holder-7c-print/ctl.py` on the Mac (read-only use is fine; it was also used for the two writes described above).
 
+## Implementation handoff: earlier designs and prints (#616, PR #602; Nov 12)
+
+Milestone 1 (#600, a project made from another carries its history) is merged. Milestone 2 is PR [#602](https://github.com/DMontgomery40/scan-to-make/pull/602), branch `feat/versions-slice-1`, for [#616](https://github.com/DMontgomery40/scan-to-make/issues/616) slice 1 of `~/scan-to-make-work/things-and-versions-2026-11-11/DESIGN.md`: finished designs are sealed under `versions/<id>/` and never overwritten, every print attempt is kept against its design, and the newest design's answer stays where it is. The PR body has the test counts, the captures and what is still open; this section only says where things are.
+
+- **Migration, checked on a clone of this Mac's 23 projects** (`scripts/ux_screens.py --prepare-only`; nothing under Application Support was written): the 1,630 source files are byte-identical afterwards, a second start changes nothing, and only the hanger, the wall holder and the stove gap filler change list words ("New one ready · printed …"). Every Done project stays Done. Tools and reports: `~/scan-to-make-work/versions-slice-1/{tools,mig-2}/`.
+- **The hanger's Nov 4 successful print is not in David's live data any more**: the Nov 11 15:54Z print replaced `object.json:print`, and `events.ndjson` starts at Nov 5. It survives in older clones (`~/scan-to-make-work/gate-train-g/work/data/state/capture/objects/5158831c…/object.json`). The migration shows Nov 4's three attempts as ended unknown. Putting the record back is the lead's call.
+- **Earlier answers are not guessed back.** Events record that a status changed, not to what; on the hanger a status set four minutes after the Nov 11 print, which David called half printed, would have been read as It works. An earlier printed design shows its own Did it fit?.
+- Android [#743](https://github.com/DMontgomery40/scan-to-make/issues/743) and Linux [#744](https://github.com/DMontgomery40/scan-to-make/issues/744) are held off the train. Both already show the new list line, which comes from the companion.
+
 ## Before that (2026-11-11, 08:46Z): a new lead (Opus 5.5)
 
 The new lead is Claude Opus 5.5 (high) in a T3 thread on agents-173, since 08:40Z. The council's synthesis reached David at 08:41Z in the removed lead's thread. #570's three gate failures are fixed on the train (`203d13e0`) and the gate is running again; [`now.md`](now.md) has the live state.

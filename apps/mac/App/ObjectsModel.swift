@@ -643,10 +643,13 @@ struct SocketObjects: ObjectsCompanion {
     }
 
     /// Project Settings' Status (PRD §5.4): `not-printed`, `printed`, `works` (Done), `needs-changes`.
-    @discardableResult func setStatus(_ status: String, for id: String) async -> Bool {
+    @discardableResult func setStatus(_ status: String, for id: String, versionId: String? = nil) async -> Bool {
         guard capabilities?.projectSettings == true else { return false }
         let pending = objects.first(where: { $0.id == id })?.pendingFollowup
-        let done = await change(id) { try await self.companion.setProjectSettings(id, ["status": .string(status)]) }
+        var patch: [String: JSONValue] = ["status": .string(status)]
+        if let versionId { patch["versionId"] = .string(versionId) }
+        let sent = patch
+        let done = await change(id) { try await self.companion.setProjectSettings(id, sent) }
         if done, status == "works", let pending { corrections.sent(pending, for: id) }
         if done { await refresh() } // the settings the sidebar and "Did it fit?" read
         return done

@@ -107,7 +107,7 @@ export class EventLog {
     const context = await this.#context(draft).catch((): WordsContext => ({title: 'Your project'}));
     const words = eventWords(draft.type, draft.data, {...context, ...(draft.printerName ? {printer: draft.printerName} : {}),
       ...(draft.detail?.item ? {item: draft.detail.item} : {}), ...(draft.detail?.question ? {question: draft.detail.question} : {}),
-      ...(draft.detail?.size ? {size: draft.detail.size} : {}), ...(draft.detail?.reason ? {reason: draft.detail.reason} : {}),
+      ...(draft.detail?.size ? {size: draft.detail.size} : {}), ...(draft.detail?.printedBefore ? {printedBefore: true} : {}), ...(draft.detail?.reason ? {reason: draft.detail.reason} : {}),
       // A deleted project can't be read back, so its event carries the title it had.
       ...(draft.detail?.title ? {title: draft.detail.title} : {}),
       ...(draft.type === 'print.sent' && draft.detail?.message === 'bambu-connect' ? {reason: 'bambu-connect'} : {}),

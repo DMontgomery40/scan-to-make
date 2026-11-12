@@ -1,0 +1,686 @@
+{
+ "about": "#616: anonymised structural copies of four of the owner's stored projects (hanger 5158831c, pink box 874333ab, wall holder 30a2a33c, Leatherman ba9346cd), made from an APFS clone on 2026-11-12 by ~/scan-to-make-work/versions-slice-1/tools/make_fixture.py. Real pass times, statuses and engines; which outputs exist and which are byte-identical (out: file -> content number); code runs and whether their STL is the pass's model; print folders with first/last frame times; the live print record; the project's print and status events. No words, photos, scans or geometry. The hanger's Nov 4 successful print is frame-only here: object.json's record of it was overwritten by the Nov 11 print before this change, so the migration cannot know it ended well and must not say so.",
+ "projects": [
+  {
+   "name": "hanger",
+   "kind": "fit",
+   "state": "ready",
+   "outcome": null,
+   "updatedAtMs": 1794423329276,
+   "passes": [
+    {
+     "startedAtMs": 1793749437401,
+     "endedAtMs": 1793749835017,
+     "status": "done",
+     "engine": "blender",
+     "dir": "passes/pass/0",
+     "out": {
+      "touched.stl": 1
+     },
+     "renders": 9,
+     "parts": []
+    },
+    {
+     "startedAtMs": 1793750462678,
+     "endedAtMs": 1793751138356,
+     "status": "done",
+     "engine": "blender",
+     "dir": "passes/pass/1",
+     "out": {
+      "touched.stl": 2
+     },
+     "renders": 8,
+     "parts": []
+    },
+    {
+     "startedAtMs": 1793751489352,
+     "endedAtMs": 1793752447591,
+     "status": "done",
+     "engine": "blender",
+     "dir": "passes/pass/2",
+     "out": {
+      "touched.stl": 3
+     },
+     "renders": 10,
+     "parts": []
+    },
+    {
+     "startedAtMs": 1793771517889,
+     "endedAtMs": 1793771519867,
+     "status": "failed",
+     "engine": "blender"
+    },
+    {
+     "startedAtMs": 1793788733575,
+     "endedAtMs": 1793788737991,
+     "status": "failed",
+     "engine": "blender"
+    },
+    {
+     "startedAtMs": 1793790273706,
+     "endedAtMs": 1793790886397,
+     "status": "done",
+     "engine": "blender",
+     "dir": "passes/pass/5",
+     "out": {
+      "touched.stl": 4
+     },
+     "renders": 9,
+     "parts": []
+    },
+    {
+     "startedAtMs": 1793843864256,
+     "endedAtMs": 1793844139016,
+     "status": "done",
+     "engine": "blender",
+     "dir": "passes/pass/6",
+     "out": {
+      "touched.stl": 5
+     },
+     "renders": 4,
+     "parts": []
+    },
+    {
+     "startedAtMs": 1793947861635,
+     "endedAtMs": 1793948274624,
+     "status": "done",
+     "engine": "blender",
+     "dir": "passes/pass/7",
+     "out": {
+      "touched.stl": 6
+     },
+     "renders": 9,
+     "parts": []
+    },
+    {
+     "startedAtMs": 1794411560823,
+     "endedAtMs": 1794412293137,
+     "status": "done",
+     "engine": "blender",
+     "dir": "passes/pass/8",
+     "out": {
+      "touched.stl": 7
+     },
+     "renders": 6,
+     "parts": [
+      "part_hanger.stl",
+      "part_nut.stl",
+      "part_screw.stl"
+     ]
+    },
+    {
+     "startedAtMs": 1794419615463,
+     "endedAtMs": 1794423329276,
+     "status": "done",
+     "engine": "code",
+     "dir": "passes/pass/9",
+     "out": {
+      "touched.stl": 8
+     },
+     "renders": 7,
+     "parts": [],
+     "cad": [
+      {
+       "matches": false,
+       "step": false,
+       "script": false,
+       "parameters": false
+      },
+      {
+       "matches": true,
+       "step": false,
+       "script": true,
+       "parameters": true
+      },
+      {
+       "matches": false,
+       "step": false,
+       "script": true,
+       "parameters": true
+      },
+      {
+       "matches": true,
+       "step": false,
+       "script": true,
+       "parameters": true
+      },
+      {
+       "matches": false,
+       "step": false,
+       "script": true,
+       "parameters": true
+      },
+      {
+       "matches": false,
+       "step": false,
+       "script": true,
+       "parameters": true
+      },
+      {
+       "matches": false,
+       "step": false,
+       "script": true,
+       "parameters": true
+      },
+      {
+       "matches": false,
+       "step": false,
+       "script": true,
+       "parameters": true
+      }
+     ]
+    }
+   ],
+   "print": {
+    "printId": "c2a0ae5b-68b2-4a1f-9757-1e2d99a199f1",
+    "bundleId": "56c027ad-1f5f-4f41-b450-caeb2822d62f",
+    "dispatchedAt": "2026-11-11T15:54:29.894Z",
+    "monitor": {
+     "phase": "ended",
+     "endState": "done",
+     "endedAt": "2026-11-11T17:41:41.294Z"
+    }
+   },
+   "prints": [
+    {
+     "id": "48a76ce3-69f9-440c-a825-30b0d74e7bfa",
+     "frames": [
+      1793797627621,
+      1793797627621
+     ]
+    },
+    {
+     "id": "753d5e9b-9386-454d-b149-e826021594a4",
+     "frames": [
+      1793791652751,
+      1793791652751
+     ]
+    },
+    {
+     "id": "beaab8b2-18c3-4b85-95f2-4a29b0c32c99",
+     "frames": [
+      1793830600554,
+      1793835123932
+     ]
+    },
+    {
+     "id": "c2a0ae5b-68b2-4a1f-9757-1e2d99a199f1",
+     "frames": [
+      1794413031662,
+      1794418901299
+     ]
+    }
+   ],
+   "events": [
+    {
+     "type": "project.updated",
+     "at": "2026-11-05T01:56:33.610Z",
+     "data": {
+      "keys": [
+       "status"
+      ]
+     }
+    },
+    {
+     "type": "project.updated",
+     "at": "2026-11-05T03:08:11.162Z",
+     "data": {
+      "keys": [
+       "status"
+      ]
+     }
+    },
+    {
+     "type": "print.started",
+     "at": "2026-11-11T15:54:36.383Z",
+     "printId": "c2a0ae5b-68b2-4a1f-9757-1e2d99a199f1",
+     "data": {
+      "estimateSec": 6214,
+      "grams": 74.98
+     }
+    },
+    {
+     "type": "print.done",
+     "at": "2026-11-11T17:41:41.300Z",
+     "printId": "c2a0ae5b-68b2-4a1f-9757-1e2d99a199f1",
+     "data": {}
+    },
+    {
+     "type": "project.updated",
+     "at": "2026-11-11T17:45:26.562Z",
+     "data": {
+      "keys": [
+       "status"
+      ]
+     }
+    }
+   ],
+   "expected": {
+    "versionPasses": [
+     0,
+     1,
+     2,
+     5,
+     6,
+     7,
+     8,
+     9
+    ],
+    "outcomes": [
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ],
+    "lastDesign": [
+     "parameters",
+     "script"
+    ],
+    "restored": true,
+    "attempts": [
+     {
+      "id": "753d5e9b",
+      "version": 4,
+      "end": null
+     },
+     {
+      "id": "48a76ce3",
+      "version": 4,
+      "end": null
+     },
+     {
+      "id": "beaab8b2",
+      "version": 4,
+      "end": null
+     },
+     {
+      "id": "c2a0ae5b",
+      "version": 7,
+      "end": "done",
+      "startedAt": "2026-11-11T15:54:29.894Z"
+     }
+    ],
+    "status": "New one ready · printed Nov 11"
+   }
+  },
+  {
+   "name": "pink-box",
+   "kind": "fit",
+   "state": "confirmed",
+   "outcome": "works",
+   "updatedAtMs": 1794441952480,
+   "passes": [
+    {
+     "startedAtMs": 1794086168355,
+     "endedAtMs": 1794086378317,
+     "status": "done",
+     "engine": "blender",
+     "dir": "passes/pass/0",
+     "out": {
+      "touched.stl": 1
+     },
+     "renders": 9,
+     "parts": []
+    },
+    {
+     "startedAtMs": 1794095608727,
+     "endedAtMs": 1794096120479,
+     "status": "done",
+     "engine": "blender",
+     "dir": "passes/pass/1",
+     "out": {
+      "touched.stl": 2,
+      "touched.3mf": 3
+     },
+     "renders": 11,
+     "parts": [
+      "part_body.stl",
+      "part_letters.stl"
+     ]
+    }
+   ],
+   "print": {
+    "printId": "e9a07caf-2711-4c9f-9ade-99d766e31315",
+    "bundleId": "c3eb4e19-09fd-4307-9794-8bf1b6d24449",
+    "dispatchedAt": "2026-11-08T00:23:42.929Z",
+    "monitor": {
+     "phase": "ended",
+     "endState": "failed",
+     "endedAt": "2026-11-08T01:24:08.204Z"
+    }
+   },
+   "prints": [
+    {
+     "id": "8f89c895-81a1-4a00-af65-4309531cdea6",
+     "frames": [
+      1794088300358,
+      1794094194585
+     ]
+    },
+    {
+     "id": "e9a07caf-2711-4c9f-9ade-99d766e31315",
+     "frames": [
+      1794098176182,
+      1794101051745
+     ]
+    }
+   ],
+   "events": [
+    {
+     "type": "print.started",
+     "at": "2026-11-07T21:34:35.570Z",
+     "printId": "8f89c895-81a1-4a00-af65-4309531cdea6",
+     "data": {
+      "estimateSec": 6832,
+      "grams": 104.94
+     }
+    },
+    {
+     "type": "print.done",
+     "at": "2026-11-07T23:29:54.589Z",
+     "printId": "8f89c895-81a1-4a00-af65-4309531cdea6",
+     "data": {}
+    },
+    {
+     "type": "project.updated",
+     "at": "2026-11-07T23:38:59.615Z",
+     "data": {
+      "keys": [
+       "status"
+      ]
+     }
+    },
+    {
+     "type": "print.started",
+     "at": "2026-11-08T00:23:51.946Z",
+     "printId": "e9a07caf-2711-4c9f-9ade-99d766e31315",
+     "data": {
+      "estimateSec": 7978,
+      "grams": 106.25
+     }
+    },
+    {
+     "type": "print.failed",
+     "at": "2026-11-08T01:24:11.747Z",
+     "printId": "e9a07caf-2711-4c9f-9ade-99d766e31315",
+     "data": {}
+    },
+    {
+     "type": "project.updated",
+     "at": "2026-11-10T19:44:27.109Z",
+     "data": {
+      "keys": [
+       "status"
+      ]
+     }
+    },
+    {
+     "type": "project.updated",
+     "at": "2026-11-10T19:44:42.674Z",
+     "data": {
+      "keys": [
+       "status"
+      ]
+     }
+    }
+   ],
+   "expected": {
+    "versionPasses": [
+     0,
+     1
+    ],
+    "outcomes": [
+     null,
+     "works"
+    ],
+    "restored": true,
+    "lastModel": "touched.3mf",
+    "attempts": [
+     {
+      "id": "8f89c895",
+      "version": 1,
+      "end": "done",
+      "startedAt": "2026-11-07T21:34:35.570Z"
+     },
+     {
+      "id": "e9a07caf",
+      "version": 2,
+      "end": "failed",
+      "startedAt": "2026-11-08T00:23:42.929Z"
+     }
+    ],
+    "status": "Done · it works"
+   }
+  },
+  {
+   "name": "wall-holder",
+   "kind": "fit",
+   "state": "ready",
+   "outcome": null,
+   "updatedAtMs": 1794340301484,
+   "passes": [
+    {
+     "startedAtMs": 1794290538392,
+     "endedAtMs": 1794290900312,
+     "status": "needs_closeup",
+     "engine": "blender",
+     "dir": "passes/pass/0",
+     "out": {},
+     "renders": 0,
+     "parts": []
+    },
+    {
+     "startedAtMs": 1794291414351,
+     "endedAtMs": 1794291712501,
+     "status": "done",
+     "engine": "blender",
+     "dir": "passes/pass/1",
+     "out": {
+      "touched.stl": 1
+     },
+     "renders": 8,
+     "parts": []
+    },
+    {
+     "startedAtMs": 1794328487110,
+     "endedAtMs": 1794328646266,
+     "status": "done",
+     "engine": "code",
+     "dir": "passes/pass/2",
+     "out": {},
+     "renders": 0,
+     "parts": []
+    },
+    {
+     "startedAtMs": 1794330827187,
+     "endedAtMs": 1794330886066,
+     "status": "needs_closeup",
+     "engine": "code",
+     "dir": "passes/pass/3",
+     "out": {},
+     "renders": 0,
+     "parts": []
+    },
+    {
+     "startedAtMs": 1794339909718,
+     "endedAtMs": 1794340301483,
+     "status": "done",
+     "engine": "code",
+     "dir": "passes/pass/4",
+     "out": {
+      "touched.stl": 2
+     },
+     "renders": 7,
+     "parts": [],
+     "cad": [
+      {
+       "matches": false,
+       "step": true,
+       "script": true,
+       "parameters": true
+      },
+      {
+       "matches": true,
+       "step": true,
+       "script": true,
+       "parameters": true
+      },
+      {
+       "matches": true,
+       "step": true,
+       "script": true,
+       "parameters": true
+      }
+     ]
+    }
+   ],
+   "print": {
+    "printId": "65e4d53d-af61-4d9c-8b1f-956594f0eb68",
+    "bundleId": "121af21d-5d52-4354-92e7-ead3267e44ed",
+    "dispatchedAt": "2026-11-10T06:49:42.878Z",
+    "monitor": {
+     "phase": "ended",
+     "endState": "done",
+     "endedAt": "2026-11-10T09:08:00.339Z"
+    }
+   },
+   "prints": [
+    {
+     "id": "65e4d53d-af61-4d9c-8b1f-956594f0eb68",
+     "frames": [
+      1794294005198,
+      1794301683884
+     ]
+    },
+    {
+     "id": "81e163a9-f8d5-410e-a665-d9eebd7bb5aa",
+     "frames": [
+      1794293101436,
+      1794293101436
+     ]
+    }
+   ],
+   "events": [
+    {
+     "type": "print.started",
+     "at": "2026-11-10T06:31:34.719Z",
+     "printId": "81e163a9-f8d5-410e-a665-d9eebd7bb5aa",
+     "data": {
+      "estimateSec": 8154,
+      "grams": 103.42
+     }
+    },
+    {
+     "type": "print.cancelled",
+     "at": "2026-11-10T06:47:32.084Z",
+     "printId": "81e163a9-f8d5-410e-a665-d9eebd7bb5aa",
+     "data": {}
+    },
+    {
+     "type": "print.started",
+     "at": "2026-11-10T06:49:48.904Z",
+     "printId": "65e4d53d-af61-4d9c-8b1f-956594f0eb68",
+     "data": {
+      "estimateSec": 8202,
+      "grams": 98.72
+     }
+    },
+    {
+     "type": "print.done",
+     "at": "2026-11-10T09:08:03.887Z",
+     "printId": "65e4d53d-af61-4d9c-8b1f-956594f0eb68",
+     "data": {}
+    },
+    {
+     "type": "project.updated",
+     "at": "2026-11-10T16:44:51.731Z",
+     "data": {
+      "keys": [
+       "status"
+      ]
+     }
+    }
+   ],
+   "expected": {
+    "versionPasses": [
+     1,
+     4
+    ],
+    "outcomes": [
+     null,
+     null
+    ],
+    "lastDesign": [
+     "parameters",
+     "script",
+     "step"
+    ],
+    "restored": true,
+    "attempts": [
+     {
+      "id": "81e163a9",
+      "version": 1,
+      "end": "cancelled",
+      "startedAt": "2026-11-10T06:31:34.719Z"
+     },
+     {
+      "id": "65e4d53d",
+      "version": 1,
+      "end": "done",
+      "startedAt": "2026-11-10T06:49:42.878Z"
+     }
+    ],
+    "status": "New one ready · printed Nov 10"
+   }
+  },
+  {
+   "name": "leatherman",
+   "kind": "copy",
+   "state": "ready",
+   "outcome": null,
+   "updatedAtMs": 1793816286345,
+   "passes": [
+    {
+     "startedAtMs": 1793815522966,
+     "endedAtMs": 1793815539516,
+     "status": "failed",
+     "engine": "blender",
+     "dir": "passes/pass/0",
+     "out": {},
+     "renders": 0,
+     "parts": []
+    },
+    {
+     "startedAtMs": 1793815627082,
+     "endedAtMs": 1793816286344,
+     "status": "done",
+     "engine": "blender",
+     "dir": "passes/pass/1",
+     "out": {
+      "touched.stl": 1
+     },
+     "renders": 8,
+     "parts": []
+    }
+   ],
+   "print": null,
+   "prints": [],
+   "events": [],
+   "expected": {
+    "versionPasses": [
+     1
+    ],
+    "outcomes": [
+     null
+    ],
+    "restored": false,
+    "attempts": [],
+    "status": "Ready to print"
+   }
+  }
+ ]
+}

@@ -13,6 +13,8 @@ struct ProjectDetail: View {
     let object: Project
     @ObservedObject var model: ObjectsModel
     let print: () -> Void
+    @State private var viewingDesign: String?
+    private var stageObject: Project { object.showingDesign(viewingDesign) }
     @State private var note = ""
     @State private var showingSettings = false
     @State private var choosingModelFiles = false
@@ -72,7 +74,7 @@ struct ProjectDetail: View {
     }
     private var working: Bool { model.working.contains(object.id) }
     /// Nothing that needs the companion can be pressed while it isn't answering (X100): the line above the card says why.
-    private var blocked: Bool { working || model.availability == .notRunning }
+    private var blocked: Bool { viewingDesign != nil || working || model.availability == .notRunning }
     private var takesPhotos: Bool { model.capabilities?.objectsCreate == true }
 
     var body: some View {
@@ -101,6 +103,23 @@ struct ProjectDetail: View {
                 }
                 .ignoresSafeArea(edges: .top)
             VStack(spacing: 12) {
+                if let viewingDesign, let version = object.versions?.first(where: { $0.id == viewingDesign }) {
+                    HStack {
+                        VStack(alignment: .leading) {
+                            Text("Earlier design · \(DesignHistory(object).printedLine(version))").font(.caption).foregroundStyle(.secondary)
+                            Text(version.label).font(.callout)
+                        }
+                        Spacer()
+                        Button("Show the newest") { self.viewingDesign = nil; picture = nil }
+                    }.padding(.horizontal, 12)
+                }
+                DesignHistoryView(project: object, select: { viewingDesign = $0; picture = nil }, answer: { versionId, status in
+                    Task { await model.setStatus(status, for: object.id, versionId: versionId) }
+                }, thumbnail: { version in
+                    if let path = version.picture ?? version.result.renders.first, let url = object.projectFile(path) {
+                        FillImage(url: url, version: version.sealedAtMs)
+                    } else { Image(systemName: "cube").font(.largeTitle).foregroundStyle(.secondary) }
+                })
                 scanLineage
                 if (object.plates?.count ?? 0) > 1 {
                     ProjectPlatesView(project: object, busy: blocked, thumbnail: { plate in
@@ -181,13 +200,13 @@ struct ProjectDetail: View {
 
     // MARK: Stage
 
-    private var gallery: ProjectGallery { ProjectGallery(project: object) }
+    private var gallery: ProjectGallery { ProjectGallery(project: stageObject) }
     private var entry: ProjectGallery.Entry? { gallery.entries.first { $0.id == picture } ?? gallery.first }
 
     /// Which picture (PRD §5.4): a segmented control for the common two or three, a pop-up for a designer's many plates
     /// (HIG macOS: a segmented control to switch views in a toolbar area; a pop-up button for a long list). None for one.
     @ViewBuilder private var pictureChooser: some View {
-        let entries = ProjectStageOffer.pictureChoices(object)
+        let entries = ProjectStageOffer.pictureChoices(stageObject)
         let choice = Binding(get: { entry?.id ?? "" }, set: { picture = $0 })
         if entries.count > 4 {
             Picker("Picture", selection: choice) { ForEach(entries) { Text($0.label).tag($0.id) } }
@@ -206,16 +225,16 @@ struct ProjectDetail: View {
         if let entry {
             switch entry.drawing {
             case .model(let path):
-                if let url = path == "model.stl" ? (object.modelURL.flatMap { $0.pathExtension.lowercased() == "stl" ? $0 : nil } ?? object.blenderModelURL) : object.projectFile(path) {
-                    ModelStage(url: url, version: FileVersion.of(url, else: object.updatedAtMs), fit: 0.15,
+                if let url = path == "model.stl" ? (stageObject.modelURL.flatMap { $0.pathExtension.lowercased() == "stl" ? $0 : nil } ?? stageObject.blenderModelURL) : stageObject.projectFile(path) {
+                    ModelStage(url: url, version: FileVersion.of(url, else: stageObject.updatedAtMs), fit: 0.15,
                                accessibilityText: "\(entry.label). Drag to turn it, scroll to zoom.",
-                               poster: entry.kind == .part ? (object.pictures?["part"].flatMap(object.projectFile) ?? Self.poster(object)) : object.pictures?["scan"].flatMap(object.projectFile), tint: Self.colour(entry.colour),
+                               poster: entry.kind == .part ? (stageObject.pictures?["part"].flatMap(stageObject.projectFile) ?? Self.poster(stageObject)) : stageObject.pictures?["scan"].flatMap(stageObject.projectFile), tint: Self.colour(entry.colour),
                                measured: { measured[entry.id] = $0 })
                     .id(entry.id)
                 } else { still(entry) }
             case .assembly(_, let scan, let seats):
-                if let url = object.blenderModelURL, let scanURL = object.projectFile(scan) {
-                    ModelStage(url: url, version: FileVersion.of(url, else: object.updatedAtMs), fit: 0.15,
+                if let url = stageObject.blenderModelURL, let scanURL = stageObject.projectFile(scan) {
+                    ModelStage(url: url, version: FileVersion.of(url, else: stageObject.updatedAtMs), fit: 0.15,
                                accessibilityText: "\(words.title) with what you scanned in place. Drag to turn it, scroll to zoom.",
                                tint: Self.colour(entry.colour), object: scanURL, seats: seats.map(\.matrix), measured: { measured[entry.id] = $0 })
                     .id(entry.id)
@@ -223,12 +242,12 @@ struct ProjectDetail: View {
             case .picture:
                 still(entry)
             }
-        } else if let photo = object.photoPicture {
+        } else if let photo = stageObject.photoPicture {
             // Photos sent, no scan model or result yet: the subject this Mac cut out, as the sidebar shows it.
-            StageStill(still: .picture(photo), file: object.projectFile(photo), version: object.updatedAtMs, label: "Your photo",
+            StageStill(still: .picture(photo), file: stageObject.projectFile(photo), version: stageObject.updatedAtMs, label: "Your photo",
                        unavailableLine: "This Mac couldn’t draw a picture of this.")
         } else {
-            StageStill(still: words.busy ? .waiting : .notAvailable, file: nil, version: object.updatedAtMs, label: words.title,
+            StageStill(still: words.busy ? .waiting : .notAvailable, file: nil, version: stageObject.updatedAtMs, label: words.title,
                        unavailableLine: "Nothing to show yet.")
         }
     }
@@ -236,9 +255,9 @@ struct ProjectDetail: View {
     /// An entry's still (`StageStill`, the stage's one still picture): its picture, or that one is coming, or that none
     /// can be had (review S7 on #539).
     private func still(_ entry: ProjectGallery.Entry) -> some View {
-        let still = object.still(for: entry)
-        let file: URL? = if case .picture(let path) = still { object.projectFile(path) } else { nil }
-        return StageStill(still: still, file: file, version: object.updatedAtMs, label: entry.label,
+        let still = stageObject.still(for: entry)
+        let file: URL? = if case .picture(let path) = still { stageObject.projectFile(path) } else { nil }
+        return StageStill(still: still, file: file, version: stageObject.updatedAtMs, label: entry.label,
                           unavailableLine: entry.kind == .plate ? "No picture of this plate came with the file." : "This Mac couldn’t draw a picture of this.")
     }
 
