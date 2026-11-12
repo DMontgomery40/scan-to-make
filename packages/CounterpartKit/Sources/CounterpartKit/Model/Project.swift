@@ -643,9 +643,17 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
         /// done, failed, cancelled, not-started, replaced, sent
         public var endState: String?
         public var endedAt: String?
-        public init(phase: String, endState: String? = nil, endedAt: String? = nil, unreachableSince: String? = nil) {
+        /// The camera check (#630) said nothing was coming out of the nozzle, and `checkMessage` is the printer MCP's own
+        /// words for it: a later firmware "done" is only the printer's word, never a physical print.
+        public var checkSent: Bool?
+        public var checkMessage: String?
+        public init(phase: String, endState: String? = nil, endedAt: String? = nil, unreachableSince: String? = nil,
+                    checkSent: Bool? = nil, checkMessage: String? = nil) {
             self.phase = phase; self.endState = endState; self.endedAt = endedAt; self.unreachableSince = unreachableSince
+            self.checkSent = checkSent; self.checkMessage = checkMessage
         }
+        /// Ended "done" with nothing from the camera against it: a print that physically came out.
+        public var printedOut: Bool { endState == "done" && checkSent != true }
     }
 
     /// The last print.

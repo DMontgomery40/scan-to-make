@@ -65,6 +65,27 @@ final class DesignHistoryTests: XCTestCase {
         XCTAssertEqual(project.showingDesign(middle.id).state, .ready)
     }
 
+    /// Train 11-12b review (Codex P2): the camera check (#630) saw nothing coming out and the firmware then said done.
+    /// The earlier design is not "Printed · Did it fit?": its line keeps the MCP's warning, and it isn't in What you have.
+    func testAPrintTheCameraFlaggedIsNeverAPrintedDesign() throws {
+        var project = try versions()
+        let middle = project.versions![1]
+        let words = "Nothing is coming out of the nozzle."
+        project.prints = [.init(id: "flagged", versionId: middle.id, startedAtMs: 1793791652751, bundleId: "b",
+                                monitor: .init(phase: "ended", endState: "done", endedAt: "2026-11-07T22:00:00Z", checkSent: true, checkMessage: words))]
+        let history = DesignHistory(project)
+        XCTAssertNil(history.printedAt(middle))
+        XCTAssertFalse(history.have.contains { $0.id == middle.id })
+        XCTAssertEqual(history.printedLine(middle), "The printer says it finished · \(words)")
+        XCTAssertNotEqual(history.outcomeLine(middle), "Did it fit?")
+        // The companion's record decodes with its check fields.
+        let monitor = try JSONDecoder().decode(Project.PrintMonitor.self, from: Data(#"{"phase":"ended","endState":"done","checkSent":true,"checkMessage":"Nothing is coming out of the nozzle."}"#.utf8))
+        XCTAssertEqual(monitor.checkSent, true); XCTAssertEqual(monitor.checkMessage, words); XCTAssertFalse(monitor.printedOut)
+        // The same print without the flag is a print.
+        project.prints![0].monitor?.checkSent = nil
+        XCTAssertNotNil(DesignHistory(project).printedAt(middle))
+    }
+
     func testTheMacsWordsWinAndActivityNamesTheSealingPass() throws {
         var project = try versions()
         project.status = .init(phase: "ready", text: "New one ready · printed Nov 4", symbol: "checkmark.seal", tint: "accent")

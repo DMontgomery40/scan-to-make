@@ -14,7 +14,8 @@ public struct DesignHistory: Equatable, Sendable {
     public func attempts(_ version: Project.DesignVersion) -> [Project.PrintAttempt] { (project.prints ?? []).filter { $0.versionId == version.id } }
     public func printedAt(_ version: Project.DesignVersion) -> Double? {
         if let at = version.printedAtMs { return at }
-        return attempts(version).filter { $0.monitor?.endState == "done" }.map { attempt in
+        // A "done" the camera check had flagged (#630) is only the printer's word: not a print of this design.
+        return attempts(version).filter { $0.monitor?.printedOut == true }.map { attempt in
             attempt.monitor?.endedAt.flatMap(ISO.date)
                 .map { $0.timeIntervalSince1970 * 1000 } ?? attempt.startedAtMs
         }.max()
@@ -29,10 +30,14 @@ public struct DesignHistory: Equatable, Sendable {
             // Never "not printed" for a design that went to the printer: say what is known (#616, the hanger's Nov 4 design).
             let tries = attempts(version).count, unknown = unknownEnds(version)
             if unknown > 0 { return "Sent to the printer \(tries == 1 ? "once" : "\(tries) times") · how \(tries == 1 ? "it" : "they") ended wasn’t kept" }
+            // The printer said it finished after the camera saw nothing coming out: keep the MCP's warning (#630).
+            if let flagged = attempts(version).last(where: { $0.monitor?.endState == "done" && $0.monitor?.checkSent == true }) {
+                return ["The printer says it finished", flagged.monitor?.checkMessage].compactMap { $0 }.joined(separator: " · ")
+            }
             if tries > 0 { return "Not printed · \(tries == 1 ? "1 try" : "\(tries) tries") didn’t finish" }
             return "Not printed yet"
         }
-        let printer = attempts(version).last(where: { $0.monitor?.endState == "done" })?.destination?.name
+        let printer = attempts(version).last(where: { $0.monitor?.printedOut == true })?.destination?.name
         return ["Printed \(Self.date(at))", printer].compactMap { $0 }.joined(separator: " · ")
     }
     public func outcomeLine(_ version: Project.DesignVersion) -> String {
