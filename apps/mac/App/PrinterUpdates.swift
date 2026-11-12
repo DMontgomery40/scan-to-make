@@ -217,6 +217,9 @@ extension PrinterMcpPackage {
                                         available: available, upToDate: upToDate, usedBy: usedBy, uses: uses,
                                         moves: moves.map { ($0.mcpId, $0.title, $0.printers, $0.words, $0.reason) })
     }
+    /// #775: Update shows when a newer version is published, except while an update is under way; a finished one
+    /// earlier in this session (`.updated`, `.failed`) never hides the next.
+    func showsUpdate(status: McpUpdateStatus?) -> Bool { softwareRow.update != nil && status?.busy != true }
     /// The Update button's name outside its row (the rotor lists buttons alone).
     func updateLabel(failed: Bool) -> String {
         failed ? "Try updating \(label) again" : "Update \(label)" + ((available ?? latestVersion).map { " to " + $0 } ?? "")

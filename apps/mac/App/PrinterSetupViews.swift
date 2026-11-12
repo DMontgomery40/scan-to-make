@@ -84,8 +84,6 @@ struct McpPackageRow: View {
     @ObservedObject private var updates = PrinterUpdates.shared
 
     private var row: PrinterSoftwareRow { package.softwareRow }
-    /// A newer version is published and this view can update it.
-    var offersUpdate: Bool { update != nil && row.update != nil }
     private var busy: Bool { status?.busy == true }
 
     var body: some View {
@@ -97,8 +95,9 @@ struct McpPackageRow: View {
                     if let version = row.version { Text(version).font(.callout.monospacedDigit()).foregroundStyle(.secondary) }
                 }
                 if !package.installed { Text(package.description).font(.caption).foregroundStyle(.secondary) }
-                // While it updates, its progress in place of "available" and the button.
-                if let status { statusLine(status) }
+                // While it updates, its progress in place of "available" and the button. A finished update earlier in
+                // this session never hides the row's status or the next version's Update.
+                if let status, status.busy || row.status == nil { statusLine(status) }
                 else if let words = row.status {
                     HStack(alignment:.firstTextBaseline) {
                         switch words {
@@ -106,15 +105,15 @@ struct McpPackageRow: View {
                         case .available: Text(words.words).font(.caption.weight(.medium)).foregroundStyle(Color.filament)
                         }
                         Spacer(minLength:8)
-                        if offersUpdate, let update {
-                            Button("Update", action:update)
+                        if update != nil, package.showsUpdate(status:status), let update {
+                            Button(failed ? "Try Again" : "Update", action:update)
                                 .buttonStyle(.glassProminent).controlSize(.small)
-                                .accessibilityLabel(package.updateLabel(failed:false))
+                                .accessibilityLabel(package.updateLabel(failed:failed))
                                 .help("Installs \(package.available ?? "the latest version") for Counterpart. Other copies on this Mac are left as they are.")
                         }
                     }
+                    if failed, let status { statusLine(status) }
                 }
-                if failed, offersUpdate, let update { Button("Try Again", action:update).controlSize(.small).accessibilityLabel(package.updateLabel(failed:true)) }
                 if package.installed { Text(row.usedBy).font(.caption).foregroundStyle(.secondary) }
                 ForEach(row.others, id:\.mcpId) { other in
                     VStack(alignment:.leading, spacing:4) {

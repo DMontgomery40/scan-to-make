@@ -68,6 +68,13 @@ import struct CounterpartKit.PrinterSoftwareRow
         let update = try software("update")
         XCTAssertEqual(update[0].softwareRow.status, .available("1.1.95"))
         XCTAssertEqual(update[0].softwareRow.update, update[0].appMcpId)
+        // While it updates, its progress stands in place of the button; a finished update never hides the next.
+        XCTAssertTrue(update[0].showsUpdate(status: nil))
+        XCTAssertFalse(update[0].showsUpdate(status: .updating(from: "1.1.94", to: "1.1.95")))
+        XCTAssertFalse(update[0].showsUpdate(status: .waiting))
+        XCTAssertTrue(update[0].showsUpdate(status: .updated(version: "1.1.94")), "an earlier update this session")
+        XCTAssertTrue(update[0].showsUpdate(status: .failed(log: nil)), "Try Again")
+        XCTAssertFalse(try software("current")[0].showsUpdate(status: nil), "nothing newer")
         let own = try software("own-copy")[0].softwareRow
         XCTAssertEqual(own.others.map(\.words), ["P1S runs your own copy (1.1.80)"])
         XCTAssertEqual(own.others.first?.footnote, "Runs from a folder you manage, so Counterpart doesn't update it by itself. Your own copy is left as it is.")
