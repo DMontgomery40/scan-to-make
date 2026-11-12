@@ -212,7 +212,7 @@ public enum PhoneNotificationMigration {
         let groups: [String: [String]] = [
             "ready": ["pass.ready"], "ask": ["pass.ask"], "confirm": ["print.confirm"],
             "live": ["live-activity"], "first": ["print.first-layer"], "paused": ["print.paused"],
-            "done": ["print.done"], "problem": ["pass.failed", "print.failed", "print.not-started", "print.check"],
+            "done": ["print.done"], "problem": ["pass.failed", "print.failed", "print.not-started"],
             "lost": ["print.unreachable"],
         ]
         let saved = notifications.devices[deviceId] ?? [:]
