@@ -179,6 +179,38 @@ test('a new design of a printed thing is announced as new, and the printed one a
   assert.equal(eventWords('pass.ready', undefined, {title: 'Hook'}).title, 'Hook is ready to print');
 });
 
+// Train 11-12b review (Codex P2): a done the camera check (#630) had flagged is only the printer's word. Neither the
+// list line nor the changes line calls that design printed; a real print, or a Printed set by hand, still is.
+test('a print the camera flagged is not "printed" in the project\'s lines; one marked Printed by hand is', async () => {
+  const {objectStatus} = await import('../dist/events/words.js');
+  const v1 = {id: 'v1', sealedAtMs: 1000, result: {model: 'a.stl', renders: []}}, v2 = {id: 'v2', sealedAtMs: 2000, result: {model: 'b.stl', renders: []}};
+  const flagged = {id: 'p1', printId: 'p1', bundleId: 'b1', startedAtMs: 1500, versionId: 'v1',
+    monitor: {phase: 'ended', endState: 'done', endedAt: '2026-11-12T08:00:00.000Z', checkSent: true, checkMessage: 'Nothing is coming out of the nozzle.'}};
+  const base = {id: 'x', title: 'Hook', photos: [], passes: [], createdAtMs: 1, updatedAtMs: 3000, versions: [v1, v2], prints: [flagged]};
+  assert.doesNotMatch(objectStatus({...base, state: 'ready'}).text, /printed/);
+  assert.doesNotMatch(objectStatus({...base, state: 'touching-up'}).text, /on your desk/);
+  const real = {...flagged, monitor: {...flagged.monitor, checkSent: undefined, checkMessage: undefined}};
+  assert.match(objectStatus({...base, state: 'ready', prints: [real]}).text, /^New one ready · printed /);
+  assert.match(objectStatus({...base, state: 'touching-up', prints: [real]}).text, /on your desk is unchanged/);
+  assert.match(objectStatus({...base, state: 'ready', versions: [{...v1, printedAtMs: 1500}, v2]}).text, /^New one ready · printed /);
+});
+
+test('migration keeps a Printed set by hand on the newest design, with no print attempt made up (train 11-12b review)', async () => {
+  const root = await tempDir('versions-hand-printed-'); const dir = join(root, 'p');
+  const out = join(dir, 'passes', 'pass-0', 'out'); await mkdir(out, {recursive: true});
+  await writeFile(join(out, 'touched.stl'), STL(1)); await writeFile(join(out, 'front.png'), 'render');
+  await mkdir(join(dir, 'current'), {recursive: true}); await writeFile(join(dir, 'current', 'model.stl'), STL(1));
+  const object = {id: 'p', state: 'printed', photos: [], createdAtMs: 1, updatedAtMs: 7000, current: {model: 'current/model.stl', renders: []},
+    passes: [{startedAtMs: 1000, endedAtMs: 1100, status: 'done', dir: join(out, '..'), summary: 'Design 1'}]};
+  const migrated = await migrateProjectVersions(object, dir, {stlInfo: async () => [10, 20, 30]});
+  assert.equal(migrated.versions.length, 1);
+  assert.equal(migrated.versions[0].printedAtMs, 7000);
+  assert.deepEqual(migrated.prints, []);
+  // Not printed and not marked: nothing is set.
+  const ready = await migrateProjectVersions({...object, state: 'ready'}, dir, {stlInfo: async () => [10, 20, 30]});
+  assert.equal(ready.versions[0].printedAtMs, undefined);
+});
+
 // ---- #602 review (Muse, 2026-11-12): first-start migration on real data ----
 
 /** A designed project on disk as an older build left it: `designs` finished passes, each with its own model and render. */
