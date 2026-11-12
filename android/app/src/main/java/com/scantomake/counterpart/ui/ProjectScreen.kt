@@ -214,7 +214,8 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
         val shownWords = if (version == null) words else ProjectWords(shown)
         /** Free for the project's own actions: idle, and the newest design on the stage. */
         val acts = idle && version == null
-        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        val scroll = rememberScrollState()
+        Column(Modifier.weight(1f).verticalScroll(scroll).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             // The project's pictures (PRD §5.4): what will print in its spool, the two together, what was scanned. The
             // computer draws each once; a row of labels under the stage chooses one (none for one, a scrolling row for many).
             val gallery = remember(shown) { ProjectGallery.of(shown) }
@@ -422,7 +423,8 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
             problem?.let { Text(it, color = Palette.failed) }
 
             // Earlier designs and prints (#616 slice 1): what you have, and what was never printed. Two or more designs only.
-            DesignHistorySection(project, enabled = idle, select = { viewingDesign = it }, answer = { versionId, status ->
+            // Opening one goes back up to the stage it is shown on, with its bar under it.
+            DesignHistorySection(project, enabled = idle, select = { viewingDesign = it; scope.launch { scroll.animateScrollTo(0) } }, answer = { versionId, status ->
                 run("design") { app.companion.setStatus(id, status, versionId = versionId)?.let(state::show) ?: state.reload(id) }
             })
 

@@ -277,7 +277,7 @@ class HomeLayoutTests {
         // Opened: its own picture on the stage, the bar, and the project's actions wait for the newest.
         compose.onNodeWithTag("design-$first").performScrollTo().performClick()
         compose.onNodeWithTag("viewing-earlier-design").performScrollTo().assertExists()
-            .assertTextContains("Earlier design · Printed Nov", substring = true)
+        compose.onNodeWithText("Earlier design · Printed Nov", substring = true).assertExists()
         compose.onNodeWithTag("print").performScrollTo().assertIsNotEnabled()
         compose.waitUntil(5_000) { fake.paths.any { it.endsWith("/versions/$first/renders/front.png") } }
         compose.onNodeWithContentDescription("More").performClick()
@@ -316,8 +316,9 @@ class HomeLayoutTests {
         compose.onNodeWithText("Which case is on the phone?").assertExists()
         compose.onNodeWithText("Made a holder for that case.").assertExists()
         // Its own request comes after the conversation it was made from.
-        val from = compose.onNodeWithTag("inherited-from").fetchSemanticsNode().positionInRoot.y
+        // Both read at one scroll position.
         val asked = compose.onNodeWithText("You asked").performScrollTo().fetchSemanticsNode().positionInRoot.y
+        val from = compose.onNodeWithTag("inherited-from").fetchSemanticsNode().positionInRoot.y
         assertTrue("the source's words come first: $from < $asked", from < asked)
         compose.onNodeWithText("Add a swivel.").assertExists()
         compose.onNodeWithTag("inherited-from").performScrollTo().performClick()

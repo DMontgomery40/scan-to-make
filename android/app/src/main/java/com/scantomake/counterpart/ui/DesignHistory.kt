@@ -85,12 +85,13 @@ fun DesignHistorySection(project: Project, enabled: Boolean, select: (String) ->
 /** The bar over an earlier design shown on the stage: which one, and the way back to the newest. */
 @Composable
 fun ViewingEarlierDesignBar(project: Project, version: DesignVersion, showNewest: () -> Unit) {
-    Row(Modifier.fillMaxWidth().testTag("viewing-earlier-design"), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Text("Earlier design · ${DesignHistory(project).printedLine(version)}", color = Palette.secondary, fontSize = 12.sp)
-            Text(version.label, fontSize = 15.sp)
+    // The caption gets the full width (a printer's name makes it long on a phone); the way back sits beside the design.
+    Column(Modifier.fillMaxWidth().testTag("viewing-earlier-design")) {
+        Text("Earlier design · ${DesignHistory(project).printedLine(version)}", color = Palette.secondary, fontSize = 12.sp)
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(version.label, Modifier.weight(1f), fontSize = 15.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            TextButton(showNewest, Modifier.testTag("show-newest")) { Text("Show the Newest") }
         }
-        TextButton(showNewest, Modifier.testTag("show-newest")) { Text("Show the Newest") }
     }
 }
 
