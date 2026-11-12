@@ -79,4 +79,17 @@ class ProjectGalleryTests {
         assertEquals("renders/overview.png", project(""","current":{"model":"current/model.stl","renders":["current/renders/overview.png"]}""").picturePath())
         assertEquals("pictures/part-1.png", project(""","picture":"pictures/part-1.png","current":{"model":"current/model.stl","renders":["current/renders/overview.png"]}""").picturePath())
     }
+
+    /** #748 (review of #741, P2): a picture the phone keeps is decoding, not coming from the computer: the bare stage, no
+     *  spinner and no "coming" line, as the iPhone's `.decoding`. A picture it doesn't keep is still loading. */
+    @Test fun aKeptPictureDecodesOnABareStageAndNeverSaysItIsComing() {
+        val picture = Still.Picture("pictures/part.png")
+        assertEquals(com.scantomake.counterpart.ui.StageShows.Decoding, com.scantomake.counterpart.ui.stageShows(picture, hasImage = false, failed = false, libraryHas = true))
+        assertEquals(com.scantomake.counterpart.ui.StageShows.Loading, com.scantomake.counterpart.ui.stageShows(picture, hasImage = false, failed = false, libraryHas = false))
+        assertEquals(com.scantomake.counterpart.ui.StageShows.Shown, com.scantomake.counterpart.ui.stageShows(picture, hasImage = true, failed = false, libraryHas = true))
+        assertEquals(com.scantomake.counterpart.ui.StageShows.NotAvailable, com.scantomake.counterpart.ui.stageShows(picture, hasImage = false, failed = true, libraryHas = true))
+        assertEquals(com.scantomake.counterpart.ui.StageShows.Loading, com.scantomake.counterpart.ui.stageShows(Still.Waiting, hasImage = false, failed = false, libraryHas = false))
+        assertEquals(com.scantomake.counterpart.ui.StageShows.NotAvailable, com.scantomake.counterpart.ui.stageShows(Still.NotAvailable, hasImage = false, failed = false, libraryHas = true))
+        assertEquals("loading", com.scantomake.counterpart.ui.StageShows.Decoding.description)
+    }
 }
