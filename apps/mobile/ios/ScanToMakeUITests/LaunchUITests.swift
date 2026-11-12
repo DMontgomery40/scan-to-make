@@ -662,8 +662,9 @@ final class LayoutParityUITests: XCTestCase {
         XCTAssertTrue(status.waitForExistence(timeout: 5))
         XCTAssertFalse(status.isEnabled, "the project's status waits until the newest design is shown again")
         let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Earlier design — the newest's status waits"; shot.lifetime = .keepAlways; add(shot)
-        // Close the menu without choosing anything.
-        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)).tap()
+        // Close the menu without choosing anything: a tap left of it, on the page's plain text. On an iPhone the top 8% is
+        // the status bar, where a tap doesn't dismiss a menu (train 12c).
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.08, dy: 0.37)).tap()
         XCTAssertTrue(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: status)], timeout: 5) == .completed)
         let newest = app.buttons["Show the newest"]
         scrollProjectPage(app, until: newest)
