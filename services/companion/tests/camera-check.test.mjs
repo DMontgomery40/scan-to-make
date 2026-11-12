@@ -82,8 +82,8 @@ function scriptedJudge(answers) {
 }
 // Opus 5.5's own answers on these two frames with this prompt (Nov 12 calibration run, PR description).
 const EMPTY_PLATE = {seen: 'The dark, textured plate is in view across the middle and looks bare: only scratches and sparkle, no lines, filled areas or raised parts.',
-  visibility: 'clear', footprint_visible: true, deposition: 'absent'};
-const PLASTIC = {seen: 'Grey printed parts stand on the plate in the middle of the picture.', visibility: 'clear', footprint_visible: true, deposition: 'present'};
+  visibility: 'clear', footprintVisible: true, deposition: 'absent'};
+const PLASTIC = {seen: 'Grey printed parts stand on the plate in the middle of the picture.', visibility: 'clear', footprintVisible: true, deposition: 'present'};
 
 test('the empty-plate first-layer frame from print faf29c4d is judged and submitted bound to its job, artifact and image hashes', async () => {
   const frame = savedFrame(EMPTY);
@@ -114,8 +114,8 @@ test('a normal printing frame is submitted as plastic present, and the MCP verdi
 });
 
 test('uncertain stays unknown: a dark, occluded, out-of-view or unlocatable footprint is never submitted as absent or present', async () => {
-  for (const answer of [{visibility: 'dark', footprint_visible: true, deposition: 'absent'}, {visibility: 'occluded', footprint_visible: true, deposition: 'present'},
-    {visibility: 'out_of_view', footprint_visible: false, deposition: 'absent'}, {visibility: 'clear', footprint_visible: false, deposition: 'absent'}]) {
+  for (const answer of [{visibility: 'dark', footprintVisible: true, deposition: 'absent'}, {visibility: 'occluded', footprintVisible: true, deposition: 'present'},
+    {visibility: 'out_of_view', footprintVisible: false, deposition: 'absent'}, {visibility: 'clear', footprintVisible: false, deposition: 'absent'}]) {
     const frame = savedFrame(EMPTY);
     const mcp = fakeMcp({frames: [frame]});
     const outcome = await checkPrintFrame(mcp.session, assessmentFor(frame), scriptedJudge({[sha(EMPTY)]: answer}).judge, new AbortController().signal);
@@ -123,14 +123,14 @@ test('uncertain stays unknown: a dark, occluded, out-of-view or unlocatable foot
     assert.equal(mcp.observations[0].visibility, answer.visibility);
     assert.equal(outcome.physical.status, 'unknown');
   }
-  assert.equal(visionAnswer({visibility: 'clear', footprint_visible: true, deposition: 'maybe'}), undefined);
+  assert.equal(visionAnswer({visibility: 'clear', footprintVisible: true, deposition: 'maybe'}), undefined);
   assert.equal(visionAnswer(undefined), undefined);
 });
 
 test('an empty-plate reference from before printing goes with the frame, and its own visibility is passed on', async () => {
   const baseline = savedFrame(EMPTY, {role: 'baseline', layer: 0}), frame = savedFrame(EMPTY);
   const mcp = fakeMcp({frames: [baseline, frame]});
-  const {judge, seen} = scriptedJudge({[sha(EMPTY)]: {...EMPTY_PLATE, reference_visibility: 'out_of_view', reference_empty: true}});
+  const {judge, seen} = scriptedJudge({[sha(EMPTY)]: {...EMPTY_PLATE, referenceVisibility: 'out_of_view', referenceEmpty: true}});
   await checkPrintFrame(mcp.session, assessmentFor(frame, [baseline]), judge, new AbortController().signal);
   assert.deepEqual(mcp.calls[0].args.frame_ids, [frame.id, baseline.id]);
   assert.equal(seen[0].referenceFile, true);
@@ -153,9 +153,21 @@ test('nothing is judged or submitted without a frame whose bytes match its saved
   const old = fakeMcp({frames: [stale], tools: []});
   assert.equal(await checkPrintFrame(old.session, assessmentFor(stale), never, new AbortController().signal), undefined, 'an MCP without counterpart_print_record');
   for (const mcp of [a, b, c]) assert.equal(mcp.observations.length, 0);
-  const unanswered = fakeMcp({frames: [stale]});
-  assert.equal(await checkPrintFrame(unanswered.session, assessmentFor(stale), async () => ({nonsense: true}), new AbortController().signal), undefined);
-  assert.equal(unanswered.observations.length, 0, 'no usable answer, nothing submitted');
+});
+
+test('a model that gives no usable answer is submitted as unknown, so the MCP can ask about its later checkpoints; a stopped check says nothing', async () => {
+  for (const judge of [async () => ({nonsense: true}), async () => { throw new Error('worker timed out'); }]) {
+    const frame = savedFrame(EMPTY);
+    const mcp = fakeMcp({frames: [frame]});
+    const outcome = await checkPrintFrame(mcp.session, assessmentFor(frame), judge, new AbortController().signal);
+    assert.deepEqual([mcp.observations[0].visibility, mcp.observations[0].footprint_visible, mcp.observations[0].deposition], ['unknown', false, 'unknown']);
+    assert.equal(outcome.deposition, 'unknown');
+  }
+  const frame = savedFrame(EMPTY);
+  const mcp = fakeMcp({frames: [frame]});
+  const controller = new AbortController();
+  await assert.rejects(checkPrintFrame(mcp.session, assessmentFor(frame), async () => { controller.abort(); return undefined; }, controller.signal));
+  assert.equal(mcp.observations.length, 0);
 });
 
 test("the vision worker is the person's Claude login with the Read tool only: no printer MCP, no other tools", async () => {
@@ -275,7 +287,35 @@ test('with no camera check (AI off, or an MCP without the contract) there is no 
   for (let i = 0; i < 3; i++) await h.step();
   assert.equal(h.types().includes('print.first-layer'), false);
   assert.equal(h.types().includes('print.check'), false);
-  assert.equal(h.mcp.observations.length, 0, 'an unanswered check submits nothing');
+  assert.deepEqual(h.mcp.observations.map(o => o.deposition), ['unknown'], 'a check with no answer says unknown, once');
+});
+
+test('P0 replay, the calibrated case: the first layer is unclear, the ten-layer checkpoint shows the plate still empty, and that is the check', async () => {
+  const first = savedFrame(EMPTY), later = savedFrame(EMPTY, {role: 'periodic', layer: 11, expectedHeightMm: 2.2});
+  // Opus 5.5 on this frame at layer 1: unknown twice in three runs; at layer 11: absent every time.
+  const now = mcp => {
+    const verdict = mcp.verdict();
+    const observed = new Set(mcp.observations.map(o => o.frame_id));
+    const pending = [first, ...(mcp.observations.length ? [later] : [])].find(f => !observed.has(f.id));
+    return {physical: {...verdict, ...(pending ? {assessment: {...assessmentFor(pending), layer: pending.layer, expectedHeightMm: pending.expectedHeightMm}} : {})},
+      problems: verdict.status === 'suspect_no_extrusion' ? [{code: 'physical-no-extrusion', severity: 'error', message: 'Possible extrusion failure.'}] : []};
+  };
+  const judge = async ({prompt}) => /layer 1,/.test(prompt) ? {seen: 'A darker area might be a dark first layer.', visibility: 'clear', footprintVisible: true, deposition: 'unknown'} : EMPTY_PLATE;
+  const clock = {t: T0, now() { return this.t; }, async sleep(ms) { this.t += ms; }};
+  const mcp = fakeMcp({frames: [first, later]});
+  const events = [], kept = new Map();
+  const reports = [m => running(1, now(m)), m => running(11, now(m)), m => running(12, now(m)), m => running(13, now(m))];
+  const monitor = new PrintMonitorRunner({projectId: randomUUID(), printId: randomUUID(), destinationId: 'current', printerName: 'Bambu Lab P1S', jobName: JOB, dispatchedAtMs: T0}, {
+    clock, read: async () => ({observedAt: new Date(clock.t).toISOString(), problems: [], source: 'counterpart', ...reports.shift()(mcp)}), milestones: () => [],
+    keepFrame: async (id, jpeg) => { kept.set(id, jpeg); return `prints/x/frames/${id}.jpg`; }, check: (a, s) => checkPrintFrame(mcp.session, a, judge, s),
+    save: async () => {}, end: async () => {}, emit: async draft => { events.push(draft); }});
+  const signal = new AbortController().signal;
+  for (let i = 0; i < 4; i++) { await monitor.step(signal); await monitor.checked(); clock.t += 10_000; }
+  assert.deepEqual(mcp.observations.map(o => [o.frame_id, o.deposition]), [[first.id, 'unknown'], [later.id, 'absent']]);
+  const check = events.filter(e => e.type === 'print.check');
+  assert.equal(check.length, 1);
+  assert.match(check[0].data.problems[0].message, /the print's area is empty in the camera/);
+  assert.equal(events.some(e => e.type === 'print.first-layer'), false);
 });
 
 test("an MCP's verdict from another client's observation still raises the check once, without a frame of its own", async () => {
