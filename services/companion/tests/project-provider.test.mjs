@@ -67,6 +67,32 @@ test('Codex uses its own login and only the pass MCP; cancellation reaps the wor
  assert.deepEqual((await runProjectModel({...request(root),timeoutMs:40},{access:{kind:'codex-cli'},codexPath:cli,env:{HOME:root}})).limit,{kind:'absolute',value:40});
 });
 
+test('a pass offers only its own engine\'s tools whichever worker runs it: Codex and API workers drop what the pass blocks, as Claude Code does (#609)',async t=>{
+ // A Blender pass's request, as buildTouchupInvocation writes it: the printer MCP also lists the code engine's and Fusion's tools.
+ const root=await fixture(t),req=request(root);
+ req.args.splice(req.args.length-1,0,'--disallowedTools','mcp__printer__cad_*,mcp__printer__fusion_mcp_*');
+ req.mcpConfig.mcpServers.printer.env.EXTRA_TOOLS='cad_status,cad_setup,cad_run,fusion_mcp_call,blender_mcp_call';
+ // API and endpoint: the model is never offered a blocked tool.
+ const offered=[];
+ const url=await server(t,async(q,res)=>{let text='';for await(const chunk of q)text+=chunk;offered.push(JSON.parse(text).tools.map(tool=>tool.function.name));res.setHeader('content-type','application/json');
+  res.end(JSON.stringify({choices:[{message:{role:'assistant',content:null,tool_calls:[{id:'finish',type:'function',function:{name:'finish',arguments:JSON.stringify({status:'done',summary:'ok'})}}]}}]}));});
+ const api=await runProjectModel(req,{access:{kind:'endpoint',url,model:'tools'},env:{HOME:root,PATH:process.env.PATH}});
+ assert.equal(api.resultEvent.structured_output.summary,'ok');
+ assert.deepEqual(offered[0].filter(name=>name.startsWith('mcp_')).sort(),['mcp_printer_blender_mcp_call','mcp_printer_design_view','mcp_printer_slice_stl']);
+ // Codex: the blocked tools are that server's disabled_tools in the config it reads.
+ await mkdir(join(root,'.codex'));await writeFile(join(root,'.codex','auth.json'),'login-fixture');
+ const cli=join(root,'codex'),receipt=join(root,'codex.json');
+ await writeFile(cli,`#!${process.execPath}\nconst fs=require('node:fs');const args=process.argv.slice(2);fs.writeFileSync(${JSON.stringify(receipt)},fs.readFileSync(process.env.CODEX_HOME+'/config.toml','utf8'));fs.writeFileSync(args[args.indexOf('-o')+1],JSON.stringify({status:'done',summary:'Codex fixture'}));`,{mode:0o700});
+ const codex=await runProjectModel(req,{access:{kind:'codex-cli'},codexPath:cli,env:{HOME:root}});
+ assert.equal(codex.resultEvent.structured_output.summary,'Codex fixture');
+ const config=await readFile(receipt,'utf8');
+ const printer=config.slice(config.indexOf('[mcp_servers."printer"]')).split('\n[')[0];
+ assert.match(printer,/^disabled_tools = \["cad_status","cad_setup","cad_run","fusion_mcp_call"\]$/m,config);
+ // A request that blocks nothing is unchanged.
+ await runProjectModel(request(root),{access:{kind:'codex-cli'},codexPath:cli,env:{HOME:root}});
+ assert.doesNotMatch(await readFile(receipt,'utf8'),/disabled_tools/);
+});
+
 test('provider-supplied key echoes are redacted from final results',async t=>{
  const root=await fixture(t),url=await server(t,(_q,res)=>res.end(JSON.stringify({choices:[{message:{role:'assistant',tool_calls:[{id:'f',type:'function',function:{name:'finish',arguments:JSON.stringify({status:'failed',summary:'private-key'})}}]}}]})));
  const req=request(root);req.mcpConfig={mcpServers:{}};

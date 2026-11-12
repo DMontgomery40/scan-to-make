@@ -1109,9 +1109,14 @@ Every pass reads `cad_status` with the same 30 s deadline as Settings (`CAD_STAT
 
 **What a code pass gets** (`touchup/invocation.ts`):
 - The printer MCP exactly as configured, plus this project's passes folder in its `CAD_OUTPUT_DIRS` (any roots the person set are kept). The engine writes runs, and reads scripts and inputs, only there.
-- **Only its own engine's tools.** The rules' first line names the pass's engine.
+- **Only its own engine's tools, whichever worker runs it.** The rules' first line names the pass's engine.
   - A code pass's worker runs without the printer MCP's `blender_mcp_*` and `fusion_mcp_*` tools.
-  - A Blender, Fusion or locate pass runs without `cad_*` (`--disallowedTools`, checked against Claude Code 2.1.322).
+  - A Blender or Blender-locate pass runs without `cad_*` and `fusion_mcp_*`. Fusion's tools there would be unbound and run without the Fusion lock.
+  - A Fusion pass runs without `cad_*` and `blender_mcp_*`.
+  - One list per engine (`OTHER_ENGINES_TOOLS` in `touchup/invocation.ts`) travels in the request's `--disallowedTools`, and every worker applies it:
+    - Claude Code reads the flag itself (checked against 2.1.322).
+    - A Codex worker gets the matching names as that server's `disabled_tools`.
+    - An API or endpoint worker never offers them to the model (`toolBlocked`).
   - Why (#609, Nov 11): a Blender pass ran `cad_setup` twice and about twenty `cad_run` calls hunting for a folder the engine would write to. Only a code pass has one.
 - The shared core rules with the code engine's lines (give every `cad_run` the pass's design folder; after each fix, mark the selected whole-model run `final`, so its receipt (`cad-result.json`) selects the model, and never a run that measures the scan or makes one colour's part), the sections the pass needs (a fit: the new design section, and the fit-size section in its fixed order: measurements first; when there is a scan, the ask on any disagreement before fit-critical geometry; each interface sized from the measurements with a fit chosen by its function, reported per interface; and, for the code engine, the `cad_check_fit` result reported in the changes; a copy: the captured-object section from #430 without its Blender line), then the MCP's own `cad_design`, `fdm_design` and `fdm_slicing` prompts as served. How to prepare the fit-check reference, and that a fit check never rescales the scan or resizes a measured interface, are the MCP's `cad_design` prompt's words, not the app's. How a script looks, its libraries, how a scan is prepared and how a run is checked are the MCP's to say; the app names none. A code pass doesn't start without `cad_design`.
 - A capture (USDZ) as the companion's own converter makes it (`capture-converter.ts`, `tools/capture-mesh-convert`): the mesh, its material and texture files, and its frame from the conversion report ("the capture converted without changes: 1 unit is 1 metre and +Y is up"). With the MCP's preparation, which needs the units and the object's up axis declared, this is how a cleaned scan comes out in millimetres, Z up, in the orientation the object is used (the cleanup prototype's potato came out on its side). A current-model STL is named as millimetres, Z up.
