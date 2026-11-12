@@ -163,3 +163,24 @@ enum ColourName {
                                < ($1.1 - r) * ($1.1 - r) + ($1.2 - g) * ($1.2 - g) + ($1.3 - b) * ($1.3 - b) }?.0
     }
 }
+
+/// Work a view starts from `body` when a value it draws changes, not only from `.task(id:)` or `.onAppear` (#769).
+/// On David's iPhone a project page pushed from Home can show an instance that SwiftUI has already sent `onDisappear`
+/// (its stage logs `stage.appear` and `stage.disappear` in the same millisecond). That instance's `body` still follows
+/// the store: the model URL reaches it, and Explore in 3D's live view loaded the 131,028-triangle model. But no `.task`
+/// of its runs again: no `stage.begin`, no still, no size, no second `page.model-published`. Kept in `@State`, not
+/// observed, so remembering a key never redraws anything.
+@MainActor final class BodyKick {
+    private var last: String?
+    /// True once for each new `key` (the caller records or starts its work then); false for the key it last saw.
+    func claim(_ key: String) -> Bool {
+        guard key != last else { return false }
+        last = key
+        return true
+    }
+    /// Runs `action` on the next main-actor turn, never inside `body`, when `key` is new to this view.
+    func on(_ key: String, _ action: @escaping @MainActor () -> Void) {
+        guard claim(key) else { return }
+        Task { @MainActor in action() }
+    }
+}

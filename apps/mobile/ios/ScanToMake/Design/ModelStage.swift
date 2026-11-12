@@ -30,6 +30,8 @@ struct ModelStage: View {
     var undrawable: (() -> Void)? = nil
     /// Lets a gallery clear a previous failure after a retry succeeds.
     var drawn: (() -> Void)? = nil
+    /// The view that owns this stage in the media trace (the gallery's own tag), so `stage.url` says whose URL it drew.
+    var traceOwner: String? = nil
 
     @State private var holder = PivotHolder()
     @State private var turn: CGSize = .zero
@@ -53,10 +55,20 @@ struct ModelStage: View {
     /// This stage's own tag in the media trace (which instance began, published, appeared).
     @State private var instance = String(UUID().uuidString.prefix(8))
     @State private var loadJob: Task<Void, Never>?
+    /// The load starts from `body` when the model changes, not only from `.task` (#769, `BodyKick`).
+    @State private var starts = BodyKick()
+    @State private var urlTrace = BodyKick()
 
     private var identity: String { "\(url?.absoluteString ?? "empty")#\(tint?.description ?? "default")#\(twoTone)#\(yaw)#\(pitch)#\(fit)#\(object?.absoluteString ?? "")#\(seats.count)" }
+    /// One load per model, scene and Try Again.
+    private var startKey: String { "\(identity)#\(scenePhase)#\(retryGeneration)" }
+    private func tag(_ identity: String) -> String { String(String(UInt(bitPattern: identity.hashValue), radix: 16).prefix(8)) }
 
     var body: some View {
+        // #769: an instance SwiftUI has already sent `onDisappear` still draws, but runs no `.task`; on David's phone the
+        // model reached such a stage and it never began (no still, no size). `body` starts the load as well, once per key.
+        let _ = traceURL()
+        let _ = starts.on(startKey) { [self] in start() }
         ZStack {
             if let backdrop { backdrop } else { StageBackground() }
             Color.clear.allowsHitTesting(false)
@@ -94,50 +106,7 @@ struct ModelStage: View {
                 guard interactive && scenePhase == .active else { return }
                 settledZoom = zoom; touch()
             }, isEnabled: interactive)
-        .task(id: "\(identity)#\(scenePhase)#\(retryGeneration)") {
-            guard scenePhase == .active else { return }
-            let wanted = identity
-            wantedIdentity = wanted
-            live = false; failed = false; meshReady = false
-            if posterIdentity != identity { poster = nil }
-            // The still this phone already drew of this model: on the stage at once on a revisit (#720).
-            if poster == nil, let hit = ModelPoster.cached(key: wanted, yaw: yaw, pitch: pitch, fit: fit) {
-                poster = hit; posterIdentity = wanted; MediaTrace.record("poster.hit", ["at": "stage-start"])
-            }
-            turn = .zero; settled = .zero; zoom = 1; settledZoom = 1
-            guard let url, scenePhase == .active else { return }
-            // The load belongs to the stage, not to this task. A page pushed onto a NavigationStack can have its tasks
-            // cancelled as it appears and not run again: #720, the iPhone's revisited model sat at "loading" (trace:
-            // stage.begin, then mesh.cancelled and stage.cancelled 20 ms later, nothing after). It runs to the end and
-            // publishes while this stage still wants the same model; a newer model's load replaces it.
-            loadJob?.cancel()
-            let (tint, twoTone, object, seats, yaw, pitch, fit, interactive, hasPlaceholder) = (self.tint, self.twoTone, self.object, self.seats, self.yaw, self.pitch, self.fit, self.interactive, self.placeholder != nil)
-            let stillWanted = { [self] in wantedIdentity == wanted }
-            let job = Task { @MainActor in
-                await MediaTrace.$context.withValue(MediaTrace.Context(file: url, scene: "active")) {
-                    MediaTrace.record("stage.begin", ["scene": "active", "stage": instance, "identity": String(String(UInt(bitPattern: wanted.hashValue), radix: 16).prefix(8))])
-                    defer { MediaTrace.record(stillWanted() ? "stage.end" : "stage.superseded", ["scene": "active"]) }
-                    let loaded = await Self.load(url, tint: tint, twoTone: twoTone, object: object, seats: seats)
-                    guard stillWanted() else { return }
-                    guard let entity = loaded else { failed = true; undrawable?(); return }
-                    meshReady = true
-                    let e = entity.visualBounds(relativeTo: nil).extents
-                    measured?([Double(e.x), Double(e.z), Double(e.y)].map { ($0 * 10_000).rounded() / 10 })
-                    var image = await ModelPoster.image(key: wanted, model: entity, yaw: yaw, pitch: pitch, fit: fit)
-                    #if DEBUG
-                    // `-CounterpartFailPoster YES` (UI tests, #606): the off-screen still fails, as it can on a phone.
-                    if UserDefaults.standard.bool(forKey: "CounterpartFailPoster") { image = nil }
-                    #endif
-                    guard stillWanted() else { return }
-                    if let image { poster = image; posterIdentity = wanted; drawn?() }
-                    // The model loaded, so it turns live; the Mac's picture stays until then (#606). Only a stage with no other
-                    // picture that never turns (the starters') says it couldn't be shown.
-                    if image == nil, !hasPlaceholder, !interactive { failed = true; undrawable?() }
-                    MediaTrace.record("stage.published", ["picture": String(image != nil), "stage": instance])
-                }
-            }
-            loadJob = job
-        }
+        .task(id: startKey) { if starts.claim(startKey) { start() } }
         .task(id: lastTouch) {
             guard live else { return }
             do { try await Task.sleep(for: .seconds(Self.idle)) } catch { return }
@@ -145,8 +114,64 @@ struct ModelStage: View {
         }
         .onChange(of: scenePhase) { _, phase in if phase != .active { live = false; holder.pivot = nil; loadJob?.cancel(); wantedIdentity = nil; Self.cache.removeAll(); ModelPoster.deferPending() } }
         .onDisappear { live = false; holder.pivot = nil; MediaTrace.record("stage.disappear", ["stage": instance]) }
-        .onAppear { MediaTrace.record("stage.appear", ["stage": instance, "identity": String(String(UInt(bitPattern: identity.hashValue), radix: 16).prefix(8)), "url": String(url != nil)]) }
+        .onAppear { MediaTrace.record("stage.appear", ["stage": instance, "identity": tag(identity), "url": String(url != nil)]) }
         .accessibilityElement(children: .contain)
+    }
+
+    /// `stage.url`, from `body` (#769): which stage drew which model, whether its load is running, for whom. Logged when
+    /// its model changes, so a stage whose `.task` never runs still says what it had.
+    private func traceURL() {
+        guard urlTrace.claim("\(url != nil)#\(identity)") else { return }
+        var fields = ["stage": instance, "identity": tag(identity), "url": String(url != nil), "job": String(loadJob != nil),
+                      "wanted": String(wantedIdentity == identity)]
+        if let traceOwner { fields["gallery"] = traceOwner }
+        MediaTrace.record("stage.url", fields)
+    }
+
+    /// Loads the model and draws its still. Called from `body` and from `.task`, once per `startKey` (`BodyKick`).
+    private func start() {
+        guard scenePhase == .active else { return }
+        let wanted = identity
+        wantedIdentity = wanted
+        live = false; failed = false; meshReady = false
+        if posterIdentity != identity { poster = nil }
+        // The still this phone already drew of this model: on the stage at once on a revisit (#720).
+        if poster == nil, let hit = ModelPoster.cached(key: wanted, yaw: yaw, pitch: pitch, fit: fit) {
+            poster = hit; posterIdentity = wanted; MediaTrace.record("poster.hit", ["at": "stage-start"])
+        }
+        turn = .zero; settled = .zero; zoom = 1; settledZoom = 1
+        guard let url, scenePhase == .active else { return }
+        // The load belongs to the stage, not to this task. A page pushed onto a NavigationStack can have its tasks
+        // cancelled as it appears and not run again: #720, the iPhone's revisited model sat at "loading" (trace:
+        // stage.begin, then mesh.cancelled and stage.cancelled 20 ms later, nothing after). It runs to the end and
+        // publishes while this stage still wants the same model; a newer model's load replaces it.
+        loadJob?.cancel()
+        let (tint, twoTone, object, seats, yaw, pitch, fit, interactive, hasPlaceholder) = (self.tint, self.twoTone, self.object, self.seats, self.yaw, self.pitch, self.fit, self.interactive, self.placeholder != nil)
+        let stillWanted = { [self] in wantedIdentity == wanted }
+        let job = Task { @MainActor in
+            await MediaTrace.$context.withValue(MediaTrace.Context(file: url, scene: "active")) {
+                MediaTrace.record("stage.begin", ["scene": "active", "stage": instance, "identity": tag(wanted)])
+                defer { MediaTrace.record(stillWanted() ? "stage.end" : "stage.superseded", ["scene": "active"]) }
+                let loaded = await Self.load(url, tint: tint, twoTone: twoTone, object: object, seats: seats)
+                guard stillWanted() else { return }
+                guard let entity = loaded else { failed = true; undrawable?(); return }
+                meshReady = true
+                let e = entity.visualBounds(relativeTo: nil).extents
+                measured?([Double(e.x), Double(e.z), Double(e.y)].map { ($0 * 10_000).rounded() / 10 })
+                var image = await ModelPoster.image(key: wanted, model: entity, yaw: yaw, pitch: pitch, fit: fit)
+                #if DEBUG
+                // `-CounterpartFailPoster YES` (UI tests, #606): the off-screen still fails, as it can on a phone.
+                if UserDefaults.standard.bool(forKey: "CounterpartFailPoster") { image = nil }
+                #endif
+                guard stillWanted() else { return }
+                if let image { poster = image; posterIdentity = wanted; drawn?() }
+                // The model loaded, so it turns live; the Mac's picture stays until then (#606). Only a stage with no other
+                // picture that never turns (the starters') says it couldn't be shown.
+                if image == nil, !hasPlaceholder, !interactive { failed = true; undrawable?() }
+                MediaTrace.record("stage.published", ["picture": String(image != nil), "stage": instance])
+            }
+        }
+        loadJob = job
     }
 
     /// The stage's state for VoiceOver and UI tests (`model-stage`): loading, still, opening (3D asked for, not drawn
@@ -184,7 +209,11 @@ struct ModelStage: View {
         RealityView { content in
             content.camera = .virtual
             if let url {
-                let loaded = await Self.load(url, tint: tint, twoTone: twoTone, object: object, seats: seats)
+                // Its own trace context (#769): a live load says which stage it came from.
+                let loaded = await MediaTrace.$context.withValue(MediaTrace.Context(file: url, scene: "active")) {
+                    MediaTrace.record("stage.live", ["stage": instance])
+                    return await Self.load(url, tint: tint, twoTone: twoTone, object: object, seats: seats)
+                }
                 guard !Task.isCancelled, live, scenePhase == .active else { return }
                 guard let model = loaded else { failed = true; return }
                 let scene = ModelPoster.scene(model: model, yaw: yaw, pitch: pitch, fit: fit)
