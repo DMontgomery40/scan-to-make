@@ -493,7 +493,7 @@ fun AskSizesCard(form: AskSizesForm, enabled: Boolean, changed: (AskSizesForm) -
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Column(Modifier.weight(1f)) {
                     Text(field.label.replaceFirstChar { it.uppercase() }, fontWeight = FontWeight.Medium)
-                    Text(AskSizesForm.source(field.from), color = Palette.secondary, fontSize = 12.sp)
+                    Text(AskSizesForm.source(field), color = Palette.secondary, fontSize = 12.sp)
                 }
                 OutlinedTextField(field.text, { changed(form.with(field.id, it)) }, Modifier.width(120.dp).testTag("ask-size-${field.id}"),
                     singleLine = true, suffix = { Text("mm") },

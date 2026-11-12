@@ -47,7 +47,9 @@ export const TOUCHUP_RESULT_SCHEMA = {
           items: {type: 'object', additionalProperties: false, required: ['label', 'mm', 'from'], properties: {
             label: {type: 'string', maxLength: 120, description: 'What to measure, in plain words'},
             mm: {type: 'number', exclusiveMinimum: 0, maximum: 10000, description: 'Your number for it, in millimetres'},
-            from: {enum: ['scan', 'published'], description: 'scan: you measured it on the scan; published: the maker published it'},
+            from: {enum: ['published', 'scan', 'estimate'], description: 'Where your number came from. published: the maker published it for the product you name in product, at reference; scan: you read it off the scan; estimate: your own guess, neither published nor read off the scan. The person sees which, and a number they confirm untouched stays exactly as certain as this source: it is never a measurement'},
+            product: {type: 'string', maxLength: 120, description: 'Required when from is published: the exact product and variant the published number is for, as the person has it. When they said it is in a case or has something attached, that is the case or the attachment (its maker and model), never the bare product: a bare product\'s published size is not its size in a case'},
+            reference: {type: 'string', maxLength: 300, description: 'Required when from is published: where the maker published it, as a link to the page you read or the name of the maker\'s document'},
           }}},
       }},
     seats: {type: 'array', minItems: 1, maxItems: 32, description: 'For a part made to fit the scanned object: where that object sits in the finished part, one entry per place it goes (three for a holder of three), as your rules under "Where the scanned object sits" define them',

@@ -355,6 +355,43 @@ export const FitSchema = z.strictObject({
   .refine(fit => fit.sizeSource === 'measured' || fit.measured === undefined, { message: 'measured sizes go with the measured source only' });
 export type Fit = z.infer<typeof FitSchema>;
 
+/**
+ * Where the Mac's number for a size came from (#622). `published`: the maker published it for `product`, at
+ * `reference`; `scan`: read off the scan; `estimate`: the Mac's own guess, neither measured nor published. A client
+ * shows which, and never calls an estimate or an unknown source "from your scan".
+ */
+export const SizeFromSchema = z.enum(['scan', 'published', 'estimate']);
+export type SizeFrom = z.infer<typeof SizeFromSchema>;
+/**
+ * One size a `sizes` question asks about. A published size names the exact product the number is for, as the person
+ * has it ("JETech clear case for iPhone 16 Pro", not "iPhone 16 Pro" when the phone is in that case), and where the
+ * maker published it (a page or a document). Both are optional here only so questions saved before Nov 12 still
+ * read; the companion keeps no new published size without them.
+ */
+export const AskSizeSchema = z.strictObject({
+  ...SizeSchema.shape,
+  from: SizeFromSchema,
+  product: text(120).min(1).optional(),
+  reference: text(300).min(1).optional(),
+});
+export type AskSize = z.infer<typeof AskSizeSchema>;
+/**
+ * How the person checked a size they sent back (#622). `measured`: they typed or edited the number. `accepted`:
+ * they confirmed the Mac's number untouched, so it is exactly as certain as where it came from, never a measurement.
+ */
+export const SizeCheckSchema = z.enum(['measured', 'accepted']);
+export type SizeCheck = z.infer<typeof SizeCheckSchema>;
+/**
+ * A `sizes` answer: `{id, mm}` for each size the person filled, and `measured`, the ids they typed or edited. A
+ * client from before Nov 12 sends no `measured`; then a number equal to the asked one is accepted and any other is
+ * measured. `measured` sits beside `sizes`, not inside each size, so a companion from before it still takes the answer.
+ */
+export const SizesAnswerSchema = z.strictObject({
+  sizes: z.array(z.strictObject({ id: text(64).min(1), mm: z.number().positive().max(10_000) })).min(1).max(6),
+  measured: z.array(text(64).min(1)).max(6).optional(),
+});
+export type SizesAnswer = z.infer<typeof SizesAnswerSchema>;
+
 export const AskSchema = z.strictObject({
   id: uuid,
   question: text(300),
@@ -376,7 +413,7 @@ export const AskSchema = z.strictObject({
   /** `file`: why the file is wanted when it isn't simply "send it": macOS refused the Downloads folder. */
   reason: z.enum(['downloads-access']).optional(),
   /** `sizes`: the sizes to confirm or correct, prefilled, each with where the number came from. One to six. */
-  sizes: z.array(z.strictObject({ ...SizeSchema.shape, from: z.enum(['scan', 'published']) })).min(1).max(6).optional(),
+  sizes: z.array(AskSizeSchema).min(1).max(6).optional(),
   /** `file`: the model's page (Open in Safari), its name and site, and the file types it takes. */
   url: z.string().url().max(2048).optional(),
   modelName: text(120).optional(),

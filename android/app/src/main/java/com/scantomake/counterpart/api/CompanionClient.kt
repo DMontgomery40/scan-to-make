@@ -245,7 +245,11 @@ class CompanionClient(
         if (bestGuess) json["bestGuess"] = true
         text?.let { json["text"] = it }
         json["photoNames"] = photoNames
-        if (sizes.isNotEmpty()) json["sizes"] = sizes.map { mapOf("id" to it.id, "mm" to wholeOrDecimal(it.mm)) }
+        if (sizes.isNotEmpty()) {
+            json["sizes"] = sizes.map { mapOf("id" to it.id, "mm" to wholeOrDecimal(it.mm)) }
+            // The ids the person typed go beside the numbers, not in them, so a computer from before Nov 12 still takes the answer (#622).
+            json["measured"] = sizes.filter { it.measured }.map { it.id }
+        }
         return one(request("POST", "/v1/objects/$id/closeup", com.scantomake.counterpart.core.toJson(json) as JsonObject))
     }
     /** A whole number goes out as `64`, not `64.0`, as the other clients send it. */

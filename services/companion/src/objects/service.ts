@@ -45,9 +45,10 @@ import {publicTouchupText, limitWords, type TouchupActivity, type TouchupResult}
 import {ObjectNotFoundError, ObjectStore, restoreLocate, type LocateSnapshot, type ObjectPrintConfirmation, type StmObject} from './store.js';
 import {fitRequest, workerRequest} from './fit.js';
 import {inheritHistory} from './inherited.js';
-import {answeredSizes, askKind, InvalidSizesError, mergeCheckedSizes, sizesNote, withCheckedSizes} from './asks.js';
+import {answeredSizes, askKind, InvalidSizesError, mergeCheckedSizes, sizesMessage, sizesNote, withCheckedSizes} from './asks.js';
 /** An answer to an open question: photos, words, Best Guess, and for a sizes question its numbers; any together. */
-export type AskAnswer = {bestGuess?: boolean; text?: string; photoNames?: string[]; sizes?: {id: string; mm: number}[]};
+/** `sizes` with `measured`: a sizes question's numbers and the ids the person typed or edited (contracts `SizesAnswerSchema`). */
+export type AskAnswer = {bestGuess?: boolean; text?: string; photoNames?: string[]; sizes?: {id: string; mm: number}[]; measured?: string[]};
 import {AskSchema, type Fit} from '@scan-to-make/contracts/counterpart';
 import {lastDesignPass, passResume, withPassEnded, type PassEnd} from './pass-end.js';
 import {readFilamentProposal, type FilamentProposal, type ProposalTray} from './filament-proposal.js';
@@ -1766,10 +1767,10 @@ export class ObjectService {
     // Only this answer's explicit attachments belong to it. Other pending photos may already
     // be reserved by a correction queued on either client; Best Guess and text claim none.
     const photos = [...new Set(answer.photoNames ?? [])];
-    // Numbers for a sizes question: the ones it listed, confirmed or corrected. They may come with words and a photo.
+    // Numbers for a sizes question: the ones it listed, accepted as asked or measured. They may come with words and a photo.
     let sizes: ReturnType<typeof answeredSizes> | undefined;
     if (answer.sizes !== undefined) {
-      try { sizes = answeredSizes(askKind(object) === 'sizes' ? object.ask : undefined, answer.sizes); }
+      try { sizes = answeredSizes(askKind(object) === 'sizes' ? object.ask : undefined, answer.sizes, answer.measured); }
       catch (error) { if (error instanceof InvalidSizesError) throw new InvalidStateError(error.message); throw error; }
     }
     if (!photos.length && !answer.bestGuess && !answer.text?.trim() && !sizes) throw new InvalidStateError('Choose photos for this answer, answer in words, or use Best Guess. If you already chose photos, update Counterpart and try again.');
@@ -1785,7 +1786,7 @@ export class ObjectService {
       const fit = sizes ? withCheckedSizes(o, sizes) : o.fit;
       return {...o, ask: {...o.ask, status: 'answered'}, ...(sizes ? {checkedSizes: mergeCheckedSizes(o.checkedSizes, sizes)} : {}), ...(fit ? {fit} : {})};
     });
-    const shown = answer.text?.trim() ?? (sizes ? sizes.map(size => `${size.label}: ${size.mm} mm`).join('\n') : answer.bestGuess ? 'Use your best guess.' : '');
+    const shown = answer.text?.trim() ?? (sizes ? sizesMessage(sizes) : answer.bestGuess ? 'Use your best guess.' : '');
     const updated = await this.#message(await this.get(id), shown, photos, false);
     const message = updated.messages!.find(item => item.id === updated.pendingMessageId)!;
     return this.#pass(updated, {...(parts.length ? {note: parts.join('\n')} : {}), messageId: message.id, photos: message.photos, trigger: 'ask-answer'});
@@ -3550,8 +3551,10 @@ export class ObjectService {
     // Sizes to confirm or correct are their own kind: number fields, with words and a caliper photo beside them.
     // `type` is left absent, so a client from before kinds shows the question and takes the answer in words.
     // Checked against the contract here too: sizes that aren't whole never reach a client, and the question stands as words.
-    const listed = AskSchema.shape.sizes.safeParse(result.ask?.sizes?.map((size, index) => ({id: `size-${index + 1}`, label: size.label, mm: size.mm, from: size.from})));
-    const sizes = listed.success ? listed.data : undefined;
+    const listed = AskSchema.shape.sizes.safeParse(result.ask?.sizes?.map((size, index) => ({id: `size-${index + 1}`, label: size.label, mm: size.mm, from: size.from,
+      ...(size.product ? {product: size.product} : {}), ...(size.reference ? {reference: size.reference} : {})})));
+    // A published number is kept only with the product it is for and where the maker published it (#622).
+    const sizes = listed.success && listed.data?.every(size => size.from !== 'published' || (size.product && size.reference)) ? listed.data : undefined;
     const base = {id: askId, question: question.slice(0, 300), ...(photo ? {photo} : {}), ...(photo && result.ask?.region ? {region: result.ask.region} : {}),
       status: 'open' as const, askedAtMs: Date.now()};
     const ask: NonNullable<StmObject['ask']> = sizes?.length ? {...base, kind: 'sizes', sizes, answers: ['sizes', 'text', 'camera']}

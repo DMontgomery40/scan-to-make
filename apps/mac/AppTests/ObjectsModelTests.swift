@@ -334,6 +334,11 @@ private func project(_ item: [String: Any]) throws -> Project {
         XCTAssertEqual(calls.last, "sizes:size-1=64,size-2=53")
         XCTAssertEqual(ControlClient.sizesParams("bottle", answer)["sizes"],
                        .array([.object(["id": .string("size-1"), "mm": .number(64)]), .object(["id": .string("size-2"), "mm": .number(53)])]))
+        // #622: the waist was typed, so it goes as measured; the untouched width goes as accepted, never as measured.
+        XCTAssertEqual(ControlClient.sizesParams("bottle", answer)["measured"], .array([.string("size-2")]))
+        XCTAssertEqual(ControlClient.sizesParams("bottle", try XCTUnwrap(AskSizesForm(try XCTUnwrap(bottle.openAsk))?.answer))["measured"], .array([]),
+                       "Confirm with nothing typed sends no measurement")
+        XCTAssertEqual(form.fields.map(AskSizesForm.source), ["Read from your scan", "Read from your scan"])
     }
 
     /// Add printer…'s Slicer section stays reachable with projects present: the chosen MCP's own slicer choice and

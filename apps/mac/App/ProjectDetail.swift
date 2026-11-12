@@ -898,7 +898,7 @@ struct MacAskSizes: View {
                     VStack(alignment: .leading, spacing: 1) {
                         Text(field.label.prefix(1).uppercased() + field.label.dropFirst()).font(.body)
                             .fixedSize(horizontal: false, vertical: true)
-                        Text(AskSizesForm.source(field.from)).font(.caption).foregroundStyle(.secondary)
+                        Text(AskSizesForm.source(field)).font(.caption).foregroundStyle(.secondary)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     TextField("", text: $field.text)

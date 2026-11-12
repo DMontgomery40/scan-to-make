@@ -1556,7 +1556,7 @@ struct AskSizesFields: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(field.label.prefix(1).uppercased() + field.label.dropFirst()).font(.subheadline.weight(.medium))
                             .fixedSize(horizontal: false, vertical: true)
-                        Text(AskSizesForm.source(field.from)).font(.caption).foregroundStyle(.secondary)
+                        Text(AskSizesForm.source(field)).font(.caption).foregroundStyle(.secondary)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     HStack(spacing: 4) {

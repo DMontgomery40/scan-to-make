@@ -406,7 +406,8 @@ export function createControlDispatcher(services: ControlServices) {
               : method === 'objects.selectPrinter' ? await objects.selectPrinter(params.id, params.destinationId!)
               : method === 'objects.start' ? await objects.start(params.id)
               : method === 'objects.answerCloseup' ? await objects.answerCloseup(params.id, {bestGuess: params.bestGuess!, photoNames: (params as {photoNames?: string[]}).photoNames, ...((params as {text?: string}).text ? {text: (params as {text?: string}).text} : {}),
-                ...((params as {sizes?: {id: string; mm: number}[]}).sizes ? {sizes: (params as {sizes?: {id: string; mm: number}[]}).sizes} : {})})
+                ...((params as {sizes?: {id: string; mm: number}[]}).sizes ? {sizes: (params as {sizes?: {id: string; mm: number}[]}).sizes} : {}),
+                ...((params as {measured?: string[]}).measured ? {measured: (params as {measured?: string[]}).measured} : {})})
               : await objects.print(params.id, (({id: _id, ...options}) => options)(params));
             return {object: local(object)};
           } catch (error) {

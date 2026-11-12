@@ -330,7 +330,8 @@ public final class CompanionClient: @unchecked Sendable {
         if bestGuess { json["bestGuess"] = true }
         if let text { json["text"] = text }
         json["photoNames"] = photoNames
-        if !sizes.isEmpty { json["sizes"] = sizes.map { ["id": $0.id, "mm": $0.mm] as [String: Any] } }
+        // The ids the person typed go beside the numbers, not in them, so a Mac from before Nov 12 still takes the answer (#622).
+        if !sizes.isEmpty { json["sizes"] = sizes.map { ["id": $0.id, "mm": $0.mm] as [String: Any] }; json["measured"] = sizes.filter(\.measured).map(\.id) }
         return json
     }
     public func selectPlate(_ id: String, fileIndex: Int, plateIndex: Int) async throws -> Project {

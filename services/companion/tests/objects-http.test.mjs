@@ -702,6 +702,35 @@ test('Ask photo selection is validated before consuming the question through HTT
 });
 
 
+// #622: a sizes answer says which numbers the person typed beside the numbers (`measured`), over HTTP (phones,
+// Android) and local control (the Mac, Linux). A phone from before Nov 12 sends none and is still taken.
+test('a sizes answer carries which numbers were typed, over HTTP and local control, and an older phone\'s answer is still taken', async t => {
+  const {call, service, store} = await fixture(t);
+  const dispatch = createControlDispatcher({objects: service});
+  const sizes = [{id: 'size-1', label: 'Phone width in its case', mm: 75.4, from: 'published', product: 'JETech clear case for iPhone 16 Pro', reference: 'placeholder'},
+    {id: 'size-2', label: 'Wallet thickness', mm: 6, from: 'estimate'}];
+  for (const [via, body, expected] of [
+    ['http', {sizes: [{id: 'size-1', mm: 75.4}, {id: 'size-2', mm: 6}], measured: ['size-2']}, ['accepted', 'measured']],
+    ['http', {sizes: [{id: 'size-1', mm: 75.4}, {id: 'size-2', mm: 7}]}, ['accepted', 'measured']],
+    ['local', {sizes: [{id: 'size-1', mm: 75.4}, {id: 'size-2', mm: 6}], measured: []}, ['accepted', 'accepted']]]) {
+    const object = await service.create('A phone mount', 'fit');
+    await store.update(object.id, o => ({...o, state: 'needs-closeup', ask: {id: 'ask', question: 'Right?', kind: 'sizes', sizes, answers: ['sizes', 'text', 'camera'], status: 'open', askedAtMs: 1}}));
+    if (via === 'local') {
+      await assert.rejects(dispatch('objects.answerCloseup', {id: object.id, bestGuess: false, ...body, measured: 'size-1'}));
+      await assert.rejects(dispatch('objects.answerCloseup', {id: object.id, bestGuess: false, sizes: [{id: 'size-1', mm: 75.4, certainty: 'measured'}]}));
+      await dispatch('objects.answerCloseup', {id: object.id, bestGuess: false, ...body});
+    } else {
+      assert.equal((await call('POST', `/v1/objects/${object.id}/closeup`, {...body, measured: [4]})).status, 400);
+      assert.equal((await call('POST', `/v1/objects/${object.id}/closeup`, {measured: ['size-1']})).status, 400, 'measured without numbers');
+      assert.equal((await call('POST', `/v1/objects/${object.id}/closeup`, body)).status, 200);
+    }
+    const after = await service.settled(object.id);
+    assert.deepEqual(after.checkedSizes.map(size => size.certainty), expected, `${via} ${JSON.stringify(body)}`);
+    assert.equal(after.checkedSizes[0].product, 'JETech clear case for iPhone 16 Pro');
+  }
+});
+
+
 test('local photo upload returns its exact renamed receipt without selecting other pending evidence', async t => {
   const {service, store} = await fixture(t);
   const dispatch = createControlDispatcher({objects: service});
