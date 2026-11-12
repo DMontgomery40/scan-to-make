@@ -214,6 +214,14 @@ export interface Project {
     thumbnail?: string;
   };
   printConfirmation?: RawQuestion;
+  /** Sealed designs, oldest first (#616, contracts `DesignVersionSchema`); the newest is the last. Older companions omit it. */
+  versions?: DesignVersion[];
+  /** Every print, appended and never replaced, each naming the design it printed (contracts `PrintAttemptSchema`). */
+  prints?: PrintAttempt[];
+  /** The companion's line when it rebuilt earlier designs from this computer's records. */
+  historyRestored?: string;
+  /** What was asked and answered for the project this one was made from (#600, contracts `InheritedHistorySchema`). */
+  inherited?: InheritedHistory;
   print?: {
     uncertain?: boolean;
     /** Set once the file was sent to the printer. */
@@ -239,6 +247,36 @@ export interface Project {
     /** The spools this print uses (PRD §5.4). */
     spools?: { index?: number; colour: string; material?: string; name?: string }[];
   };
+}
+/** One design a pass finished with, sealed under `versions/<id>/` and never edited (#616). */
+export interface DesignVersion {
+  id: string;
+  sealedAtMs: number;
+  /** The pass that sealed it (Activity's "This became the … design"). */
+  passStartedAtMs?: number;
+  note?: string;
+  modelSha256: string;
+  result: NonNullable<Project["current"]>;
+  picture?: string;
+  pictures?: Project["pictures"];
+  pictureStates?: Project["pictureStates"];
+  outcome?: "works" | "needs-changes" | string;
+  printedAtMs?: number;
+}
+/** One print of one design (#616). */
+export interface PrintAttempt {
+  id: string;
+  versionId?: string;
+  startedAtMs: number;
+  printId?: string;
+  bundleId: string;
+  destination?: { id: string; name: string };
+  monitor?: { phase?: string; endState?: string; endedAt?: string };
+  spools?: { index?: number; colour: string; material?: string; name?: string }[];
+}
+export interface InheritedHistory {
+  from: { id: string; title: string };
+  items: { at: number; who: "you" | "app" | string; text: string; from?: { id: string; title: string } }[];
 }
 export interface Printer {
   id: string;

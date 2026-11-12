@@ -1,3 +1,4 @@
+import { twoTruthsLine } from "./designs";
 import { filePath, picturePath } from "./gallery";
 import type {
   Estimate,
@@ -293,6 +294,8 @@ export function validateAnswer(
 export const words = (p: Project) =>
   p.status?.text ??
   p.progress ??
+  // #616: a companion that knows designs writes "New one ready · printed …" itself; this is for one that wrote nothing.
+  twoTruthsLine(p) ??
   {
     new: "Draft",
     ready: "Ready to print",

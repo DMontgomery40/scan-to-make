@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { canLocate, gallery, drawnColour, photoPicture, still } from "../src/gallery";
+import { canLocate, gallery, drawnColour, photoPicture, still, filePath } from "../src/gallery";
+import { designAnswer, designHistory, designThumbnail, inheritedConversation, sealedLine, showingDesign, twoTruthsLine, viewingLine } from "../src/designs";
 import {
   MAKE_FROM_SCAN, FIT_CHOICE, COPY_CHOICE, USE_EXISTING_SCAN, canMakeFromScan, scanLineage, scansToReuse, scannedLine,
   FIT_SIZE_SOURCES, fitSizeDetail, fitMissing, makeFromScanParams, newFitChoice,
@@ -1069,3 +1070,93 @@ test("a wait or a start that never hears back says so, and any other word stops 
   await new Promise((resolve) => setTimeout(resolve, 100));
   assert.deepEqual(expired, [reply.update.mcpId, "stuck"], "stopping clears every clock");
 });
+
+// #616 slice 1 (#744): earlier designs and prints, the same fixture Kit and the contracts read.
+const versionsDoc = JSON.parse(readFileSync(new URL("../../../packages/contracts/fixtures/project-versions.json", import.meta.url), "utf8"));
+const hanger = versionsDoc.project as Project;
+const [firstDesign, widerDesign, newestDesign] = hanger.versions!;
+
+test("project-versions.json: What you have, Earlier designs and the list line, as Kit derives them", () => {
+  const history = designHistory(hanger, "UTC");
+  assert.ok(history.showsSections);
+  assert.deepEqual(history.have.map((v) => v.id), versionsDoc.expected.have);
+  assert.deepEqual(history.earlier.map((v) => v.id), versionsDoc.expected.earlier);
+  assert.equal(twoTruthsLine(hanger, "UTC"), versionsDoc.expected.line);
+  assert.equal(history.printedLine(firstDesign!), "Printed Nov 4 · Workshop printer");
+  assert.equal(history.outcomeLine(firstDesign!), "It works");
+  assert.equal(history.label(firstDesign!), "A rest for a 25 mm desk.");
+  assert.equal(history.printedLine(widerDesign!), "Not printed yet");
+  // A companion that writes its own line wins; with none, the derived one (as Kit's ProjectWords).
+  assert.equal(words(hanger), twoTruthsLine(hanger));
+  assert.equal(words({ ...hanger, status: { text: "Ready to print", phase: "ready", tint: "accent" } }), "Ready to print");
+  // Done stays Done, and a project with one design reads exactly as before: no sections, no new line.
+  assert.equal(twoTruthsLine({ ...hanger, state: "confirmed" }), undefined);
+  const single = { ...hanger, versions: [newestDesign!], prints: [] } as Project;
+  assert.equal(designHistory(single).showsSections, false);
+  assert.equal(twoTruthsLine(single), undefined);
+  assert.equal(words(single), "Ready to print");
+});
+
+test("an earlier design opens on the same stage from its own files, with Show the newest, with projects present (#744)", () => {
+  const others = [{ ...project, id: "other-1", title: "Pink box" }, { ...project, id: "other-2", title: "Wall holder" }] as Project[];
+  const page = [others[0]!, hanger, others[1]!].find((p) => p.id === hanger.id)!;
+  const history = designHistory(page, "UTC");
+  const shown = showingDesign(page, history.have[0]!.id);
+  assert.equal(shown.current?.model, `versions/${firstDesign!.id}/model.stl`);
+  assert.equal(filePath(shown, "model.stl"), `versions/${firstDesign!.id}/model.stl`, "Explore in 3D reads the design's own model");
+  assert.equal(filePath(shown, `renders/front.png`), `versions/${firstDesign!.id}/renders/front.png`);
+  assert.equal(shown.state, "confirmed");
+  assert.equal(words(shown), "Done", "the header shows the design's own state, never the newest's words");
+  assert.equal(shown.versions?.length, 1, "no sections inside the design's own view");
+  assert.equal(shown.print?.destination?.name, "Workshop printer");
+  assert.equal(viewingLine(page, firstDesign!, "UTC"), "Earlier design · Printed Nov 4 · Workshop printer");
+  assert.equal(designThumbnail(firstDesign!), firstDesign!.picture);
+  assert.equal(designThumbnail(widerDesign!), undefined, "no render: the placeholder");
+  assert.equal(showingDesign(page, undefined), page, "Show the newest is the project as it is");
+  assert.equal(showingDesign(page, "gone"), page);
+  // A merged mesh sits beside a sealed 3MF.
+  const three = showingDesign({ ...page, versions: [{ ...firstDesign!, result: { ...firstDesign!.result, model: `versions/${firstDesign!.id}/model.3mf` } }, newestDesign!] }, firstDesign!.id);
+  assert.equal(filePath(three, "model.stl"), `versions/${firstDesign!.id}/model.stl`);
+  // Its own Did it fit? goes to that design only.
+  assert.deepEqual(designAnswer(page, widerDesign!.id, "needs-changes"), { id: hanger.id, status: "needs-changes", versionId: widerDesign!.id });
+});
+
+test("a design that went to the printer is never called unprinted, and Activity names the pass that sealed it", () => {
+  const sent = {
+    ...hanger,
+    versions: hanger.versions!.map((v, i) => (i === 1 ? { ...v, passStartedAtMs: 1793836000000 } : v)),
+    prints: [...hanger.prints!, ...[1, 2, 3].map((n) => ({ id: `old-${n}`, bundleId: "b", versionId: widerDesign!.id, startedAtMs: 1793836900000 + n }))],
+  } as Project;
+  const history = designHistory(sent, "UTC");
+  assert.equal(history.printedLine(widerDesign!), "Sent to the printer 3 times · how they ended wasn’t kept");
+  assert.equal(showingDesign(sent, widerDesign!.id).state, "sent");
+  const failed = { ...hanger, prints: [...hanger.prints!, { id: "f", bundleId: "b", versionId: widerDesign!.id, startedAtMs: 1, monitor: { endState: "failed" } }] } as Project;
+  assert.equal(designHistory(failed).printedLine(widerDesign!), "Not printed · 1 try didn’t finish");
+  assert.equal(sealedLine(sent, 1793836000000, "UTC"), "This became the Nov 5 design");
+  assert.equal(sealedLine(sent, 42), undefined);
+  assert.equal(sealedLine({ ...sent, versions: [sent.versions![1]!] }, 1793836000000), undefined, "one design: no mark");
+});
+
+// #613: a project made from another shows what was asked and answered there.
+test("inherited-history.json: a made project shows its source's conversation, read-only, with projects present", () => {
+  const [source, made] = JSON.parse(readFileSync(new URL("../../../packages/contracts/fixtures/inherited-history.json", import.meta.url), "utf8")) as Project[];
+  const others = [{ ...project, id: "o", title: "Hook" }] as Project[];
+  const history = inheritedConversation(made!, [...others, source!, made!])!;
+  assert.equal(history.line, "From “Forester phone mount”");
+  assert.equal(history.from.exists, true);
+  assert.deepEqual(history.entries.map((e) => [e.role, e.text]), [
+    ["person", "A mount for my phone."],
+    ["counterpart", "Which case is on the phone?"],
+    ["person", "The case is a JETech clear case."],
+    ["counterpart", "Made a holder for that case."],
+  ]);
+  assert.deepEqual(history.entries.map((e) => e.showsTime), [true, false, false, false]);
+  const renamed = inheritedConversation(made!, [{ ...source!, title: "Phone mount v2" }])!;
+  assert.equal(renamed.line, "From “Phone mount v2”", "the source's name now");
+  const gone = inheritedConversation(made!, others)!;
+  assert.equal(gone.line, "From “Forester phone mount”, since deleted");
+  assert.equal(gone.from.exists, false);
+  assert.equal(gone.entries.length, 4, "deleting the source never changes the copy");
+  assert.equal(inheritedConversation(source!, [source!, made!]), undefined);
+});
+

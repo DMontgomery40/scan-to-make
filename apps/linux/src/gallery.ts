@@ -138,7 +138,12 @@ export function still(p: Project, entry: GalleryEntry): Still {
 
 /** A companion path as a file in the project's folder: renders by name, the model at its own path. */
 export function filePath(p: Project, path: string): string {
-  if (path === "model.stl") return p.current?.model.toLowerCase().endsWith(".stl") ? p.current.model : "current/model.stl";
+  // A 3MF's merged mesh sits beside it: `current/model.stl`, or a sealed design's `versions/<id>/model.stl` (#616).
+  if (path === "model.stl") {
+    const model = p.current?.model;
+    if (model?.toLowerCase().endsWith(".stl")) return model;
+    return model?.includes("/") ? `${model.slice(0, model.lastIndexOf("/"))}/model.stl` : "current/model.stl";
+  }
   if (path.startsWith("renders/")) return p.current?.renders.find((render) => render.split("/").pop() === path.slice(8)) ?? path;
   return path;
 }
@@ -168,3 +173,4 @@ export function drawnColour(colour: Colour): Colour {
   }
   return "#" + rgb.map((c) => Math.round(Math.min(1, Math.max(0, c)) * 255).toString(16).padStart(2, "0").toUpperCase()).join("");
 }
+
