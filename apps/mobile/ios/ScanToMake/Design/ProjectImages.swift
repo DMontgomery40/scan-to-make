@@ -8,10 +8,25 @@ import CounterpartKit
     private let cache = NSCache<NSString, UIImage>()
     func image(_ key: String) -> UIImage? { cache.object(forKey: key as NSString) }
     func store(_ image: UIImage, _ key: String) { cache.setObject(image, forKey: key as NSString) }
-    /// A picture of the project this phone has already decoded at any size the lists use (`ProjectImage`'s keys).
+    /// A picture of the project this phone has already decoded at any size the lists use (`ProjectImage`'s keys), or the
+    /// last one decoded for this path at any version (shown while the current one comes, never "coming from your Mac").
     func anySize(_ project: Project, _ path: String?) -> UIImage? {
         guard let path else { return nil }
-        return [500, 300, 160, 600, 1200].lazy.compactMap { self.image("\(project.id)#\(Int64(project.mediaVersion))#\(path)#\($0)") }.first
+        return [500, 300, 160, 600, 1200].lazy.compactMap { self.image(Self.key(project, path, $0)) }.first
+            ?? cache.object(forKey: "latest#\(project.id)#\(path)" as NSString)
+    }
+
+    /// The decoded picture's key. A Mac picture (`pictures/…`) is named by what it draws, so its key is its name alone
+    /// and a newer project version (a finished pass, a print) never decodes or fetches it again (#720). Anything else is
+    /// per project version, as before.
+    nonisolated static func key(_ project: Project, _ path: String?, _ size: Int) -> String {
+        let path = path ?? ""
+        return OnDeviceLibrary.namedByContent(path) ? "\(project.id)#\(path)#\(size)" : "\(project.id)#\(Int64(project.mediaVersion))#\(path)#\(size)"
+    }
+    /// Remembers a decoded picture under its key and as this path's latest.
+    func store(_ image: UIImage, _ key: String, project: String, path: String?) {
+        store(image, key)
+        if let path { cache.setObject(image, forKey: "latest#\(project)#\(path)" as NSString) }
     }
 
     /// Decode only the pixels a view can show, without expanding a full capture first.
@@ -58,7 +73,7 @@ struct ProjectImage: View {
     @State private var shownKey: String?
     @State private var failed = false
 
-    private var key: String { "\(project.id)#\(Int64(project.mediaVersion))#\(path ?? "")#\(maxPixelSize)" }
+    private var key: String { ImageMemory.key(project, path, maxPixelSize) }
 
     var body: some View {
         ZStack {
@@ -74,12 +89,21 @@ struct ProjectImage: View {
         .task(id: "\(key)#\(scenePhase)") {
             if let cached = ImageMemory.shared.image(key) { image = cached; shownKey = key; failed = false; return }
             if shownKey == key, image != nil { return }
-            guard scenePhase == .active else { return }
-            image = nil; failed = false
+            // What this phone keeps, at once and with no network (on-device-library.md): the card is never a symbol for a
+            // picture the phone has had. The current version is the answer; an older one stays until the new one arrives.
+            if let path, let kept = await ImageMemory.kept(app, project, path, maxPixelSize: maxPixelSize), !Task.isCancelled {
+                image = kept.image; failed = false
+                if kept.current { ImageMemory.shared.store(kept.image, key, project: project.id, path: path); shownKey = key; return }
+            } else if !Task.isCancelled {
+                guard scenePhase == .active else { return }
+                image = nil; failed = false
+            }
             guard let path else { return }
-            guard let decoded = await ImageMemory.load(app, project, path, maxPixelSize: maxPixelSize) else { if !Task.isCancelled { failed = true }; return }
+            // Then the Mac, for the current version.
+            guard scenePhase == .active, !Task.isCancelled else { return }
+            guard let decoded = await ImageMemory.load(app, project, path, maxPixelSize: maxPixelSize) else { if !Task.isCancelled, image == nil { failed = true }; return }
             guard !Task.isCancelled else { return }
-            ImageMemory.shared.store(decoded, key)
+            ImageMemory.shared.store(decoded, key, project: project.id, path: path)
             image = decoded; shownKey = key
         }
         .accessibilityHidden(true)
@@ -87,6 +111,15 @@ struct ProjectImage: View {
 }
 
 extension ImageMemory {
+    /// The copy of this picture the phone keeps (`OnDeviceLibrary`), decoded at `maxPixelSize`, and whether it is the
+    /// project's current version. No network, no Keychain.
+    static func kept(_ app: AppModel, _ project: Project, _ path: String, maxPixelSize size: Int) async -> (image: UIImage, current: Bool)? {
+        guard let kept = app.companion.library.latest(project: project.id, name: path) else { return nil }
+        let url = kept.url
+        guard let image = await DecodeLane.shared.run({ ImageMemory.thumbnail(at: url, maxPixelSize: size) }) ?? nil else { return nil }
+        return (image, kept.version == Int64(project.mediaVersion) || OnDeviceLibrary.namedByContent(path))
+    }
+
     /// Downloads one of the project's pictures and decodes it at `maxPixelSize`. Nil when it can't be had.
     static func load(_ app: AppModel, _ project: Project, _ path: String, maxPixelSize size: Int) async -> UIImage? {
         guard let url = try? await app.projects.mac.download(project, path) else { return nil }
@@ -131,11 +164,17 @@ struct StagePicture: View {
     var controlsInset: CGFloat = 0
     @State private var load = PictureLoad<UIImage>()
     @State private var attempt = 0
+    /// The copy of this picture the phone keeps, by key: shown while a newer one comes and when the Mac doesn't answer.
+    @State private var kept: (key: String, image: UIImage)?
+    /// The picture this stage wants now (#720: its fetch outlives a cancelled task, never a newer picture).
+    @State private var wantedKey: String?
 
     private var path: String? { if case .picture(let path) = still { path } else { nil } }
-    private var key: String { "\(project.id)#\(Int64(project.mediaVersion))#\(path ?? "")#\(maxPixelSize)" }
+    private var key: String { ImageMemory.key(project, path, maxPixelSize) }
 
-    fileprivate enum Shows { case shown(UIImage), loading(UIImage?), waiting, notAvailable(String, retry: Bool) }
+    /// `decoding`: the phone has this picture and is decoding it now (a few milliseconds): the bare stage, never a
+    /// spinner or "coming from your Mac" for something it already has (#720).
+    fileprivate enum Shows { case shown(UIImage), loading(UIImage?), decoding, waiting, notAvailable(String, retry: Bool) }
     private var shows: Shows {
         switch still {
         case .waiting: return .waiting
@@ -144,8 +183,19 @@ struct StagePicture: View {
         case .picture(let path):
             if load.key == key, let image = load.picture { return .shown(image) }
             if let image = ImageMemory.shared.image(key) { return .shown(image) }
-            if load.key == key, load.failed { return .notAvailable(modelMissing?.line ?? "The picture didn’t come from your Mac.", retry: true) }
-            return .loading(ImageMemory.shared.anySize(project, path))
+            // The phone's own copy is a picture shown, not a wait: no spinner over it, and never "didn't come".
+            if let kept, kept.key == key { return .shown(kept.image) }
+            // An earlier copy of this picture (another size, an earlier version the phone keeps): shown while the current
+            // one comes, and kept on screen if it doesn't.
+            let earlier = ImageMemory.shared.anySize(project, path) ?? kept?.image
+            if load.key == key, load.failed {
+                if let earlier { return .shown(earlier) }
+                return .notAvailable(modelMissing?.line ?? "The picture didn’t come from your Mac.", retry: true)
+            }
+            if let earlier { return .loading(earlier) }
+            // Kept but not yet decoded: drawn from the phone in a moment, whatever the Mac does.
+            if app.companion.library.latest(project: project.id, name: path) != nil { return .decoding }
+            return .loading(nil)
         }
     }
     private var coming: String { "\(label): coming from your Mac" }
@@ -153,7 +203,7 @@ struct StagePicture: View {
     var body: some View {
         let shows = shows
         let label: String = switch shows {
-        case .shown, .loading(_?): "\(label), as your Mac drew it"
+        case .shown, .loading(_?), .decoding: "\(label), as your Mac drew it"
         case .loading(nil), .waiting: coming
         case .notAvailable(let line, _): "\(label). \(line)"
         }
@@ -171,6 +221,8 @@ struct StagePicture: View {
                         if case .loading = shows { ProgressView().tint(.white.opacity(0.6)).padding(14) }
                     }
                     .accessibilityHidden(true).allowsHitTesting(false)
+            case .decoding:
+                EmptyView()
             case .loading(nil), .waiting:
                 // Above the chips; side by side when the stage is too short to stack them.
                 ViewThatFits(in: .vertical) {
@@ -193,19 +245,32 @@ struct StagePicture: View {
             }
         }
         .clipped()
-        .onChange(of: load.key == key && load.failed, initial: true) { _, failed in failedChanged(failed) }
+        .onChange(of: load.key == key && load.failed && kept?.key != key, initial: true) { _, failed in failedChanged(failed) }
         // Coming back to the app, or Try Again, fetches a picture that failed again.
         .task(id: "\(key)#\(attempt)#\(scenePhase)") {
             guard let path else { return }
             let key = key
+            wantedKey = key
             if let cached = ImageMemory.shared.image(key) { load.start(key, cached: cached); return }
             if load.key == key, load.picture != nil { return }
-            guard scenePhase == .active else { return }
-            load.start(key, cached: nil)
-            let decoded = await ImageMemory.load(app, project, path, maxPixelSize: maxPixelSize)
-            guard !Task.isCancelled else { return }
-            if let decoded { ImageMemory.shared.store(decoded, key) }
-            load.decoded(decoded, for: key)
+            guard scenePhase == .active || kept?.key != key else { return }
+            // As ModelStage's load (#720): a page pushed onto a NavigationStack can have this task cancelled as it appears
+            // and never run again, which left the revisited stage "loading". The work runs to the end and publishes while
+            // the stage still wants this picture.
+            let still = { [self] in wantedKey == key }
+            let (app, project, size, active) = (app, project, maxPixelSize, scenePhase == .active)
+            Task { @MainActor in
+                if kept?.key != key, let copy = await ImageMemory.kept(app, project, path, maxPixelSize: size), still() {
+                    kept = (key, copy.image)
+                    if copy.current { ImageMemory.shared.store(copy.image, key, project: project.id, path: path); load.start(key, cached: copy.image); return }
+                }
+                guard active, still() else { return }
+                load.start(key, cached: nil)
+                let decoded = await ImageMemory.load(app, project, path, maxPixelSize: size)
+                if let decoded { ImageMemory.shared.store(decoded, key, project: project.id, path: path) }
+                guard still() else { return }
+                load.decoded(decoded, for: key)
+            }
         }
     }
 }
@@ -234,7 +299,7 @@ private extension StagePicture.Shows {
     var value: String {
         switch self {
         case .shown: "shown"
-        case .loading, .waiting: "loading"
+        case .loading, .decoding, .waiting: "loading"
         case .notAvailable: "not available"
         }
     }
@@ -353,7 +418,9 @@ struct AskPhoto: View {
     private func fetch(_ key: String) async {
         load.start(key, cached: ImageMemory.shared.image(key))
         guard let path else { load.downloaded(nil, for: key); return }
-        let url = try? await app.projects.mac.download(project, path)
+        // The phone's own copy when it is this version; else the Mac's, falling back to the copy the phone has.
+        let kept = app.companion.library.latest(project: project.id, name: path)
+        let url = kept?.version == Int64(project.mediaVersion) ? kept?.url : ((try? await app.projects.mac.download(project, path)) ?? kept?.url)
         guard !Task.isCancelled else { return }
         load.downloaded(url, for: key)
         guard let url, load.picture == nil else { return }

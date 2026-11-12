@@ -215,9 +215,16 @@ import CounterpartKit
         let project = Project(id: "p", createdAtMs: 1, updatedAtMs: 2, state: .ready)
         XCTAssertNil(ImageMemory.shared.anySize(project, "pictures/part-0123456789abcdef.png"))
         let image = UIGraphicsImageRenderer(size: CGSize(width: 4, height: 4)).image { $0.fill(CGRect(x: 0, y: 0, width: 4, height: 4)) }
-        ImageMemory.shared.store(image, "p#\(Int64(project.mediaVersion))#pictures/part-0123456789abcdef.png#300")
+        ImageMemory.shared.store(image, ImageMemory.key(project, "pictures/part-0123456789abcdef.png", 300))
         XCTAssertTrue(ImageMemory.shared.anySize(project, "pictures/part-0123456789abcdef.png") === image)
         XCTAssertNil(ImageMemory.shared.anySize(project, nil))
+        // #720: a Mac picture is named by what it draws, so a newer project version finds it decoded already.
+        let later = Project(id: "p", createdAtMs: 9_000, updatedAtMs: 9_001, state: .ready)
+        XCTAssertNotEqual(later.mediaVersion, project.mediaVersion)
+        XCTAssertTrue(ImageMemory.shared.anySize(later, "pictures/part-0123456789abcdef.png") === image)
+        // A render is per version: the last one decoded stands in while the newer version's comes.
+        ImageMemory.shared.store(image, ImageMemory.key(project, "renders/front.png", 300), project: "p", path: "renders/front.png")
+        XCTAssertTrue(ImageMemory.shared.anySize(later, "renders/front.png") === image)
     }
 
     func testAnEstimateShowsOnlyForItsOwnSettings() throws {
@@ -335,6 +342,51 @@ import CounterpartKit
         let uses = store.mcpCopies?.first?.uses.filter { $0.printerId == selected }
         XCTAssertEqual(uses?.count, 1, "the new canonical printer retains its software row")
         XCTAssertEqual(uses?.first?.canMove, true, "its explicit move action remains available")
+    }
+
+    /// #720, on the device: a newer project version with the same model bytes asks the Mac with the kept file's tag, gets 304,
+    /// and keeps the same file. The bytes come once.
+    func testAnUnchangedModelIsNotDownloadedTwiceOnThisDevice() async throws {
+        let mac = TaggedMac()
+        let pairing = PairingClient(store: PairingStore(store: Fixtures.store()), transport: mac)
+        let base = FileManager.default.temporaryDirectory.appending(path: "tagged-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: base) }
+        let library = OnDeviceLibrary(base: base.appending(path: "library"))
+        library.use(mac: "m")
+        let keep = OnDeviceLibrary.Keep.chosen
+        OnDeviceLibrary.Keep.chosen = .models
+        defer { OnDeviceLibrary.Keep.chosen = keep }
+        let client = CompanionClient(pairing: pairing, transport: mac, cache: base.appending(path: "cache"), library: library)
+        func project(_ ended: Int) throws -> Project {
+            try JSONDecoder().decode(Project.self, from: Data(#"{"id":"d79d4c15-d786-461c-b76e-ec687c8e2dad","createdAtMs":1,"updatedAtMs":2,"state":"ready","kind":"fit","photos":[],"passes":[{"startedAtMs":1,"endedAtMs":\#(ended),"status":"done"}],"current":{"model":"current/model.stl","renders":[]}}"#.utf8))
+        }
+        let first = try await client.download(project(1000), "model.stl")
+        let second = try await client.download(project(2000), "model.stl")
+        XCTAssertEqual(first, second, "the same file on disk, so its mesh and still are reused")
+        XCTAssertEqual(mac.bodies, 1, "the model's bytes came once")
+        XCTAssertEqual(mac.tags, [nil, "\"m1\""])
+    }
+
+    /// #720: a launch into one project's page reads that project alone, before (or without) the list. That one project is
+    /// not the Mac's list, so the library must not take every other project as deleted and let its files go.
+    func testOneProjectReadAloneIsNotTheMacsListForTheLibrary() {
+        let mac = SettingsMac()
+        let pairing = PairingClient(store: PairingStore(store: Fixtures.store()), transport: mac)
+        let store = ProjectsStore(mac: MacConnection(client: CompanionClient(pairing: pairing, transport: mac)), pairing: pairing)
+        let project = Project(id: "d79d4c15-d786-461c-b76e-ec687c8e2dad", createdAtMs: 1, updatedAtMs: 2, state: .ready)
+        XCTAssertTrue(store.replace(project, ticket: store.startRequest()))
+        XCTAssertEqual(store.projects.map(\.id), [project.id])
+        XCTAssertFalse(store.listedFromMac, "one project read alone never prunes the library")
+        let library = OnDeviceLibrary(base: FileManager.default.temporaryDirectory.appending(path: "prune-\(UUID().uuidString)"))
+        library.use(mac: "m")
+        let other = "0b6f0f43-7c35-4b8a-9a3c-8f0b4c4b2a11"
+        let file = FileManager.default.temporaryDirectory.appending(path: "kept-\(UUID().uuidString)")
+        try? Data("png".utf8).write(to: file)
+        _ = try? library.commit(file, project: other, name: "pictures/a.png", version: 1, file: "a.png")
+        let filler = LibraryFiller(client: CompanionClient(pairing: pairing, transport: mac, library: library))
+        filler.fill(store.projects, fromMac: store.listedFromMac)
+        XCTAssertNotNil(library.latest(project: other, name: "pictures/a.png"), "another project's kept picture stays")
+        try? FileManager.default.removeItem(at: library.base)
     }
 
     /// PRD §8.10: an update the Mac said waits, whose finishing event never came, stops claiming to wait and lets Update
@@ -552,6 +604,23 @@ private actor ResyncMac: HTTPTransport {
 }
 
 /// A Mac that serves settings, can stop answering, and can refuse an AI choice.
+/// A Mac that tags its model `"m1"` and answers 304 to a request that has it (#720).
+private final class TaggedMac: HTTPTransport, @unchecked Sendable {
+    private let lock = NSLock()
+    private var _bodies = 0, _tags: [String?] = []
+    var bodies: Int { lock.withLock { _bodies } }
+    var tags: [String?] { lock.withLock { _tags } }
+    func send(_ request: URLRequest, trust: TrustPolicy, limit: Int, resourceTimeout: TimeInterval) async throws -> HTTPReply {
+        let tag = request.value(forHTTPHeaderField: "If-None-Match")
+        return lock.withLock {
+            _tags.append(tag)
+            if tag == "\"m1\"" { return HTTPReply(status: 304, body: Data(), headers: ["ETag": "\"m1\""]) }
+            _bodies += 1
+            return HTTPReply(status: 200, body: Data("solid".utf8), headers: ["ETag": "\"m1\""])
+        }
+    }
+}
+
 private final class SettingsMac: HTTPTransport, @unchecked Sendable {
     static let refusal = "The AI choice changed on another device. Choose again."
     private let lock = NSLock()

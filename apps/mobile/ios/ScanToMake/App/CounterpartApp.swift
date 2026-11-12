@@ -34,6 +34,11 @@ struct CounterpartApp: App {
                     Task { await app.activities.reconcile(projects.compactMap { PrintActivitySnapshot($0) }, mayStart: true) }
                 }
                 .onChange(of: app.projects.settingsChanges) { _, _ in Task { await app.refreshCloud() } }
+                // The phone's library fills from every list, saved or fresh (docs/design/overhaul/on-device-library.md).
+                .onChange(of: app.projects.projects, initial: true) { _, projects in
+                    // Only the Mac's whole list says a project is gone; one project read alone (a launch into its page) does not.
+                    app.library.fill(projects, fromMac: app.projects.listedFromMac && app.projects.reachable == true)
+                }
         }
     }
 }
