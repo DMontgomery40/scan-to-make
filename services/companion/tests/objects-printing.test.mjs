@@ -848,6 +848,34 @@ test('the camera route serves one frame per 3 s to every viewer, and 404s a prin
   await assert.rejects(blind.service.camera(blind.object.id), error => error.reason === 'no-camera');
 });
 
+// #758 review (P2, #638): the "can't follow" print closes the question as stored, so Not printed can't bring it back.
+test('a print sent to a printer Counterpart can\'t follow closes the open question for good, through Not printed too', async t => {
+  const f = await setup(t, {reports: [status('RUNNING', 1)]});
+  f.deps.print.services.runner.runBundle = async (store, id) => { await store.setStatus(id, 'printed'); return {manifest: await store.read(id), result: {dispatch: {}}}; };
+  const askId = '00000000-0000-4000-8000-000000000758';
+  await f.store.update(f.object.id, o => ({...o, state: 'needs-closeup', question: {closeup: 'the clip'},
+    ask: {id: askId, question: 'Can you take a close-up of the clip?', answers: ['camera', 'photos', 'best-guess'], status: 'open', askedAtMs: 1}}));
+  await f.service.print(f.object.id);
+  const sent = await f.service.settled(f.object.id);
+  assert.equal(sent.state, 'sent');
+  const stored = await f.store.get(f.object.id);
+  assert.equal(stored.ask.status, 'answered', 'closed where it is kept, not only when read');
+  assert.equal(stored.question, undefined);
+  const notPrinted = await f.service.setStatus(f.object.id, 'not-printed');
+  assert.equal(notPrinted.state, 'ready');
+  assert.equal(notPrinted.ask.status, 'answered', 'Not printed doesn\'t reopen a question nobody can answer');
+  assert.equal(notPrinted.ask.id, askId);
+});
+
+test('a project stored printed with an open question stays closed when marked Not printed', async t => {
+  const f = await setup(t, {reports: [status('RUNNING', 1)]});
+  await f.store.update(f.object.id, o => ({...o, state: 'printed', question: {closeup: 'the hooks'},
+    ask: {id: '00000000-0000-4000-8000-000000000759', question: 'Can you take a close-up of the hooks?', answers: ['camera'], status: 'open', askedAtMs: 1}}));
+  const notPrinted = await f.service.setStatus(f.object.id, 'not-printed');
+  assert.deepEqual([notPrinted.state, notPrinted.ask.status, notPrinted.question], ['ready', 'answered', undefined]);
+  assert.equal((await f.store.get(f.object.id)).ask.status, 'answered');
+});
+
 test('a print whose job the printer can\'t identify is "sent", never "printed"; one named after our file is adopted', async t => {
   const f = await setup(t, {reports: [status('RUNNING', 1)]});
   f.deps.print.services.runner.runBundle = async (store, id) => { await store.setStatus(id, 'printed'); return {manifest: await store.read(id), result: {dispatch: {}}}; };

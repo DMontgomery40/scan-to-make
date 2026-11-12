@@ -857,7 +857,10 @@ export class ObjectService {
     if (there && !(status === 'works' && object.pendingFollowup) && !(object.publishedSelection && ['works', 'printed', 'not-printed'].includes(status))) return object;
     if (object.state === 'touching-up' || object.state === 'printing') throw new InvalidStateError('Wait until the current step finishes.');
     if ((status === 'works' || status === 'printed') && !object.current) throw new InvalidStateError("There's no model yet, so it can't be marked printed.");
-    const updated = await this.#deps.store.update(id, o => {
+    const updated = await this.#deps.store.update(id, stored => {
+      // A question a recorded print closed stays closed, also one stored open before that rule (#638): Not printed
+      // must not bring back a question nobody can answer.
+      const o = closedByPrint(stored);
       const {outcome: _outcome, ...rest} = o;
       if (o.publishedSelection && (status === 'works' || status === 'printed' || status === 'not-printed'))
         rest.plateProgress = acknowledgePlate(o, status === 'not-printed' ? 'not-printed' : 'printed');
@@ -2103,7 +2106,8 @@ export class ObjectService {
     const dispatchedAt = new Date().toISOString();
     if (!watchable || !session) {
       // PRD §2.6: no evidence, no "printed". The printer has it; Counterpart can't follow it.
-      const sentObject = await this.#deps.store.update(id, o => o.print?.bundleId !== bundleId ? o : ({...o, state: 'sent', progress: undefined, printConfirmation: undefined,
+      // Sent to a printer Counterpart can't follow records the print: it closes any open question (#638).
+      const sentObject = await this.#deps.store.update(id, o => o.print?.bundleId !== bundleId ? o : closedByPrint({...o, state: 'sent', progress: undefined, printConfirmation: undefined,
         failure: undefined, print: {...o.print, spools: sent, dispatchedAt, uncertain: true, ...(dispatch?.jobName ? {jobName: dispatch.jobName} : {}), ...(dispatch?.taskId ? {taskId: dispatch.taskId} : {}),
           ...(bambuConnect ? {sentVia: 'bambu-connect' as const} : {})}}));
       if (sentObject.print?.printId) await this.#emit({id: randomUUID(), type: 'print.sent', projectId: id, printId: sentObject.print.printId,
