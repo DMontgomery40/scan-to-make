@@ -425,6 +425,8 @@ export interface McpPackage {
   appCopy?: { kind: string; path?: string; version?: string };
   uses?: {
     destinationId: string;
+    /** The printer's catalog id: two profiles of one printer share it. */
+    printerId?: string;
     printer: string;
     mcpId: string;
     kind: string;
@@ -436,8 +438,15 @@ export interface McpPackage {
     /** The companion's sentence: which copy, its version, and whether it's older than Counterpart's. */
     words?: string;
   }[];
-  /** The Moves in the order the uses are listed, each titled by its printers, MCP and copy (Nov 6). */
-  moves?: { mcpId: string; title: string }[];
+  /**
+   * The Moves in the order the uses are listed, each titled by its printers, MCP and copy (Nov 6). #775 adds
+   * `printers` (each once), `words` (the row's one line) and `reason` (why it isn't kept current, Q9).
+   */
+  moves?: { mcpId: string; title: string; printers?: string[]; words?: string; reason?: string }[];
+  /** #775: the printers that use it, each once; a newer version Update installs; npm said nothing is newer. */
+  usedBy?: string[];
+  available?: string;
+  upToDate?: boolean;
   package: string;
   label: string;
   description: string;

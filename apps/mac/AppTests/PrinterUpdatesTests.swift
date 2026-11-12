@@ -1,5 +1,6 @@
 import XCTest
 import Darwin
+import struct CounterpartKit.PrinterSoftwareRow
 
 /// PRD §8.10: Update asks the companion, which updates the install its own way and reports with `mcp.update.*`.
 @MainActor final class PrinterUpdatesTests: XCTestCase {
@@ -46,6 +47,46 @@ import Darwin
         XCTAssertEqual(package.moves.map(\.title), ["Move Bambu Lab P1S (bambu-printer-mcp, Counterpart’s older copy at /x/printers/bambu-1.1.46) to Counterpart’s updated copy",
                                                      "Move Bambu Lab P1S (bambu-printer-mcp, your copy at /x/bambu-printer-mcp) to Counterpart’s updated copy"])
         XCTAssertEqual(package.uses?.first?.words, "Bambu Lab P1S uses Counterpart’s older copy at /x/printers/bambu-1.1.46 (1.1.65).")
+    }
+
+    // #775 (David, Nov 12, Settings → Printer software: "messy af looking, double entries, confusing wording"): the Mac's
+    // row reads the companion's fields through CounterpartKit's PrinterSoftwareRow, the same words as the iPhone and iPad.
+    private func software(_ name: String) throws -> [PrinterMcpPackage] {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<4 { root.deleteLastPathComponent() }
+        struct Reply: Decodable { let packages: [PrinterMcpPackage] }
+        return try JSONDecoder().decode(Reply.self, from: Data(contentsOf: root.appendingPathComponent("packages/contracts/fixtures/mcp-printer-software-\(name).json"))).packages
+    }
+
+    func testPrinterSoftwareRowsReadOncePerPrinterAndOfferUpdateOnlyWhenNewer() throws {
+        let current = try software("current").map(\.softwareRow)
+        XCTAssertEqual(current.map(\.usedBy), ["Used by P1S", "No printer uses it yet"], "two P1S profiles are one P1S")
+        XCTAssertEqual(current.map(\.version), ["1.1.94", "1.2.76"])
+        XCTAssertEqual(current.map(\.status), [.upToDate, .upToDate])
+        XCTAssertEqual(current.map(\.update), [nil, nil], "nothing newer: no Update")
+        XCTAssertTrue(current.allSatisfy { $0.others.isEmpty && !$0.allWords.contains("Counterpart’s copy") })
+        let update = try software("update")
+        XCTAssertEqual(update[0].softwareRow.status, .available("1.1.95"))
+        XCTAssertEqual(update[0].softwareRow.update, update[0].appMcpId)
+        let own = try software("own-copy")[0].softwareRow
+        XCTAssertEqual(own.others.map(\.words), ["P1S runs your own copy (1.1.80)"])
+        XCTAssertEqual(own.others.first?.footnote, "Runs from a folder you manage, so Counterpart doesn't update it by itself. Your own copy is left as it is.")
+    }
+
+    /// A companion from before #775 (the Mac always runs its own, but the row must not depend on it): no status, no
+    /// Update, printers once by name.
+    func testPrinterSoftwareRowFromAnOlderCompanionRendersCleanly() throws {
+        let json = #"""
+        {"package":"bambu-printer-mcp","label":"bambu-printer-mcp","description":"d","installed":true,"version":"1.1.94","latestVersion":"1.1.95","appMcpId":"mcp-a","installs":[],
+         "appCopy":{"kind":"app","version":"1.1.94"},
+         "uses":[{"destinationId":"current","printer":"P1S","mcpId":"mcp-a","kind":"app","version":"1.1.94","canMove":false,"managed":true},
+                 {"destinationId":"lan","printer":"P1S","mcpId":"mcp-a","kind":"app","version":"1.1.94","canMove":false,"managed":true}]}
+        """#
+        let row = try JSONDecoder().decode(PrinterMcpPackage.self, from: Data(json.utf8)).softwareRow
+        XCTAssertEqual(row.usedBy, "Used by P1S")
+        XCTAssertNil(row.status)
+        XCTAssertNil(row.update)
+        XCTAssertEqual(row.others, [])
     }
 
     private func event(_ type: String, _ data: String) throws -> CounterpartEvent {

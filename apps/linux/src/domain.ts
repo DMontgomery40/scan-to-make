@@ -519,7 +519,7 @@ export function mcpUsageWords(
 }
 
 /** The Moves in the order the uses are listed (never by id), each titled so two Moves for one printer read apart. */
-export function mcpMoves(pkg: import("./types").McpPackage): { mcpId: string; title: string }[] {
+export function mcpMoves(pkg: import("./types").McpPackage): NonNullable<import("./types").McpPackage["moves"]> {
   if (pkg.moves) return pkg.moves;
   const uses = pkg.uses ?? [];
   return [...new Set(uses.filter((use) => use.canMove).map((use) => use.mcpId))].map((mcpId) => {
@@ -529,6 +529,51 @@ export function mcpMoves(pkg: import("./types").McpPackage): { mcpId: string; ti
       : first.path ? `your copy at ${first.path}` : "your copy";
     return { mcpId, title: `Move ${[...new Set(on.map((use) => use.printer))].join(", ")} (${pkg.label}, ${from}) to Counterpart’s updated copy` };
   });
+}
+
+/** "P1S", "P1S and X1C", "P1S, X1C and A1". */
+export function listedNames(names: string[]): string {
+  return names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names.at(-1)}` : names[0] ?? "";
+}
+/** Each printer once, by its catalog id (by name from a companion without ids), in the order listed. */
+function printersOnce(uses: { printerId?: string; printer: string }[]): string[] {
+  return [...new Map(uses.map((use) => [use.printerId ?? use.printer, use.printer])).values()];
+}
+
+/**
+ * Settings → Printer software (#775), the same as CounterpartKit's `PrinterSoftwareRow` (iPhone, iPad, Mac) and Android's
+ * `printerSoftwareRow`: its name and version; "Up to date" or "<version> available" with one Update; the printers that
+ * use it, each once; and only when a printer runs another copy, one line and one "Use Counterpart’s". A companion from
+ * before #775 sends no `usedBy`, `available` or `upToDate`: no status line and no Update.
+ */
+export function printerSoftwareRow(pkg: import("./types").McpPackage, printerId?: string) {
+  const uses = pkg.uses ?? [];
+  const status = pkg.available && pkg.appCopy ? `${pkg.available} available` : pkg.upToDate ? "Up to date" : undefined;
+  const others = mcpMoves(pkg)
+    .filter((move) => !printerId || uses.some((use) => use.printerId === printerId && use.mcpId === move.mcpId))
+    .map((move) => {
+      const on = uses.filter((use) => use.mcpId === move.mcpId), first = on[0];
+      const printers = move.printers ?? printersOnce(on);
+      const words = move.words ?? (first
+        ? `${listedNames(printers)} ${printers.length > 1 ? "run" : "runs"} ${first.kind === "app" ? "an earlier copy" : "your own copy"}${first.version ? ` (${first.version})` : ""}`
+        : move.title);
+      const lead = `${listedNames(printers)} `;
+      const copy = words.startsWith(lead) ? words.slice(lead.length).replace(/^runs? /, "") : words;
+      return {
+        mcpId: move.mcpId, words, button: "Use Counterpart’s",
+        label: `Use Counterpart’s ${pkg.label} for ${listedNames(printers)} instead of ${copy}`,
+        footnote: [move.reason, "Your own copy is left as it is."].filter(Boolean).join(" "),
+      };
+    });
+  const used = pkg.usedBy ?? printersOnce(uses);
+  return {
+    name: pkg.label,
+    version: pkg.appCopy?.version ?? pkg.version,
+    status,
+    update: pkg.available && pkg.appCopy ? pkg.appMcpId : undefined,
+    usedBy: used.length ? `Used by ${listedNames(used)}` : "No printer uses it yet",
+    others,
+  };
 }
 
 /** The installs a package's notices belong to: its printers' and Counterpart's own copy. */

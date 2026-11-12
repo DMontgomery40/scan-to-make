@@ -62,17 +62,10 @@ public struct MCPPackageCopies: Decodable, Sendable, Identifiable {
     /// Settings → Printer software's row (#775), from the companion's fields. `printerId` narrows it to one printer's page.
     public func row(printerId: String? = nil) -> PrinterSoftwareRow {
         let mine = moves.filter { move in printerId == nil || uses.contains { $0.printerId == printerId && $0.mcpId == move.mcpId } }
-        let others = mine.map { move -> PrinterSoftwareRow.Other in
-            let on = uses.filter { $0.mcpId == move.mcpId }
-            let printers = move.printers ?? PrinterSoftwareRow.once(on.map { ($0.printerId, $0.printer) })
-            let words = move.words ?? on.first.map { PrinterSoftwareRow.otherCopy(printers, earlier: $0.kind == "app", version: $0.version) } ?? move.title
-            return PrinterSoftwareRow.Other(mcpId: move.mcpId, label: label, printers: printers, words: words, reason: move.reason)
-        }
-        return PrinterSoftwareRow(name: label, version: appCopy?.version ?? version,
-                                  status: available.flatMap { appCopy == nil ? nil : .available($0) } ?? (upToDate == true ? .upToDate : nil),
-                                  update: available != nil && appCopy != nil ? appMcpId : nil,
-                                  usedBy: PrinterSoftwareRow.usedBy(usedBy ?? PrinterSoftwareRow.once(uses.map { ($0.printerId, $0.printer) })),
-                                  others: others)
+        return PrinterSoftwareRow.build(label: label, version: appCopy?.version ?? version, appMcpId: appMcpId, hasAppCopy: appCopy != nil,
+                                        available: available, upToDate: upToDate, usedBy: usedBy,
+                                        uses: uses.map { ($0.printerId, $0.printer, $0.mcpId, $0.kind, $0.version) },
+                                        moves: mine.map { ($0.mcpId, $0.title, $0.printers, $0.words, $0.reason) })
     }
 }
 
@@ -100,6 +93,24 @@ public struct PrinterSoftwareRow: Equatable, Sendable {
         /// Under the button, only in this case: why it isn't kept current, and that the person's copy stays.
         public var footnote: String { [reason, PrinterSoftwareRow.leftAlone].compactMap { $0 }.joined(separator: " ") }
     }
+    /// The row from the companion's `printers.mcps` fields (iPhone and iPad: `MCPPackageCopies.row`; Mac: ControlKit's
+    /// `PrinterMcpPackage`). A companion from before #775 sends no `available`, `upToDate`, `usedBy` or Move `words`:
+    /// no status line and no Update, printers once by id (by name where the client has no id), the same plain line.
+    public static func build(label: String, version: String?, appMcpId: String, hasAppCopy: Bool, available: String?, upToDate: Bool?, usedBy: [String]?,
+                             uses: [(printerId: String, printer: String, mcpId: String, kind: String, version: String?)],
+                             moves: [(mcpId: String, title: String, printers: [String]?, words: String?, reason: String?)]) -> PrinterSoftwareRow {
+        let others = moves.map { move -> Other in
+            let on = uses.filter { $0.mcpId == move.mcpId }
+            let printers = move.printers ?? once(on.map { ($0.printerId, $0.printer) })
+            let words = move.words ?? on.first.map { otherCopy(printers, earlier: $0.kind == "app", version: $0.version) } ?? move.title
+            return Other(mcpId: move.mcpId, label: label, printers: printers, words: words, reason: move.reason)
+        }
+        let newer = hasAppCopy ? available : nil
+        return PrinterSoftwareRow(name: label, version: version, status: newer.map { .available($0) } ?? (upToDate == true ? .upToDate : nil),
+                                  update: newer == nil ? nil : appMcpId,
+                                  usedBy: Self.usedBy(usedBy ?? once(uses.map { ($0.printerId, $0.printer) })), others: others)
+    }
+
     public let name: String
     public let version: String?
     public let status: Status?

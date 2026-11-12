@@ -86,6 +86,7 @@ import CounterpartKit
     private(set) var mcpUpdates: [String: MCPUpdateProgress] = [:]
     /// A wait (120 s) or an update under way (35 min) that hears nothing more says so and offers Update again (the Mac's clock, CounterpartKit).
     @ObservationIgnored let mcpWaits = MCPUpdateWaits()
+    /// Each Use Counterpart’s pressed this session, by install, with its package: how it ended stays on that MCP's row (#775).
     var attemptedMcpMoves: [String: String] = [:]
     /// What each printer last reported loaded, from a print sheet (the Mac reports spools per project).
     var spools: [String: [PrinterFilament]] = [:]

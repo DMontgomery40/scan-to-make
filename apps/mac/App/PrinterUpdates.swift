@@ -4,6 +4,7 @@ import SwiftUI
 import ControlKit
 #endif
 import class CounterpartKit.MCPUpdateWaits
+import struct CounterpartKit.PrinterSoftwareRow
 
 /// One printer MCP install's update, as Settings → Printers shows it (PRD §8.10). The companion does the work; the
 /// Mac shows what `printers.updateMcp` answers and what the `mcp.update.*` events say after it.
@@ -209,8 +210,15 @@ extension PrinterMcpPackage {
     /// Installed, and a newer version is published: a package no printer uses then offers Update, which installs
     /// the latest as Counterpart's own copy (`printers.updateMcp` with `appMcpId`, #320's path).
     var offersUpdate: Bool { installed && McpUpdateStatus.newer(installed: version, latest: latestVersion) }
+    /// Settings → Printer software's row (#775), the same words as the iPhone and iPad (CounterpartKit `PrinterSoftwareRow`).
+    var softwareRow: PrinterSoftwareRow {
+        let uses = (uses ?? []).map { ($0.printerId ?? $0.printer, $0.printer, $0.mcpId, $0.kind, $0.version) }
+        return PrinterSoftwareRow.build(label: label, version: appCopy?.version ?? (installed ? version : nil), appMcpId: appMcpId, hasAppCopy: appCopy != nil,
+                                        available: available, upToDate: upToDate, usedBy: usedBy, uses: uses,
+                                        moves: moves.map { ($0.mcpId, $0.title, $0.printers, $0.words, $0.reason) })
+    }
     /// The Update button's name outside its row (the rotor lists buttons alone).
     func updateLabel(failed: Bool) -> String {
-        failed ? "Try updating \(label) again" : "Update \(label)" + (latestVersion.map { " to " + $0 } ?? "")
+        failed ? "Try updating \(label) again" : "Update \(label)" + ((available ?? latestVersion).map { " to " + $0 } ?? "")
     }
 }

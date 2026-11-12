@@ -424,8 +424,9 @@ struct PrintersSettings: View {
                     }
                 }
                 if PrinterMCP.list(printers).isEmpty && unusedPackages.isEmpty { Text("None found yet.").foregroundStyle(.secondary) }
-            } header: { Text("Printer MCPs") } footer: {
-                if setup.available {
+            } header: { Text("Printer software") } footer: {
+                // Only beside a Download (#775: no standing footnote).
+                if setup.available, setup.packages.contains(where: { !$0.installed }) {
                     Text("Download installs that MCP for Counterpart only. You need just the one your printer uses.")
                         .font(.caption).foregroundStyle(.secondary)
                 }

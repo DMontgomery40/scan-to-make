@@ -732,6 +732,8 @@ public struct PrinterMcpPackage: Decodable, Sendable, Equatable, Identifiable {
     }
     public struct Usage: Decodable, Sendable, Equatable, Identifiable {
         public let destinationId: String
+        /// The printer's catalog id: two profiles of one printer share it.
+        public let printerId: String?
         public let printer: String
         public let mcpId: String
         public let kind: String
@@ -743,7 +745,7 @@ public struct PrinterMcpPackage: Decodable, Sendable, Equatable, Identifiable {
         /// The companion's sentence: which copy, its version, and whether it's older than Counterpart's.
         let sentence: String?
         public var id: String { destinationId }
-        enum CodingKeys: String, CodingKey { case destinationId, printer, mcpId, kind, path, version, canMove, managed, sentence = "words" }
+        enum CodingKeys: String, CodingKey { case destinationId, printerId, printer, mcpId, kind, path, version, canMove, managed, sentence = "words" }
         public var words: String {
             if let sentence { return sentence }
             let place = path.map { " at " + ($0 as NSString).abbreviatingWithTildeInPath } ?? ""
@@ -751,9 +753,20 @@ public struct PrinterMcpPackage: Decodable, Sendable, Equatable, Identifiable {
             return "\(printer) uses \(location) (\(version ?? "version unknown"))."
         }
     }
-    /// One Move to Counterpart's updated copy, named by its printers, MCP and the copy they leave.
-    public struct Move: Decodable, Sendable, Equatable { public let mcpId: String; public let title: String }
+    /// One Move to Counterpart's updated copy, named by its printers, MCP and the copy they leave. #775's companion adds
+    /// `printers` (each once), `words` (the row's one line) and `reason` (why it isn't kept current, Q9).
+    public struct Move: Decodable, Sendable, Equatable {
+        public let mcpId: String; public let title: String
+        public var printers: [String]? = nil; public var words: String? = nil; public var reason: String? = nil
+        public init(mcpId: String, title: String, printers: [String]? = nil, words: String? = nil, reason: String? = nil) {
+            self.mcpId = mcpId; self.title = title; self.printers = printers; self.words = words; self.reason = reason
+        }
+    }
     public let uses: [Usage]?
+    /// #775: the printers that use it, each once; a newer version Update installs; npm said nothing is newer.
+    public let usedBy: [String]?
+    public let available: String?
+    public let upToDate: Bool?
     let listedMoves: [Move]?
     /// The Moves in the order their printers are listed (never by id), each titled so it reads apart from the others.
     public var moves: [Move] {
@@ -780,12 +793,13 @@ public struct PrinterMcpPackage: Decodable, Sendable, Equatable, Identifiable {
     public let appMcpId: String
     public let installs: [Install]
     public var id: String { package }
-    enum CodingKeys: String, CodingKey { case uses, appCopy, package, label, description, installed, version, latestVersion, appMcpId, installs, listedMoves = "moves" }
+    enum CodingKeys: String, CodingKey { case uses, appCopy, package, label, description, installed, version, latestVersion, appMcpId, installs, usedBy, available, upToDate, listedMoves = "moves" }
     public init(package: String, label: String, description: String, installed: Bool, version: String? = nil, latestVersion: String? = nil,
-                appMcpId: String, installs: [Install] = [], uses: [Usage]? = nil, appCopy: Install? = nil, moves: [Move]? = nil) {
+                appMcpId: String, installs: [Install] = [], uses: [Usage]? = nil, appCopy: Install? = nil, moves: [Move]? = nil,
+                usedBy: [String]? = nil, available: String? = nil, upToDate: Bool? = nil) {
         self.package = package; self.label = label; self.description = description; self.installed = installed; self.version = version
         self.latestVersion = latestVersion; self.appMcpId = appMcpId; self.installs = installs; self.uses = uses; self.appCopy = appCopy
-        self.listedMoves = moves
+        self.listedMoves = moves; self.usedBy = usedBy; self.available = available; self.upToDate = upToDate
     }
 }
 
