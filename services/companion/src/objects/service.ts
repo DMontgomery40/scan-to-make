@@ -1919,12 +1919,18 @@ export class ObjectService {
     const manifest = await bundles.create({...(object.kind === 'published' || isMultipart(object) ? {model: {bytes: stl, format: isMultipart(object) ? '3mf' as const : 'stl' as const}} : {stl}), prompt: '', backend: runner.backend, ...(selected ? {selection:selected} : {})});
     const printId = randomUUID();
     const plate = selectedPlateIdentity(object);
-    // Every print names the design it printed (#616). A designed project with a model and no sealed design yet (made
-    // before designs were kept, or by a path that doesn't seal) has its model sealed now, so this print can't be orphaned.
-    let design = object.versions?.at(-1);
+    // Every print names the design whose bytes it slices (#616): the kept design holding exactly these bytes. A designed
+    // project's model that no design holds (made before designs were kept, a path that doesn't seal, or a checkpoint a
+    // pass kept when it stopped at a limit or failed) is sealed now as its own design, so this print can't be orphaned
+    // or credited to the design before it.
+    const modelSha256 = createHash('sha256').update(stl).digest('hex');
+    let design = object.kind === 'published' ? object.versions?.at(-1) : [...(object.versions ?? [])].reverse().find(v => v.modelSha256 === modelSha256);
     if (!design && object.kind !== 'published' && object.current) {
       const sealed = await sealVersion(object, this.dir(id), object.current, {endedAtMs: Date.now()});
-      await this.#deps.store.update(id, o => ({...o, versions: [...(o.versions ?? []), sealed]}), {keepUpdatedAt: true});
+      // A new design after earlier ones hasn't been shown to work: like a finished pass's, it drops the project's answer
+      // (the earlier designs keep theirs). The first design sealed here is the model the answer was given about.
+      await this.#deps.store.update(id, o => o.versions?.some(v => v.id === sealed.id) ? o
+        : {...(o.versions?.length ? (({outcome: _outcome, ...rest}) => rest)(o) : o), versions: [...(o.versions ?? []), sealed]}, {keepUpdatedAt: true});
       design = sealed;
     }
     const print = {bundleId: manifest.id, printId, ...(design ? {versionId: design.id} : {}), ...(plate ? {plate} : {}), ...(printDestination ? {destination: printDestination, destinationId: printDestination.id} : {}),

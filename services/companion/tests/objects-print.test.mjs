@@ -1,4 +1,5 @@
 import test from 'node:test';
+import {createHash} from 'node:crypto';
 import assert from 'node:assert/strict';
 import {mkdir, readFile, rm, writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
@@ -16,7 +17,7 @@ const STL = Buffer.from('solid m\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\n
 // The advertised Bambu hardware-confirmation schema (including its unchecked default).
 const CONFIRM = {type: 'object', properties: {confirmed: {type: 'boolean', title: 'I checked the printer and confirm this operation', default: false}}, required: ['confirmed']};
 
-async function setup({runnerFails, afterDispatch, uncertain, objects = 1, slowMs = 0, schema = CONFIRM, mode = 'form', timeoutMs = 5000, inventory, progressUpdates, printerReport, relayExpiresEarlyMs} = {}) {
+async function setup({runnerFails, afterDispatch, uncertain, objects = 1, slowMs = 0, schema = CONFIRM, mode = 'form', timeoutMs = 5000, inventory, progressUpdates, printerReport, relayExpiresEarlyMs, runTouchup} = {}) {
   const root = await tempDir('objects-print-');
   const store = new ObjectStore(join(root, 'objects'));
   const relay = new InMemoryElicitationRelay({timeoutMs});
@@ -57,7 +58,7 @@ async function setup({runnerFails, afterDispatch, uncertain, objects = 1, slowMs
   const printers = {capabilities: () => ({filaments: 'ams'}), lastReport: () => printerReport, session: () => undefined,
     record() {}, refresh: async () => {}, printing: async () => false, list: () => ({defaultDestinationId: 'default', destinations: []})};
   const emitted = [];
-  const service = showing(new ObjectService({store, events: {emit: async event => { emitted.push(event); }}, runTouchup: async () => { throw new Error('not used'); }, stlInfo: async () => undefined, claudePath: '/c',
+  const service = showing(new ObjectService({store, events: {emit: async event => { emitted.push(event); }}, runTouchup: runTouchup ?? (async () => { throw new Error('not used'); }), stlInfo: async () => undefined, claudePath: '/c',
     handoff: {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true'}}, printers,
     printerCatalog: {defaultDestinationId: 'default', canonical: id => id, destinations: [{id: 'default', name: 'Bambu Lab P1S', backend: 'bambu-printer-mcp', source: 'current', origin: 'printer-handoff'}],
       resolve: id => id === 'default' ? {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true'}} : undefined},
@@ -577,6 +578,55 @@ test('a retained checkpoint in a failed capped project remains available for exp
   const sent = await service.settled(object.id);
   assert.equal(sent.state, 'sent');
   assert.equal(await readFile(join(store.dir(object.id), sent.current.model), 'utf8'), STL.toString());
+});
+
+// #616 follow-up: a pass that stops at a limit keeps its checkpoint in current/ but seals no design. Printing that
+// checkpoint names the design whose bytes were sliced: the checkpoint, sealed as its own design, never the one before it.
+test('printing a checkpoint kept by a capped correction records it against its own design, not the earlier printed one', async t => {
+  const CHECKPOINT = 'solid checkpoint\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 2 0 0\nvertex 0 2 0\nendloop\nendfacet\nendsolid checkpoint\n';
+  const runTouchup = async () => {
+    const out = await tempDir('objects-print-pass-'); t.after(() => rm(out, {recursive: true, force: true}));
+    await writeFile(join(out, 'touched.stl'), CHECKPOINT);
+    return {status: 'capped', reason: 'stopped at the 120 tool-call limit', model: join(out, 'touched.stl'), renders: [], checkpoints: [], stats: {seconds: 1, toolCalls: 120}, passDir: out};
+  };
+  const {service, store, object} = await setup({runTouchup});
+  t.after(() => service.close());
+  // The first design prints, finishes and is answered It works.
+  await service.print(object.id);
+  await approve(service, object.id);
+  await service.settled(object.id);
+  await store.update(object.id, o => ({...o, state: 'printed', print: {...o.print, monitor: {phase: 'ended', endState: 'done', endedAt: new Date().toISOString()}}}));
+  await service.setStatus(object.id, 'works');
+  const first = (await store.get(object.id)).versions;
+  assert.equal(first.length, 1);
+  // A correction stops at the limit with a checkpoint: current/ changes, no design is sealed.
+  await service.correct(object.id, 'Make it wider.');
+  const stopped = await service.settled(object.id);
+  assert.equal(stopped.state, 'failed');
+  assert.equal(await readFile(join(store.dir(object.id), stopped.current.model), 'utf8'), CHECKPOINT);
+  assert.equal(stopped.versions.length, 1, 'a capped pass seals nothing');
+  // Print the checkpoint.
+  await service.print(object.id);
+  await approve(service, object.id);
+  const sent = await service.settled(object.id);
+  const sha = createHash('sha256').update(CHECKPOINT).digest('hex');
+  const attempt = sent.prints.at(-1);
+  const design = sent.versions.find(v => v.id === attempt.versionId);
+  assert.ok(design, 'the attempt names a kept design');
+  assert.equal(design.modelSha256, sha, 'the design it names holds the bytes that were sliced');
+  assert.notEqual(design.id, first[0].id);
+  assert.equal(await readFile(join(store.dir(object.id), design.result.model), 'utf8'), CHECKPOINT);
+  assert.equal(sent.print.versionId, design.id);
+  assert.equal(sent.prints[0].versionId, first[0].id, 'the first print stays on the first design');
+  assert.equal(sent.versions[0].outcome, 'works', 'the first design keeps its answer');
+  assert.equal(design.outcome, undefined, 'the printed checkpoint has not been answered');
+  assert.equal(sent.outcome, undefined, 'a new design is not Done because an earlier one worked');
+  // Printing the same checkpoint again names the same design: nothing is sealed twice.
+  await service.print(object.id, {checked: true});
+  await approve(service, object.id);
+  const again = await service.settled(object.id);
+  assert.equal(again.versions.length, 2);
+  assert.equal(again.prints.at(-1).versionId, design.id);
 });
 
 // Counterpart is a bridge: the designer's supports choice goes to the slicer as it is, and the slicer orients the model.
