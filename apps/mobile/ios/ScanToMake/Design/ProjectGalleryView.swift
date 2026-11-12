@@ -84,7 +84,9 @@ struct ProjectGalleryView: View {
         .onChange(of: scenePhase) { _, phase in if phase != .active { cancelAR() } }
         .onChange(of: selected) { cancelAR(); arFailed = false }
         .onDisappear { cancelAR() }
-        .task(id: wantKey) { if wants.claim(wantKey) { want() } }
+        // On every appear too, not only a new key: coming back to the page starts again a download that failed meanwhile
+        // (`want` does nothing for one running or here).
+        .task(id: wantKey) { _ = wants.claim(wantKey); want() }
     }
 
     /// The store fetches them, so leaving the page never stops a download (Nov 10). Coming back to the page or to the app

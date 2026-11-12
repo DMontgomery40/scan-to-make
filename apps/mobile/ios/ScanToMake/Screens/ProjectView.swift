@@ -485,7 +485,8 @@ struct ProjectView: View {
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.protectedDataDidBecomeAvailableNotification)) { _ in
             if scenePhase == .active { store.models.recover() }
         }
-        .task(id: demandKey(object)) { if modelDemand.claim(demandKey(object)) { demandModel(object) } }
+        // On every appear too: back on the page, a download that failed meanwhile starts again (`want` is idempotent).
+        .task(id: demandKey(object)) { _ = modelDemand.claim(demandKey(object)); demandModel(object) }
     }
 
     private func demandKey(_ object: Project) -> String { "\(object.id)#\(object.mediaVersion)#\(object.current?.model ?? "")#\(scenePhase)" }
@@ -638,7 +639,7 @@ struct ProjectView: View {
                                arFile: $arFile, localScan: scanURL, working: working || away,
                                locate: { act { try await store.mac.client.locate(object.id) } })
             .task(id: scanKey) {
-                if scanKick.claim(scanKey) { scanURL = object.current == nil ? store.mac.localScan(object.id) : nil }
+                _ = scanKick.claim(scanKey); scanURL = object.current == nil ? store.mac.localScan(object.id) : nil
             }
             .ignoresSafeArea(edges: .top)
             scanLineage(object)

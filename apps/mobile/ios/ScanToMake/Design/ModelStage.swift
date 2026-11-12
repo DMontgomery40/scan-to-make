@@ -106,6 +106,8 @@ struct ModelStage: View {
                 guard interactive && scenePhase == .active else { return }
                 settledZoom = zoom; touch()
             }, isEnabled: interactive)
+        // Once per key, never again on a re-appear: a second start for the same model cancels the load in flight, which then
+        // returns nothing and would mark a good model failed.
         .task(id: startKey) { if starts.claim(startKey) { start() } }
         .task(id: lastTouch) {
             guard live else { return }
