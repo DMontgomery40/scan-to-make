@@ -1,26 +1,15 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {execFileSync} from 'node:child_process';
-import {readFile,rm} from 'node:fs/promises';
+import {readFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {X509Certificate} from 'node:crypto';
-import {createServer} from 'node:net';
 import {request} from 'node:https';
 import {RemoteAuthStore} from '../dist/remote-auth.js';
 import {startCompanionServer} from '../dist/server.js';
-import {tempDir} from './support/temp.mjs';
-async function fixture(t) {
- const root=await tempDir('lan-auth-'); t.after(()=>rm(root,{recursive:true,force:true}));
- execFileSync('openssl',['req','-x509','-newkey','rsa:2048','-nodes','-days','1','-subj','/CN=127.0.0.1','-addext','subjectAltName=IP:127.0.0.1','-keyout',join(root,'key.pem'),'-out',join(root,'cert.pem')],{stdio:'ignore'});
- const cert=await readFile(join(root,'cert.pem')),key=await readFile(join(root,'key.pem'));
- const reservation=createServer(); await new Promise(r=>reservation.listen(0,'127.0.0.1',r));
- const port=reservation.address().port; await new Promise(r=>reservation.close(r));
- const host=`127.0.0.1:${port}`;
- const certificateSha256=new X509Certificate(cert).fingerprint256.replaceAll(':','').toLowerCase();
- const store=await RemoteAuthStore.create(join(root,'auth'),{transport:'lan',host,certificateSha256,allowedLogins:['lan']});
- return {root,store,cert,key,port,certificateSha256};
-}
+import {lanFixture,onFreePort} from './support/lan.mjs';
+const fixture=t=>lanFixture(t,{prefix:'lan-auth-'});
 function wire(url,cert,path,{method='GET',headers={},body}={}) {
  return new Promise((resolve,reject)=>{
   const req=request(new URL(path,url),{method,headers,ca:cert,servername:''},res=>{
@@ -30,7 +19,7 @@ function wire(url,cert,path,{method='GET',headers={},body}={}) {
 }
 test('existing VPN pairs over direct verified TLS without Serve identity and still requires a device token',async t=>{
  const f=await fixture(t);
- const server=await startCompanionServer({remoteAuth:f.store,lanTls:{cert:f.cert,key:f.key}});t.after(()=>server.close());
+ const server=await f.serve();t.after(()=>server.close());
  assert.equal(server.url,`https://127.0.0.1:${f.port}`);
  const invite=await f.store.createPairing('lan',['generation:health','projects:read','projects:write','captures:read','captures:import']);
  assert.equal(invite.certificateSha256,f.certificateSha256);
@@ -63,14 +52,17 @@ test('installer certificate and init-lan CLI agree with the persisted registry a
  execFileSync('python3',[fileURLToPath(new URL('../../../deploy/companion/generate-lan-tls.py',import.meta.url)),tls,'127.0.0.1']);
  const cert=await readFile(join(tls,'cert.pem')),key=await readFile(join(tls,'key.pem'));
  const cli=fileURLToPath(new URL('../dist/remote-auth-cli.js',import.meta.url));
- const directory=join(f.root,'cli-auth');
- const url=`https://127.0.0.1:${f.port}`;
- const result=JSON.parse(execFileSync(process.execPath,[cli,'init-lan',directory,url,join(tls,'cert.pem')],{encoding:'utf8'}));
- assert.equal(result.transport,'lan');assert.equal(result.host,`127.0.0.1:${f.port}`);
- const store=await RemoteAuthStore.open(directory);
- assert.equal(store.transport,'lan');assert.equal(store.baseUrl,url);assert(store.allowsLogin('lan'));
- assert.equal(store.certificateSha256,new X509Certificate(cert).fingerprint256.replaceAll(':','').toLowerCase());
- const server=await startCompanionServer({remoteAuth:store,lanTls:{cert,key}});t.after(()=>server.close());
+ // The CLI writes the port into the registry before the companion binds it: a port taken meanwhile is chosen again.
+ const server=await onFreePort(async port=>{
+  const directory=join(f.root,`cli-auth-${port}`);
+  const url=`https://127.0.0.1:${port}`;
+  const result=JSON.parse(execFileSync(process.execPath,[cli,'init-lan',directory,url,join(tls,'cert.pem')],{encoding:'utf8'}));
+  assert.equal(result.transport,'lan');assert.equal(result.host,`127.0.0.1:${port}`);
+  const store=await RemoteAuthStore.open(directory);
+  assert.equal(store.transport,'lan');assert.equal(store.baseUrl,url);assert(store.allowsLogin('lan'));
+  assert.equal(store.certificateSha256,new X509Certificate(cert).fingerprint256.replaceAll(':','').toLowerCase());
+  return startCompanionServer({remoteAuth:store,lanTls:{cert,key}});
+ },{first:f.port});t.after(()=>server.close());
  assert.equal((await wire(server.url,cert,'/healthz')).status,401);
  assert.throws(()=>execFileSync(process.execPath,[cli,'init-lan',join(f.root,'mismatch'),'https://127.0.0.2:9077',join(tls,'cert.pem')],{stdio:'pipe'}));
  await assert.rejects(()=>RemoteAuthStore.open(join(f.root,'mismatch')));
@@ -83,7 +75,7 @@ test('PRD §5.10: a phone enrols with the Mac\'s iCloud token: once, while curre
  const clock = {now: Date.now()};
  const icloud = new IcloudEnrolment(join(f.root, 'auth', 'mac-id'), {now: () => clock.now});
  const presence = new DevicePresence(join(f.root, 'auth', 'device-presence.json'));
- const server = await startCompanionServer({remoteAuth: f.store, lanTls: {cert: f.cert, key: f.key}, icloud, presence}); t.after(() => server.close());
+ const server = await f.serve({icloud, presence}); t.after(() => server.close());
  const install = 'i'.repeat(43);
  const enrol = body => wire(server.url, f.cert, '/v1/pair/icloud', {method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify(body)});
  const first = await icloud.token();
@@ -122,7 +114,7 @@ test('failed iCloud enrolment attempts are rate-limited like pairing attempts', 
  const {IcloudEnrolment} = await import('../dist/icloud-enrolment.js');
  const f = await fixture(t);
  const icloud = new IcloudEnrolment(join(f.root, 'auth', 'mac-id'));
- const server = await startCompanionServer({remoteAuth: f.store, lanTls: {cert: f.cert, key: f.key}, icloud}); t.after(() => server.close());
+ const server = await f.serve({icloud}); t.after(() => server.close());
  const {macId} = await icloud.token();
  const statuses = [];
  for (let i = 0; i < 6; i++) statuses.push((await wire(server.url, f.cert, '/v1/pair/icloud', {method: 'POST', headers: {'content-type': 'application/json'},
