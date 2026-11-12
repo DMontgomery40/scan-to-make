@@ -46,8 +46,8 @@ import {ObjectNotFoundError, ObjectStore, restoreLocate, type LocateSnapshot, ty
 import {fitRequest, workerRequest} from './fit.js';
 import {inheritHistory} from './inherited.js';
 import {answeredSizes, askKind, InvalidSizesError, mergeCheckedSizes, sizesMessage, sizesNote, withCheckedSizes} from './asks.js';
-/** An answer to an open question: photos, words, Best Guess, and for a sizes question its numbers; any together. */
-/** `sizes` with `measured`: a sizes question's numbers and the ids the person typed or edited (contracts `SizesAnswerSchema`). */
+/** An answer to an open question: photos, words, Best Guess, and for a sizes question its numbers with `measured`,
+ *  the ids the person typed or edited (contracts `SizesAnswerSchema`); any together. */
 export type AskAnswer = {bestGuess?: boolean; text?: string; photoNames?: string[]; sizes?: {id: string; mm: number}[]; measured?: string[]};
 import {AskSchema, type Fit} from '@scan-to-make/contracts/counterpart';
 import {lastDesignPass, passResume, withPassEnded, type PassEnd} from './pass-end.js';
