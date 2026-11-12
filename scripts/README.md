@@ -58,6 +58,11 @@ python3 scripts/lane.py --status                                              # 
 - **Stale state blocks nobody.** The kernel locks are the truth. A ticket or record counts only while its owner
   keeps it flock'ed and its pid is alive, so a caller killed even with SIGKILL drops out of the queue and
   `--status`. If `lane.py` itself is killed, its command keeps running outside the lane (as with `lockf`).
+- **A waiter stopped before its turn is listed.** On Nov 10 a T3 restart cancelled every queued hold and nobody
+  noticed (#703). A waiter stopped by a signal, or killed outright (its ticket left behind), is kept in
+  `~/.stm-lane/cancelled` with its label, folder, command and T3 thread, and `--status` (`cancelled` in `--json`)
+  lists it as "stopped while waiting, never ran" until the same label is queued again from the same folder, or
+  for 24 hours. After a restart, run `--status` and queue again what is yours.
 - **Nested calls.** The command runs with `STM_LANE_HELD=<holder pid>`; a `lane.py` call inside it (an install
   script run from a gate job) runs straight away instead of waiting behind its own holder.
 - **Exit code** is the command's; a command killed by a signal gives 128 + the signal number. `--output FILE`
