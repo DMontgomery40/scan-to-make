@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdir, readFile, writeFile} from 'node:fs/promises';
+import {mkdir, readFile, rm, writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {ObjectStore} from '../dist/objects/store.js';
 import {ObjectService} from '../dist/objects/service.js';
@@ -20,7 +20,12 @@ async function setup(t) {
       await writeFile(join(out, 'touched.stl'), STL(round)); await writeFile(join(out, 'front.png'), `render${round}`);
       return {status: 'done', model: join(out, 'touched.stl'), renders: [join(out, 'front.png')], summary: `Design ${round}`, checkpoints: [], stats: {seconds: 1, toolCalls: 1}, passDir: join(out, '..')};
     }});
-  t.after(() => service.close());
+  // Drawn and closed first, then its folder removed: a duplicate's background picture drawing could still write into
+  // the folder after the file-level cleanup of tempDir ran (the temp guard found objects-versions-* left over on the train).
+  t.after(async () => {
+    await service.picturesDrawn(); await service.close();
+    await rm(root, {recursive: true, force: true, maxRetries: 10, retryDelay: 50});
+  });
   const object = await service.create('A holder.', 'fit'); await service.start(object.id); await service.settled(object.id); await service.picturesDrawn();
   return {store, service, id: object.id, question: () => { question = true; }};
 }
