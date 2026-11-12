@@ -2139,7 +2139,7 @@ export class ObjectService {
       save: async (monitor, live) => { this.#changed(await this.#deps.store.update(id, o => ours(o) ? {...o, print: {...o.print!, monitor, ...(live ? {live} : {})}} : o)); },
       end: async (end, report) => { this.#changed(await this.#deps.store.update(id, o => ours(o) ? this.#ended(o, end, report) : o)); },
       emit: async draft => {
-        const fixed = draft.type === 'print.milestone' && draft.data?.progress !== 50 ? `${draft.data?.progress}% done.` : printLogLine(draft.type, draft.data);
+        const fixed = draft.type === 'print.milestone' && draft.data?.progress !== 50 ? `${draft.data?.progress}% done.` : printLogLine(draft.type, draft.data, draft.detail?.reason);
         if (fixed) this.#changed(await this.#deps.store.update(id, o => {
           if (!ours(o)) return o;
           const events = o.print!.events ?? [];

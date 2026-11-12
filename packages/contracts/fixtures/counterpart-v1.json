@@ -736,7 +736,7 @@
    "destinationId": "current",
    "printerName": "Bambu Lab P1S",
    "title": "Check Mic mount on Bambu Lab P1S",
-   "body": "Nothing seems to be coming out of the nozzle on Bambu Lab P1S: the first layer's area is empty in the camera. The printer doesn't detect this itself. Check the print.",
+   "body": "Possible extrusion failure: the expected print area appeared empty. Check the print.",
    "notify": "timeSensitive",
    "data": {
     "state": "printing",
@@ -747,7 +747,7 @@
     "problems": [
      {
       "code": "physical-no-extrusion",
-      "message": "Nothing seems to be coming out of the nozzle on Bambu Lab P1S: the first layer's area is empty in the camera. The printer doesn't detect this itself. Check the print."
+      "message": "Possible extrusion failure: the expected print area appeared empty. Check the print."
      }
     ]
    },

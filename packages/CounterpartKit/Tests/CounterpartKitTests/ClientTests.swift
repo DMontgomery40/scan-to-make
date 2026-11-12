@@ -1053,7 +1053,7 @@ final class DecodingTests: XCTestCase {
         printed["createdAtMs"] = 1; printed["updatedAtMs"] = 2; printed["photos"] = [String](); printed["passes"] = [Any]()
         let done = try JSONDecoder().decode(Project.self, from: JSONSerialization.data(withJSONObject: printed))
         XCTAssertEqual(ProjectWords(done).line, done.status?.text)
-        XCTAssertTrue(done.status?.text.contains("camera showed nothing coming out") == true)
+        XCTAssertTrue(done.status?.text.hasSuffix(line) == true, "the printer MCP's own words")
     }
 
     /// The Mac's control socket (`objects.list`) adds the project folder; `/v1/objects` doesn't.

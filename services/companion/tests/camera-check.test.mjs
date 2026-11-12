@@ -226,7 +226,7 @@ const physicalNow = frame => mcp => {
   return {physical: {...verdict, ...asked}, problems};
 };
 
-test('P0 replay of faf29c4d: an empty first layer is never "first layer\'s down"; it is one time-sensitive check with the empty frame, on the card, and "done" says so', async () => {
+test('P0 replay of faf29c4d: an empty first layer is never "first layer\'s down"; the MCP\'s verdict is one time-sensitive check in its own words, with the empty frame, on the card, and "done" says so', async () => {
   const frame = savedFrame(EMPTY);
   const now = physicalNow(frame);
   const h = watch({frames: [frame], answers: {[sha(EMPTY)]: EMPTY_PLATE}, reports: [
@@ -243,21 +243,29 @@ test('P0 replay of faf29c4d: an empty first layer is never "first layer\'s down"
   assert.equal(h.types().includes('print.milestone'), false, '"halfway" is not news after the camera showed nothing coming out');
   const check = h.events.find(e => e.type === 'print.check');
   assert.deepEqual(h.kept.get(check.id), EMPTY, 'the frame attached is the judged one');
-  const line = "Nothing seems to be coming out of the nozzle on Bambu Lab P1S: the first layer's area is empty in the camera. The printer doesn't detect this itself. Check the print.";
-  assert.equal(check.data.problems[0].message, line);
-  assert.equal(check.data.problems.length, 1, "the MCP's own line for the same verdict isn't said twice");
+  // The MCP's own problem, as it sent it: keyed on physical.status, never on its code or wording, and not rewritten.
+  const line = 'Possible extrusion failure: the expected print area appeared empty. Check the print.';
+  assert.deepEqual(check.data.problems, [{code: 'physical-no-extrusion', message: line}]);
   const words = eventWords('print.check', check.data, {title: 'Forester', printer: 'Bambu Lab P1S'});
   assert.deepEqual(words, {title: 'Check Forester on Bambu Lab P1S', body: line, notify: 'timeSensitive'});
   assert.equal(NOTIFY['print.check'], 'timeSensitive');
   // The card: the live report and the status line every layout shows.
   const live = h.saves.findLast(s => s.live?.state === 'printing').live;
   assert.equal(live.problems[0].message, line);
-  const status = objectStatus({state: 'printing', print: {dispatchedAt: new Date(T0).toISOString(), destination: {name: 'Bambu Lab P1S'}, monitor: {phase: 'watching'}, live}});
+  const monitor = h.saves.findLast(s => s.live?.state === 'printing').m;
+  assert.equal(monitor.checkSent, true);
+  const status = objectStatus({state: 'printing', print: {dispatchedAt: new Date(T0).toISOString(), destination: {name: 'Bambu Lab P1S'}, monitor, live}});
   assert.deepEqual([status.phase, status.text, status.tint], ['printing', line, 'orange']);
+  // Without the structured verdict the same problem is just a problem: the line isn't taken over.
+  const plain = objectStatus({state: 'printing', print: {dispatchedAt: new Date(T0).toISOString(), destination: {name: 'Bambu Lab P1S'}, monitor: {...monitor, checkSent: undefined}, live}});
+  assert.match(plain.text, /^Printing on Bambu Lab P1S/);
   // Firmware FINISH is not a part on the plate.
   const done = h.events.find(e => e.type === 'print.done');
-  assert.match(eventWords('print.done', done.data, {title: 'Forester', printer: 'Bambu Lab P1S'}).body, /camera showed nothing coming out/);
-  assert.match(printLogLine('print.done', done.data), /says it's done, but the camera showed nothing/);
+  assert.equal(done.detail.reason, line);
+  assert.deepEqual(eventWords('print.done', done.data, {title: 'Forester', printer: 'Bambu Lab P1S', reason: done.detail.reason}),
+    {title: 'Bambu Lab P1S says Forester is done', body: line, notify: 'active'});
+  assert.equal(printLogLine('print.done', done.data, done.detail.reason), `The printer says it's done. ${line}`);
+  assert.equal(printLogLine('print.check', check.data), line);
   assert.equal(h.monitor.state.checkSent, true);
   // Never a control: only the record and the observation.
   assert.deepEqual([...new Set(h.mcp.calls.map(c => c.name))], ['counterpart_print_record', 'counterpart_print_assess']);
@@ -314,7 +322,7 @@ test('P0 replay, the calibrated case: the first layer is unclear, the ten-layer 
   assert.deepEqual(mcp.observations.map(o => [o.frame_id, o.deposition]), [[first.id, 'unknown'], [later.id, 'absent']]);
   const check = events.filter(e => e.type === 'print.check');
   assert.equal(check.length, 1);
-  assert.match(check[0].data.problems[0].message, /the print's area is empty in the camera/);
+  assert.equal(check[0].data.problems[0].message, 'Possible extrusion failure.');
   assert.equal(events.some(e => e.type === 'print.first-layer'), false);
 });
 
@@ -328,7 +336,7 @@ test("an MCP's verdict from another client's observation still raises the check 
   const check = h.events.find(e => e.type === 'print.check');
   assert.equal(h.kept.has(check.id), false);
   assert.match(check.frame, /^prints\/.+\.jpg$/, 'a fresh camera frame instead');
-  assert.match(check.data.problems[0].message, /the print's area is empty in the camera/);
+  assert.equal(check.data.problems[0].message, 'Possible extrusion failure.');
 });
 
 test('the shared print.check fixture every client decodes is exactly what the companion says (packages/contracts/fixtures/print-check.json)', async () => {
@@ -344,7 +352,7 @@ test('the shared print.check fixture every client decodes is exactly what the co
   // The status line is the one field every layout's print card shows (iPhone/iPad and Mac: status.text; Android: Words.kt; Linux: words()).
   assert.deepEqual(ObjectStatusSchema.parse(shared.project.status), objectStatus(shared.project));
   assert.equal(shared.project.status.text, shared.line);
-  assert.equal(shared.project.print.events[0].message, printLogLine('print.check'));
+  assert.equal(shared.project.print.events[0].message, printLogLine('print.check', event.data));
 });
 
 test('a check that fails on the way (the session reconnecting) is tried again, so the later checkpoint still gets its look', async () => {
@@ -378,6 +386,6 @@ test('after the printer says it finished, the card keeps saying the camera showe
   const status = objectStatus(shared.printedProject);
   assert.deepEqual(status, shared.printedProject.status);
   assert.deepEqual([status.phase, status.tint], ['printed', 'orange']);
-  assert.equal(status.text, "The printer says it's done, but the camera showed nothing coming out of the nozzle. Check the plate.");
+  assert.equal(status.text, `The printer says it's done. ${shared.line}`);
   assert.match(objectStatus({...shared.printedProject, print: {...shared.printedProject.print, monitor: {...shared.printedProject.print.monitor, checkSent: undefined}}}).text, /^Printed /);
 });

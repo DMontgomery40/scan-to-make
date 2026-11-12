@@ -82,18 +82,6 @@ export function sentWords(printer: string, bambuConnect: boolean): string {
   return bambuConnect ? 'Finish on your Mac: press Print in Bambu Connect' : `Sent to ${printer} · Counterpart can't follow this print`;
 }
 
-/**
- * #630: the counterpart/1 problem code both MCPs give their `suspect_no_extrusion` verdict (a camera frame shows the
- * expected print area empty after printing was attempted). Counterpart says it in its own words, below.
- */
-export const NO_EXTRUSION = 'physical-no-extrusion';
-
-/** The line for a print whose camera shows nothing coming out of the nozzle: the notification, the card and the Live Activity. */
-export function noExtrusionWords(printer: string, firstLayer: boolean): string {
-  return `Nothing seems to be coming out of the nozzle on ${printer}: ${firstLayer ? "the first layer's area" : "the print's area"} is empty in the camera. The printer doesn't detect this itself. Check the print.`;
-}
-const noExtrusion = (data: CounterpartEvent['data']) => data?.problems?.find(problem => problem.code === NO_EXTRUSION);
-
 /** Short history lines for `print.events`, which older apps show as the print's log. */
 export const PRINT_LOG: Record<string, string> = {
   'print.started': 'The printer started it.',
@@ -107,14 +95,16 @@ export const PRINT_LOG: Record<string, string> = {
   'print.not-started': "The printer didn't start it.",
   'print.unreachable': 'Lost contact with the printer. Still trying.',
   'print.sent': "Sent. Counterpart can't follow this print.",
-  'print.check': 'The camera showed nothing coming out of the nozzle. Check the print.',
+  'print.check': 'Check the print.',
 };
 
-/** The print's log line for an event; a "done" after the camera showed nothing coming out says so instead. */
-/** A finished print whose camera showed nothing coming out: its log line and the card's line afterwards. */
-export const AFTER_CHECK_DONE = "The printer says it's done, but the camera showed nothing coming out of the nozzle. Check the plate.";
-export function printLogLine(type: string, data?: CounterpartEvent['data']): string | undefined {
-  if (type === 'print.done' && noExtrusion(data)) return AFTER_CHECK_DONE;
+/**
+ * The print's log line for an event. #630: `print.check` and a "done" after it are the printer MCP's own words (its
+ * first problem, given as `reason` for the done); Counterpart rewrites none of them.
+ */
+export function printLogLine(type: string, data?: CounterpartEvent['data'], reason?: string): string | undefined {
+  if (type === 'print.check') return data?.problems?.[0]?.message ?? PRINT_LOG[type];
+  if (type === 'print.done' && reason) return `The printer says it's done. ${reason}`.slice(0, 500);
   return PRINT_LOG[type];
 }
 
@@ -185,11 +175,11 @@ export function eventWords(type: CounterpartEventType, data: CounterpartEvent['d
     case 'print.milestone': title = milestoneTitle(t, data?.progress); body = joined(remaining ? `${remaining} left` : undefined, layers, printer); break;
     case 'print.paused': title = `${printer} paused ${t}`; body = problem ?? 'Open Counterpart to resume.'; break;
     case 'print.resumed': title = t; body = `Printing again on ${printer}`; break;
-    // A firmware "finished" isn't a part on the plate (#630): after the camera showed nothing coming out, it says so.
-    case 'print.done': if (noExtrusion(data)) { title = `${printer} says ${t} is done`; body = 'But the camera showed nothing coming out of the nozzle. Check the plate.'; }
+    // A firmware "finished" isn't a part on the plate (#630): after a print.check, `reason` is the printer MCP's own words.
+    case 'print.done': if (context.reason) { title = `${printer} says ${t} is done`; body = context.reason; }
       else { title = `${t} is done`; body = 'Take it off the plate.'; } break;
-    // #630: never a control: the person looks, and pauses or stops it if they want to.
-    case 'print.check': title = `Check ${t} on ${printer}`; body = noExtrusion(data)?.message ?? noExtrusionWords(printer, false); break;
+    // #630: the MCP's camera verdict (physical.status), in the MCP's own words. Never a control: the person looks.
+    case 'print.check': title = `Check ${t} on ${printer}`; body = problem ?? 'Check the print.'; break;
     case 'print.failed': title = `${printer} stopped ${t}`; body = printerStopped(data?.problems?.[0]); break;
     case 'print.cancelled': title = `${t} was cancelled`; body = 'Nothing more will print.'; break;
     // `reason`: the printer service refused it before anything reached the printer, in its own words.
@@ -272,17 +262,18 @@ export function objectStatus(object: StatusSource, updatedAtMs?: number): Object
       if (!object.print?.dispatchedAt || !watching || !live) return {phase: 'preparing', text: 'Getting the print ready', symbol: 'gearshape', tint: 'accent'};
       // The printer has the job but is still heating, cleaning or levelling: "Printing · 3%" would be a lie.
       if (printPreparing(live.state, live.job)) return {phase: 'preparing', text: joined('Getting ready', live.job?.stage).slice(0, 300), symbol: 'gearshape', tint: 'accent'};
-      // #630: the camera shows nothing coming out of the nozzle. Every layout shows this line, so it says that first.
-      const check = live.problems?.find(problem => problem.code === NO_EXTRUSION);
-      if (check) return {phase: 'printing', text: check.message.slice(0, 300), ...(rowDetail(check.message) ? {detail: rowDetail(check.message)} : {}), symbol: 'exclamationmark.triangle', tint: 'orange'};
+      // #630: after a print.check every layout's line is the printer MCP's own problem, first.
+      const check = object.print?.monitor?.checkSent ? live.problems?.[0]?.message : undefined;
+      if (check) return {phase: 'printing', text: check.slice(0, 300), ...(rowDetail(check) ? {detail: rowDetail(check)} : {}), symbol: 'exclamationmark.triangle', tint: 'orange'};
       const progress = live.job?.progress !== undefined ? `${Math.round(live.job.progress)}%` : undefined;
       const left = live.job?.remainingSec !== undefined ? `${duration(live.job.remainingSec)} left` : undefined;
       const paused = live.state === 'paused';
       return {phase: 'printing', text: joined(`${paused ? 'Paused' : 'Printing'} on ${printer}`, progress, paused ? undefined : left).slice(0, 300), symbol: 'printer.fill', tint: 'green'};
     }
     case 'printed': {
-      // #630: the printer said it finished, but its camera showed nothing coming out. The card keeps saying so.
-      if (object.print?.monitor?.checkSent) return {phase: 'printed', text: AFTER_CHECK_DONE, ...(rowDetail(AFTER_CHECK_DONE) ? {detail: rowDetail(AFTER_CHECK_DONE)} : {}), symbol: 'exclamationmark.triangle', tint: 'orange'};
+      // #630: the printer said it finished after a print.check: the card keeps the MCP's own words.
+      const check = object.print?.monitor?.checkSent ? object.print.live?.problems?.[0]?.message : undefined;
+      if (check) { const text = `The printer says it's done. ${check}`.slice(0, 300); return {phase: 'printed', text, ...(rowDetail(text) ? {detail: rowDetail(text)} : {}), symbol: 'exclamationmark.triangle', tint: 'orange'}; }
       const at = object.print?.monitor?.endedAt ?? object.print?.dispatchedAt ?? (updatedAtMs ? new Date(updatedAtMs).toISOString() : undefined);
       return {phase: 'printed', text: at ? `Printed ${formatDate(at)}` : 'Printed', symbol: 'shippingbox', tint: 'secondary'};
     }

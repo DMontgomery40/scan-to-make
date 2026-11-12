@@ -35,6 +35,6 @@ class PrintCheckTests {
         val printedValue = fixture.getValue("printedProject").jsonObject
         val printed = requireNotNull(Project.decode(JsonObject(printedValue + mapOf("createdAtMs" to JsonPrimitive(1), "updatedAtMs" to JsonPrimitive(2)))))
         assertEquals(printedValue.getValue("status").jsonObject.getValue("text").jsonPrimitive.content, ProjectWords(printed).line)
-        assertTrue(ProjectWords(printed).line.contains("camera showed nothing coming out"))
+        assertTrue(ProjectWords(printed).line.endsWith(line))
     }
 }

@@ -1,7 +1,7 @@
 import {randomUUID} from 'node:crypto';
 import type {PhysicalAssessment, PhysicalEvidence, PrintReport} from '@scan-to-make/printer-handoff';
 import type {CounterpartEventType, PrintLive, PrintMonitor} from '@scan-to-make/contracts/counterpart';
-import {NO_EXTRUSION, noExtrusionWords, printPreparing} from '../events/words.js';
+import {printPreparing} from '../events/words.js';
 
 /** PRD §8.6 cadence. */
 export const MONITOR = {
@@ -145,18 +145,7 @@ export function matchJob(target: Pick<MonitorTarget, 'taskId' | 'jobName' | 'fil
  * The report as Counterpart shows it. Until the first layer the printer is getting ready (PRD §8.6): the state is
  * `preparing` and there is no percent or time left (Bambu reports a few percent and the whole print's time then).
  */
-/**
- * The report's problems as Counterpart shows them. When the MCP's camera evidence says nothing is coming out of the
- * nozzle (`physical.status`, counterpart/1), its line is said in Counterpart's words, first, once: the MCP's own
- * problem for that verdict carries the contract's code, `physical-no-extrusion`, the same in both MCPs.
- */
-export function shownProblems(report: PrintReport, printer: string, firstLayer = false): PrintLive['problems'] {
-  if (report.physical?.status !== 'suspect_no_extrusion') return report.problems.map(problem => ({...problem}));
-  return [{code: NO_EXTRUSION, severity: 'error' as const, message: noExtrusionWords(printer, firstLayer)},
-    ...report.problems.filter(problem => problem.code !== NO_EXTRUSION).map(problem => ({...problem}))].slice(0, 32);
-}
-
-function liveFrom(report: PrintReport, problems: PrintLive['problems'] = report.problems): PrintLive {
+function liveFrom(report: PrintReport): PrintLive {
   const preparing = printPreparing(report.state, report.job);
   const job = report.job && preparing ? (({progress: _progress, remainingSec: _remaining, ...rest}) => rest)(report.job) : report.job;
   const remaining = preparing ? undefined : report.job?.remainingSec;
@@ -167,12 +156,12 @@ function liveFrom(report: PrintReport, problems: PrintLive['problems'] = report.
     ...(remaining !== undefined && Number.isFinite(observed) ? {endsAt: new Date(observed + remaining * 1000).toISOString()} : {}),
     ...(report.temps ? {temps: structuredClone(report.temps)} : {}),
     ...(report.activeFilament ? {activeFilament: structuredClone(report.activeFilament)} : {}),
-    problems: problems.map(problem => ({...problem})),
+    problems: report.problems.map(problem => ({...problem})),
   };
 }
 
-function eventData(report: PrintReport, problems: PrintLive['problems'] = report.problems): EventDraft['data'] {
-  const live = liveFrom(report, problems), job = live.job;
+function eventData(report: PrintReport): EventDraft['data'] {
+  const live = liveFrom(report), job = live.job;
   // Getting ready: the stage only (a layer count then is 0, or the previous job's).
   const preparing = live.state === 'preparing';
   return {
@@ -183,7 +172,7 @@ function eventData(report: PrintReport, problems: PrintLive['problems'] = report
     ...(job?.layer !== undefined && !preparing ? {layer: job.layer} : {}),
     ...(job?.totalLayers !== undefined && !preparing ? {totalLayers: job.totalLayers} : {}),
     ...(job?.stage ? {stage: job.stage} : {}),
-    ...(problems.length ? {problems: problems.slice(0, 16).map(({code, message}) => ({code, message}))} : {}),
+    ...(report.problems.length ? {problems: report.problems.slice(0, 16).map(({code, message}) => ({code, message}))} : {}),
   };
 }
 
@@ -216,8 +205,6 @@ export class PrintMonitorRunner {
   #checked = new Set<string>();
   /** Tries per frame whose check failed on the way (the session reconnecting, a timeout): a few more on later reads. */
   #tries = new Map<string, number>();
-  /** The empty frame was the first layer's: the words say so. In memory; after a restart the words are general. */
-  #firstLayerEmpty = false;
   #evidence?: {frameId: string; jpeg: Buffer};
 
   constructor(target: MonitorTarget, deps: MonitorDeps, state?: PrintMonitor) {
@@ -232,16 +219,14 @@ export class PrintMonitorRunner {
 
   get state(): PrintMonitor { return structuredClone(this.#state); }
 
-  #problems(report: PrintReport): PrintLive['problems'] { return shownProblems(report, this.target.printerName, this.#firstLayerEmpty); }
-
   #draft(type: CounterpartEventType, report?: PrintReport, extra: Partial<EventDraft> = {}): EventDraft {
     return {id: randomUUID(), type, projectId: this.target.projectId, printId: this.target.printId,
       destinationId: this.target.destinationId, printerName: this.target.printerName,
-      ...(report ? {data: eventData(report, this.#problems(report))} : {}), ...extra};
+      ...(report ? {data: eventData(report)} : {}), ...extra};
   }
 
-  async #emit(type: CounterpartEventType, report: PrintReport | undefined, options: {frame?: boolean; jpeg?: Buffer; signal: AbortSignal; data?: EventDraft['data']}) {
-    const draft = this.#draft(type, report);
+  async #emit(type: CounterpartEventType, report: PrintReport | undefined, options: {frame?: boolean; jpeg?: Buffer; signal: AbortSignal; data?: EventDraft['data']; detail?: EventDraft['detail']}) {
+    const draft = this.#draft(type, report, options.detail ? {detail: options.detail} : {});
     if (options.data) draft.data = {...draft.data, ...options.data};
     // The judged frame itself, not a newer one from a different moment.
     if (options.jpeg && this.#deps.keepFrame) {
@@ -280,7 +265,10 @@ export class PrintMonitorRunner {
     await this.#save();
     await this.#deps.end(end, report, this.state);
     const event = events[end];
-    if (event) await this.#emit(event[0], report, {frame: event[1], signal});
+    // #630: firmware "finished" after the MCP's camera evidence said nothing was coming out: the done event says so,
+    // in the MCP's own words (its first problem; the MCP keeps that verdict and its problem after FINISH).
+    const check = end === 'done' && this.#state.checkSent ? report?.problems[0]?.message : undefined;
+    if (event) await this.#emit(event[0], report, {frame: event[1], signal, ...(check ? {detail: {reason: check}} : {})});
   }
 
   #interval(): number {
@@ -397,7 +385,7 @@ export class PrintMonitorRunner {
   }
 
   #observe(report: PrintReport) {
-    this.#live = liveFrom(report, this.#problems(report));
+    this.#live = liveFrom(report);
     this.#state = {...this.#state, lastReportAt: report.observedAt};
   }
 
@@ -438,7 +426,6 @@ export class PrintMonitorRunner {
       this.#check = undefined;
       const outcome = check.outcome;
       if (outcome?.jpeg) this.#evidence = {frameId: outcome.frameId, jpeg: outcome.jpeg};
-      if (outcome?.firstLayer && outcome.deposition === 'absent') this.#firstLayerEmpty = true;
       if (outcome?.firstLayer && outcome.deposition === 'present' && !this.#state.firstLayerSent && !this.#state.checkSent
           && !printPreparing(report.state, report.job) && activeStates.has(report.state)) {
         this.#state = {...this.#state, firstLayerSent: true};

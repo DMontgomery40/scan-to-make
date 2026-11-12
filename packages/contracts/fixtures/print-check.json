@@ -1,5 +1,5 @@
 {
-  "about": "#630: the camera shows nothing coming out of the nozzle. Written by the companion (services/companion/tests/camera-check.test.mjs checks it still says this); every client decodes it.",
+  "about": "#630: the printer MCP's camera evidence says nothing is coming out of the nozzle (physical.status suspect_no_extrusion). The words are the MCP's own problem message (bambu-printer-mcp #144 / mcp-3D-printer-server #100); the companion keys on the structured state and rewrites none of it. Written by the companion (services/companion/tests/camera-check.test.mjs checks it still says this); every client decodes it.",
   "event": {
     "v": 1,
     "seq": 412,
@@ -11,7 +11,7 @@
     "destinationId": "current",
     "printerName": "Bambu Lab P1S",
     "title": "Check Forester on Bambu Lab P1S",
-    "body": "Nothing seems to be coming out of the nozzle on Bambu Lab P1S: the first layer's area is empty in the camera. The printer doesn't detect this itself. Check the print.",
+    "body": "Possible extrusion failure: the expected print area appeared empty. Check the print.",
     "notify": "timeSensitive",
     "data": {
       "state": "printing",
@@ -22,7 +22,7 @@
       "problems": [
         {
           "code": "physical-no-extrusion",
-          "message": "Nothing seems to be coming out of the nozzle on Bambu Lab P1S: the first layer's area is empty in the camera. The printer doesn't detect this itself. Check the print."
+          "message": "Possible extrusion failure: the expected print area appeared empty. Check the print."
         }
       ]
     },
@@ -34,8 +34,8 @@
     "state": "printing",
     "status": {
       "phase": "printing",
-      "text": "Nothing seems to be coming out of the nozzle on Bambu Lab P1S: the first layer's area is empty in the camera. The printer doesn't detect this itself. Check the print.",
-      "detail": "Nothing seems to be coming out of the nozzle on Bambu Lab P1S: the first…",
+      "text": "Possible extrusion failure: the expected print area appeared empty. Check the print.",
+      "detail": "Possible extrusion failure: the expected print area appeared empty",
       "symbol": "exclamationmark.triangle",
       "tint": "orange"
     },
@@ -69,27 +69,26 @@
           {
             "code": "physical-no-extrusion",
             "severity": "error",
-            "message": "Nothing seems to be coming out of the nozzle on Bambu Lab P1S: the first layer's area is empty in the camera. The printer doesn't detect this itself. Check the print."
+            "message": "Possible extrusion failure: the expected print area appeared empty. Check the print."
           }
         ]
       },
       "events": [
         {
           "atMs": 1794424912000,
-          "message": "The camera showed nothing coming out of the nozzle. Check the print."
+          "message": "Possible extrusion failure: the expected print area appeared empty. Check the print."
         }
       ]
     }
   },
-  "line": "Nothing seems to be coming out of the nozzle on Bambu Lab P1S: the first layer's area is empty in the camera. The printer doesn't detect this itself. Check the print.",
   "printedProject": {
     "id": "53a48b5e-d3f1-4b77-9e8e-aa2cad0a6157",
     "title": "Forester",
     "state": "printed",
     "status": {
       "phase": "printed",
-      "text": "The printer says it's done, but the camera showed nothing coming out of the nozzle. Check the plate.",
-      "detail": "The printer says it's done, but the camera showed nothing coming out of the…",
+      "text": "The printer says it's done. Possible extrusion failure: the expected print area appeared empty. Check the print.",
+      "detail": "The printer says it's done",
       "symbol": "exclamationmark.triangle",
       "tint": "orange"
     },
@@ -125,20 +124,21 @@
           {
             "code": "physical-no-extrusion",
             "severity": "error",
-            "message": "Nothing seems to be coming out of the nozzle on Bambu Lab P1S: the first layer's area is empty in the camera. The printer doesn't detect this itself. Check the print."
+            "message": "Possible extrusion failure: the expected print area appeared empty. Check the print."
           }
         ]
       },
       "events": [
         {
           "atMs": 1794424912000,
-          "message": "The camera showed nothing coming out of the nozzle. Check the print."
+          "message": "Possible extrusion failure: the expected print area appeared empty. Check the print."
         },
         {
           "atMs": 1794429300000,
-          "message": "The printer says it's done, but the camera showed nothing coming out of the nozzle. Check the plate."
+          "message": "The printer says it's done. Possible extrusion failure: the expected print area appeared empty. Check the print."
         }
       ]
     }
-  }
+  },
+  "line": "Possible extrusion failure: the expected print area appeared empty. Check the print."
 }

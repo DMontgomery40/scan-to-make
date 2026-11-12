@@ -1081,5 +1081,5 @@ test("a print whose camera shows nothing coming out says so on its card and in i
   assert.equal(doc.event.body, doc.line);
   // After the printer says it finished, the card keeps the warning.
   assert.equal(words(doc.printedProject as Project), doc.printedProject.status.text);
-  assert.match(words(doc.printedProject as Project), /camera showed nothing coming out/);
+  assert.ok(words(doc.printedProject as Project).endsWith(doc.line), "the printer MCP's own words");
 });
