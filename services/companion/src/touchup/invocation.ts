@@ -72,7 +72,18 @@ export const TOUCHUP_RESULT_SCHEMA = {
  */
 export type DesignEngine = 'blender' | 'fusion' | 'code';
 
-const FUSION_RULES = `- Design it in Autodesk Fusion through the printer MCP's fusion_mcp_* tools: fusion_mcp_call reaches Fusion's own tools (create_sketch, extrude, revolve, fillet, shell, boolean_operation, create_parameter, set_parameter, get_parameters, check_interference, …). A separate document is already prepared for this pass. Its identity is fixed by the tools: work with the provided design and component, without opening or switching documents.
+/**
+ * The first line of every pass's rules says which engine it runs on (#609: a Blender pass hunted across ~20 cad_run
+ * calls for a folder the code engine would write to). The other engines' tools aren't offered either (`--disallowedTools`).
+ */
+const ON_ENGINE = {
+  blender: "- This pass runs on Blender. The printer MCP's code design engine isn't part of this pass.",
+  fusion: "- This pass runs on Fusion. The printer MCP's code design engine isn't part of this pass.",
+  code: "- This pass runs on the printer MCP's code design engine.",
+} as const;
+
+const FUSION_RULES = `${ON_ENGINE.fusion}
+- Design it in Autodesk Fusion through the printer MCP's fusion_mcp_* tools: fusion_mcp_call reaches Fusion's own tools (create_sketch, extrude, revolve, fillet, shell, boolean_operation, create_parameter, set_parameter, get_parameters, check_interference, …). A separate document is already prepared for this pass. Its identity is fixed by the tools: work with the provided design and component, without opening or switching documents.
 - Make every functional dimension a named user parameter, so a later change is one set_parameter.
 - When the design is finished, call fusion_mcp_export with output_dir set to the output folder and name "touched": it writes touched.stl, touched.f3d and touched.parameters.json. Use body_name when the design has more than one body; for several colours, export each colour's body under its own name and combine them as the colour section below says.
 - If you can, save clear PNG views of the design to the output folder, named so the clearest overall view sorts first.`;
@@ -81,7 +92,8 @@ const FUSION_RULES = `- Design it in Autodesk Fusion through the printer MCP's f
  * The code engine's lines (PRD §8.9). How a script looks, which libraries it has and how a scan is prepared are the
  * printer MCP's (its cad_design prompt, added below); these lines are only where Counterpart keeps each run.
  */
-const CODE_RULES = `- Build it with the printer MCP's code design engine (its cad_* tools), following its cad_design prompt below. Give every cad_run the design folder from the files list as its output_dir.
+const CODE_RULES = `${ON_ENGINE.code}
+- Build it with the printer MCP's code design engine (its cad_* tools), following its cad_design prompt below. Give every cad_run the design folder from the files list as its output_dir.
 - After each fix, mark the run of the whole model you select as the result so far final: Counterpart files each final run as a checkpoint, the latest one's model, views, script and parameters become this pass's result (Counterpart copies them to the output folder), and a later change starts from that script and those parameters. Never mark final a run that measures or prepares the scan, or makes one colour's part: it never becomes the model.`;
 
 /** How the core's checkpoint and final-export lines read for each engine. The code engine's runs are filed by Counterpart. */
@@ -184,7 +196,7 @@ const CODE_FIT_CHECK = `
 4. When there is a scan, check the finished part against it with cad_check_fit as the printer MCP's cad_design prompt describes, and report the interference and gap, with what you changed in the reference, in your changes.`;
 
 /** The code engine's one line for a locate pass: its tools, and that nothing it runs becomes the model. */
-const CODE_LOCATE_CORE = "- Reach the part and the scan only through the printer MCP's code design engine (its cad_* tools). Give every cad_run the design folder from the files list as its output_dir.";
+const CODE_LOCATE_CORE = `${ON_ENGINE.code}\n` + "- Reach the part and the scan only through the printer MCP's code design engine (its cad_* tools). Give every cad_run the design folder from the files list as its output_dir.";
 
 /** Only what Claude Code needs to find the user's own login. Never printer tokens or provider keys. */
 const ENV_ALLOWLIST = ['HOME', 'USER', 'LOGNAME', 'PATH', 'TMPDIR', 'LANG', 'SHELL', 'CLAUDE_CONFIG_DIR'] as const;
@@ -276,7 +288,7 @@ function locatePrompt(pass: TouchupPass, instructions?: string, summary?: string
 }
 
 /** The lean, isolated `claude -p` call for one touch-up pass. Writes the pass's MCP config file. */
-export const BLENDER_RULES = "- Reach Blender only through the printer MCP's blender_mcp_* tools. Start in the empty scene you are given, and work only with objects in the current scene (bpy.context.scene.objects).";
+export const BLENDER_RULES = `${ON_ENGINE.blender}\n` + "- Reach Blender only through the printer MCP's blender_mcp_* tools. Start in the empty scene you are given, and work only with objects in the current scene (bpy.context.scene.objects).";
 /**
  * The printer MCP's own guidance for a pass: how to design for its printers (`fdm_design`) and how its slicer
  * orients, supports and checks a slice (`fdm_slicing`). The app holds no slicer knowledge (PRD §8.0 item 10).
@@ -378,6 +390,9 @@ export function buildTouchupInvocation(input: {resumeSessionId?: string; pass: T
     '--strict-mcp-config',
     '--tools', 'Read,WebSearch,WebFetch',
     '--allowedTools', 'Read,WebSearch,WebFetch,mcp__printer',
+    // Only this pass's engine's tools: the patterns take the others out of the worker's tool list (checked against
+    // Claude Code 2.1.322). Nov 11 (#609): a Blender pass ran cad_setup twice and about twenty cad_run calls.
+    '--disallowedTools', input.engine === 'code' ? 'mcp__printer__blender_mcp_*,mcp__printer__fusion_mcp_*' : 'mcp__printer__cad_*',
     '--disable-slash-commands',
     '--setting-sources', '',
     '--settings', '{"disableAllHooks":true}',

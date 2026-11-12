@@ -338,6 +338,101 @@ test('the code design engine: ready → it designs and cleans up; installed but 
   assert.deepEqual(designer.calls, []);
 });
 
+test('a project whose passes ran on Blender moves to the code engine while the MCP re-checks itself after an update (#609)', async () => {
+  const {CAD_STATUS_TIMEOUT_MS} = await import('../dist/touchup/code-engine.js');
+  const {cadCalls} = await import('../dist/cad-settings.js');
+  // David, Nov 11 15:39Z: "Use the new design engine so that this comes with the under desk screw", in a project
+  // whose eight passes ran on Blender; the pass ran on Blender and said the engine "isn't set up". The first
+  // cad_status after an MCP update that changed the engine re-runs its confined round trip (bambu-printer-mcp 1.1.90:
+  // 14–22 s measured, and it waits up to 25 s for a busy engine), and a caller that gives up cancels it.
+  const RECHECK_MS = 22_000;
+  const deadlines = [];
+  const rechecking = () => ({
+    async connect() {}, async close() {},
+    hasTool: name => [...CAD_TOOLS, ...LEGACY_TOOLS].includes(name),
+    getTool: name => ({name, inputSchema: {type: 'object', properties: {bind_document: {type: 'boolean'}}}}),
+    async callTool(name, _args, options = {}) {
+      if (name !== 'cad_status') return text(name === 'fusion_mcp_new_design' ? {document_binding: 1, document_id: 'owned-token'} : {configured: true, connected: true});
+      deadlines.push(options.timeoutMs);
+      if (!(options.timeoutMs >= RECHECK_MS)) throw new Error(`cad_status timed out after ${options.timeoutMs} ms`);
+      return cadStatus(true);
+    },
+  });
+  // A change to a Blender-made model: no saved design, no project engine of its own.
+  for (const kind of ['fit', 'copy']) assert.deepEqual(await chooseEngine({handoff, kind}, {client: rechecking}), {engine: 'code'}, kind);
+  // The pass waits as long for cad_status as Settings' own row does.
+  const settings = cadCalls(() => handoff, () => rechecking());
+  assert.equal((await settings.status()).status.ready, true);
+  assert.ok(deadlines.length >= 3 && deadlines.every(ms => ms === CAD_STATUS_TIMEOUT_MS), `one deadline for every cad_status read: ${deadlines}`);
+});
+
+test('a pass on one engine never resumes a session from another: a Blender attempt\'s next request on the code engine starts fresh (#609)', async () => {
+  const root = await tempDir('touchup-resume-engine-');
+  const previous = join(root, 'passes', 'pass', 'previous');
+  await mkdir(join(previous, 'out', 'checkpoints'), {recursive: true});
+  const invocations = [];
+  const deps = ready => ({
+    lockPath: join(root, 'blender.lock'), fusionLockPath: join(root, 'fusion.lock'), codeLockPath: join(root, 'code.lock'),
+    ensureBlender: async () => {}, resetScene: async () => {},
+    client: bridge({cad_status: cadStatus(ready)}, [...CAD_TOOLS, ...LEGACY_TOOLS]).client,
+    guidance: async () => ({design: 'D', slicing: 'S', cad: 'MCP CAD PROMPT'}),
+    run: async (inv, pass) => { invocations.push(inv); return {status: 'done', sessionId: 'new', model: join(pass.outDir, 'touched.stl'), renders: [], checkpoints: [], stats: {seconds: 1, toolCalls: 1}}; },
+  });
+  const request = resume => ({root, objectId: 'pass', scan: [], photos: [], handoff, claudePath: '/c', instructions: 'A hanger', note: 'Use the new design engine so that this comes with the under desk screw', kind: 'fit', resume});
+  // The Blender attempt stopped at a limit; the code engine is ready now.
+  const moved = await runTouchup(request({sessionId: 'blender-session', passDir: previous, engine: 'blender'}), deps(true));
+  assert.equal(moved.engine, 'code');
+  const cold = invocations.at(-1);
+  assert.equal(cold.args.includes('--resume'), false, 'a code pass never continues a Blender session');
+  assert.doesNotMatch(cold.args.at(-1), /Continue from where you stopped/);
+  assert.match(cold.args.at(-1), /Use the new design engine so that this comes with the under desk screw/, 'the new request still reaches the worker');
+  assert.equal(moved.resume, undefined);
+  // The same engine still continues its own session, and a pass saved before passes recorded their engine does too.
+  for (const resume of [{sessionId: 'blender-session', passDir: previous, engine: 'blender'}, {sessionId: 'blender-session', passDir: previous}]) {
+    const same = await runTouchup(request(resume), deps(false));
+    assert.equal(same.engine, 'blender');
+    assert.deepEqual(invocations.at(-1).args.slice(invocations.at(-1).args.indexOf('--resume'), invocations.at(-1).args.indexOf('--resume') + 2), ['--resume', 'blender-session']);
+    assert.match(invocations.at(-1).args.at(-1), /Continue from where you stopped/);
+  }
+});
+
+test('a pass offers only its own engine\'s tools and says which engine it is on: no cad_* outside a code pass (#609)', async () => {
+  const root = await tempDir('touchup-engine-tools-');
+  const pass = await prepareTouchupPass({root: join(root, 'passes'), objectId: 'pass', scan: [], photos: [], requirePhotos: false});
+  const printer = {command: '/usr/bin/node', args: ['/mcp/index.js']};
+  const disallowed = inv => inv.args[inv.args.indexOf('--disallowedTools') + 1];
+  const rules = inv => inv.args[inv.args.indexOf('--append-system-prompt') + 1];
+  // Nov 11: a Blender pass ran cad_setup twice and about twenty cad_run calls hunting for a folder the engine
+  // would write to. A pass on Blender or Fusion has no cad_* tools at all (Claude Code 2.1.322 drops them from the tool list).
+  const blender = buildTouchupInvocation({pass, printer, claudePath: '/c', kind: 'fit', instructions: 'A hanger'});
+  assert.equal(disallowed(blender), 'mcp__printer__cad_*');
+  assert.match(rules(blender), /This pass runs on Blender/);
+  const fusion = buildTouchupInvocation({pass, printer, claudePath: '/c', kind: 'fit', engine: 'fusion', documentId: 'doc', handoff, instructions: 'A hanger'});
+  assert.equal(disallowed(fusion), 'mcp__printer__cad_*');
+  assert.match(rules(fusion), /This pass runs on Fusion/);
+  const located = buildTouchupInvocation({pass, printer, claudePath: '/c', locate: true});
+  assert.equal(disallowed(located), 'mcp__printer__cad_*');
+  // A code pass has the code engine's tools and its design folder, and none of Blender's or Fusion's.
+  const code = buildTouchupInvocation({pass, printer, claudePath: '/c', kind: 'fit', engine: 'code', instructions: 'A hanger', guidance: {design: 'D', slicing: 'S', cad: 'MCP CAD PROMPT'}});
+  assert.equal(disallowed(code), 'mcp__printer__blender_mcp_*,mcp__printer__fusion_mcp_*');
+  assert.match(rules(code), /This pass runs on the printer MCP's code design engine/);
+  assert.match(code.args.at(-1), /- Design folder \(output_dir for every cad_run\): /);
+  assert.equal(code.args.includes('mcp__printer__cad_*'), false);
+  // A resumed attempt whose session is gone starts cold with the same tools.
+  const runs = [];
+  const result = await runTouchup({root, objectId: 'pass', scan: [], photos: [], handoff, claudePath: '/c', instructions: 'A hanger', note: 'Taller', kind: 'fit',
+    resume: {sessionId: 'gone', passDir: pass.dir, engine: 'blender'}}, {
+    lockPath: join(root, 'blender.lock'), fusionLockPath: join(root, 'fusion.lock'), ensureBlender: async () => {}, resetScene: async () => {},
+    client: bridge({}, LEGACY_TOOLS).client, guidance: async () => ({design: 'D', slicing: 'S'}),
+    run: async (inv, made) => { runs.push(inv.args); return runs.length === 1
+      ? {status: 'failed', resumeUnavailable: true, renders: [], checkpoints: [], stats: {seconds: 0, toolCalls: 0}}
+      : {status: 'done', model: join(made.outDir, 'touched.stl'), renders: [], checkpoints: [], stats: {seconds: 1, toolCalls: 1}}; },
+  });
+  assert.equal(result.resume?.outcome, 'cold-start');
+  assert.equal(runs[1].includes('--resume'), false);
+  assert.equal(runs[1][runs[1].indexOf('--disallowedTools') + 1], 'mcp__printer__cad_*');
+});
+
 test('the composed rules for a code pass: the MCP\'s cad_design prompt plus only Counterpart\'s own sections, with no Blender, Fusion or script-format words', () => {
   const guidance = {design: 'MCP DESIGN GUIDANCE', slicing: 'MCP SLICING GUIDANCE', cad: 'MCP CAD PROMPT'};
   const fit = systemRules({kind: 'fit', engine: 'code', request: true}, guidance);
