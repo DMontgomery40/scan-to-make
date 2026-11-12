@@ -338,6 +338,60 @@ test('the code design engine row shows what Set Up takes, then what it uses, fro
   assert.equal(storageWords(undefined, false), undefined);
 });
 
+// #639: with the Mac at load ~600 the check timed out, and the row said "Counterpart couldn't check your printer MCP.
+// Check it in Settings → Printers." A slow computer is not a broken MCP: it says so and checks again by itself.
+test('a cad_status check that runs out of time says the computer is busy and checks again by itself; only a real failure sends the person to Settings', async () => {
+  const {CadSettings, CadCheckTimedOut, cadCalls} = await import('../dist/cad-settings.js');
+  const {PrinterMcpError} = await import('@scan-to-make/printer-handoff');
+  const tick = async (check, rounds = 200) => { for (let i = 0; i < rounds && !check(); i++) await new Promise(resolve => setTimeout(resolve, 2)); };
+  // The transport outcome decides, never the MCP's words: connect's own deadline, a request timeout, or ours.
+  const config = () => ({backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true'}});
+  const failing = (where, error) => () => ({async connect() { if (where === 'connect') throw error; }, async close() {}, hasTool: () => true,
+    async callTool() { throw error; }});
+  const connectDeadline = new PrinterMcpError('connection-failed', new DOMException('This operation was aborted', 'AbortError'));
+  await assert.rejects(cadCalls(config, failing('connect', connectDeadline)).status(), error => error instanceof CadCheckTimedOut && error.server === 'bambu-printer-mcp');
+  const requestTimeout = Object.assign(new PrinterMcpError('tool-failed', Object.assign(new Error('MCP error -32001: Request timed out'), {name: 'McpError', code: -32001})), {incomplete: true});
+  await assert.rejects(cadCalls(config, failing('call', requestTimeout)).status(), CadCheckTimedOut);
+  const ours = AbortSignal.timeout(1); await new Promise(resolve => setTimeout(resolve, 10));
+  await assert.rejects(cadCalls(config, failing('call', new PrinterMcpError('cancelled'))).status(ours), CadCheckTimedOut);
+  // Not installed, or the process died: not a timeout.
+  const missing = new PrinterMcpError('connection-failed', Object.assign(new Error('spawn bambu-printer-mcp ENOENT'), {code: 'ENOENT'}));
+  await assert.rejects(cadCalls(config, failing('connect', missing)).status(), error => error === missing);
+  const closed = new PrinterMcpError('connection-failed', Object.assign(new Error('MCP error -32000: Connection closed'), {name: 'McpError', code: -32000}));
+  await assert.rejects(cadCalls(config, failing('connect', closed)).status(), error => error === closed);
+
+  // The row: busy and checking again (clients keep reading while it is `checking`), then the answer when it comes.
+  const events = [];
+  let answers = [new CadCheckTimedOut('bambu-printer-mcp'), {status: {configured: false, ready: false}, server: 'bambu-printer-mcp'}];
+  let asked = 0;
+  const calls = {status: async () => { const next = answers[Math.min(asked++, answers.length - 1)]; if (next instanceof Error) throw next; return next; }, setup: async () => assert.fail('no setup')};
+  const settings = new CadSettings({calls, emit: async event => { events.push(event); }, retryMs: [5, 5]});
+  const busy = await settings.view();
+  assert.equal(busy.state, 'checking');
+  assert.equal(busy.message, 'This computer is busy, so bambu-printer-mcp is slow to answer. Counterpart is checking again.');
+  assert.doesNotMatch(busy.message, /Settings|couldn/, 'a slow computer never sends the person to Settings');
+  await tick(() => settings.current().state === 'not-set-up');
+  assert.equal(settings.current().state, 'not-set-up', 'it checked again by itself');
+  assert.ok(events.some(event => event.type === 'settings.changed' && event.data.keys[0] === 'cad'), 'every layout is told the row changed');
+  // A row that was answered keeps its answer through a timeout: no flapping between Ready and busy.
+  answers = [new CadCheckTimedOut('bambu-printer-mcp')]; asked = 0;
+  await settings.refresh();
+  assert.equal(settings.current().state, 'not-set-up');
+  settings.close();
+
+  // Still too busy after the retries: it stops asking and says when it will check again; still not "go to Settings".
+  const stuck = new CadSettings({calls: {status: async () => { throw new CadCheckTimedOut('bambu-printer-mcp'); }, setup: async () => assert.fail('no setup')}, emit: async () => {}, retryMs: [5, 5]});
+  await stuck.view();
+  await tick(() => stuck.current().state === 'unavailable');
+  assert.deepEqual(stuck.current(), {state: 'unavailable', message: 'This computer is too busy to check bambu-printer-mcp right now. Counterpart checks again when you next open Settings.', server: 'bambu-printer-mcp', canSetUp: false});
+  stuck.close();
+
+  // A real failure (not installed, crashed, refused) still says to check the MCP in Settings → Printers.
+  const broken = new CadSettings({calls: {status: async () => { throw missing; }, setup: async () => assert.fail('no setup')}, emit: async () => {}, retryMs: [5]});
+  assert.deepEqual(await broken.view(), {state: 'unavailable', message: "Counterpart couldn't check your printer MCP. Check it in Settings → Printers.", server: 'your printer MCP', canSetUp: false});
+  broken.close();
+});
+
 test('a refused Set Up shows the MCP\'s own sentence and suggestion, and passes its structured result through unread', async () => {
   const {CadSettings, cadCalls} = await import('../dist/cad-settings.js');
   const {PrinterMcpError} = await import('@scan-to-make/printer-handoff');

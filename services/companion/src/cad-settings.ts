@@ -59,9 +59,37 @@ function refusalOf(value: unknown): Record<string, unknown> | undefined {
     ? value as Record<string, unknown> : undefined;
 }
 
+/**
+ * The printer MCP didn't answer `cad_status` in time (#639): the computer is busy, not the MCP broken. The row says so
+ * and checks again by itself; only an MCP that answered with an error, or couldn't start, sends the person to Settings.
+ */
+export class CadCheckTimedOut extends Error {
+  constructor(readonly server: string, cause?: unknown) { super(`${server} didn't answer in time.`, cause === undefined ? undefined : {cause}); this.name = 'CadCheckTimedOut'; }
+}
+
+/** The MCP protocol's request-timeout error code (`ErrorCode.RequestTimeout`). */
+const REQUEST_TIMEOUT = -32001;
+
+/**
+ * A call that ran out of time, by its transport outcome and never by the MCP's words: our own deadline passed, a
+ * request timed out (the SDK's RequestTimeout), or connecting stopped at its own deadline (connect aborts itself then).
+ */
+function timedOut(error: unknown, signal: AbortSignal): boolean {
+  if (signal.aborted) return (signal.reason as {name?: unknown} | undefined)?.name === 'TimeoutError';
+  for (let at: unknown = error, depth = 0; at && typeof at === 'object' && depth < 6; at = (at as {cause?: unknown}).cause, depth++) {
+    const {name, code} = at as {name?: unknown; code?: unknown};
+    if (name === 'TimeoutError' || (name === 'McpError' && code === REQUEST_TIMEOUT)) return true;
+    if (name === 'AbortError' && error instanceof PrinterMcpError && error.code === 'connection-failed') return true;
+  }
+  return false;
+}
+
 type Client = Pick<PrinterMcpClient, 'connect' | 'hasTool' | 'callTool' | 'close'>;
 export interface CadCalls {
-  /** `cad_status` on the printer MCP as the companion runs it: its structured answer, or null when it has no such tool. */
+  /**
+   * `cad_status` on the printer MCP as the companion runs it: its structured answer, or null when it has no such tool.
+   * Throws `CadCheckTimedOut` when it ran out of time.
+   */
   status(signal?: AbortSignal): Promise<{status: Record<string, unknown> | null; server: string; error?: string}>;
   /**
    * `cad_setup {install: true}`: its structured answer, or the MCP's error. A refusal's structured result is `refusal`,
@@ -72,10 +100,15 @@ export interface CadCalls {
 
 /** The two calls, on the printer MCP as the companion runs it (`running()`, with any Update or Move override). */
 export function cadCalls(running: () => PrinterHandoffConfig, client: (config: PrinterHandoffConfig) => Client = config => new PrinterMcpClient(config)): CadCalls {
-  const call = async (tool: string, args: Record<string, unknown>, options: {timeoutMs: number; onProgress?: () => void; signal?: AbortSignal}) => {
+  const call = async (tool: string, args: Record<string, unknown>, options: {timeoutMs: number; onProgress?: () => void; signal?: AbortSignal; slow?: boolean}) => {
     const config = running(), server = mcpPackageName(config.backend), mcp = client(config);
     const signal = options.signal ?? AbortSignal.timeout(options.timeoutMs);
-    try {
+    try { return await ask(); }
+    catch (error) {
+      if (options.slow && timedOut(error, signal)) throw new CadCheckTimedOut(server, error);
+      throw error;
+    } finally { await mcp.close().catch(() => undefined); }
+    async function ask() {
       await mcp.connect(signal);
       if (!mcp.hasTool(tool)) return {result: null, server};
       let reply;
@@ -93,10 +126,10 @@ export function cadCalls(running: () => PrinterHandoffConfig, client: (config: P
         return {result: null, server, error: (refusal?.message as string | undefined) ?? toolErrorText(reply), ...(refusal ? {refusal} : {})};
       }
       return {result: toolResultJson<Record<string, unknown>>(reply), server};
-    } finally { await mcp.close().catch(() => undefined); }
+    }
   };
   return {
-    status: async signal => { const {result, ...rest} = await call('cad_status', {}, {timeoutMs: 30_000, ...(signal ? {signal} : {})}); return {status: result, ...rest}; },
+    status: async signal => { const {result, ...rest} = await call('cad_status', {}, {timeoutMs: 30_000, slow: true, ...(signal ? {signal} : {})}); return {status: result, ...rest}; },
     // The MCP reports progress every few seconds while it installs; each one restarts the wait, up to the companion's ceiling.
     // The companion's ceiling for one install is 20 minutes.
     setup: async (onProgress, signal) => { const {result, ...rest} = await call('cad_setup', {install: true}, {timeoutMs: 120_000, onProgress, signal: signal ?? AbortSignal.timeout(20 * 60_000)}); return {setup: result, ...rest}; },
@@ -104,18 +137,30 @@ export function cadCalls(running: () => PrinterHandoffConfig, client: (config: P
 }
 
 const STALE_MS = 30_000;
+/** After a check runs out of time, when to check again by itself; then it waits for the next read (#639). */
+const RETRY_MS = [10_000, 20_000, 40_000, 60_000] as const;
 
 export class CadSettings {
-  #status?: {status: Record<string, unknown> | null; server: string; at: number; error?: string};
+  #status?: {status: Record<string, unknown> | null; server: string; at: number; error?: string; slow?: boolean};
+  /** Checks in a row that ran out of time. */
+  #timeouts = 0;
+  #retry?: ReturnType<typeof setTimeout>;
+  readonly #retryMs: readonly number[];
   #setup?: {startedAt: number; seconds: number};
   #result?: {ok: boolean; message: string};
   #refreshing?: Promise<void>;
   readonly #now: () => number;
   constructor(private readonly deps: {calls: CadCalls; emit: (event: EventDraft) => Promise<void>; now?: () => number;
     /** Waits for the code engine's turn (passes hold it while they run); refuses after `waitMs`. */
-    lock?: (waitMs: number) => Promise<() => Promise<void>>}) {
+    lock?: (waitMs: number) => Promise<() => Promise<void>>;
+    /** When to check again after each timeout in a row (tests make it short). */
+    retryMs?: readonly number[]}) {
     this.#now = deps.now ?? Date.now;
+    this.#retryMs = deps.retryMs ?? RETRY_MS;
   }
+
+  /** Stops checking again by itself. */
+  close(): void { clearTimeout(this.#retry); this.#retry = undefined; }
 
   /** The row every layout shows. Reads `cad_status` again when the last answer is older than 30 s. */
   async view(): Promise<CadView> {
@@ -140,7 +185,11 @@ export class CadSettings {
     if (!this.#status) return {state: 'checking', message: 'Checking…', canSetUp: false, ...result};
     const status = this.#status.status;
     if (!status) {
-      // No cad_status at all: an older printer MCP (or one that can't be reached right now).
+      // It ran out of time: a busy computer, not a broken MCP. Clients keep reading while it is `checking`.
+      if (this.#status.slow) return this.#timeouts > this.#retryMs.length
+        ? {state: 'unavailable', message: `This computer is too busy to check ${server} right now. Counterpart checks again when you next open Settings.`, canSetUp: false, ...named}
+        : {state: 'checking', message: `This computer is busy, so ${server} is slow to answer. Counterpart is checking again.`, canSetUp: false, ...named};
+      // No cad_status at all: an older printer MCP, or one that answered with an error or couldn't start.
       return this.#status.error
         ? {state: 'unavailable', message: `Counterpart couldn't check ${server}. Check it in Settings → Printers.`, canSetUp: false, ...named}
         : {state: 'unavailable', message: `Update ${server} in Settings → Printers to use its code design engine.`, canSetUp: false, ...named};
@@ -156,8 +205,18 @@ export class CadSettings {
       try {
         const answer = await this.deps.calls.status();
         this.#status = {...answer, at: this.#now()};
+        this.#timeouts = 0;
       } catch (error) {
-        this.#status = {status: null, server: this.#status?.server ?? 'your printer MCP', at: this.#now(), error: error instanceof Error ? error.message : String(error)};
+        if (error instanceof CadCheckTimedOut) {
+          this.#timeouts++;
+          // A row that was answered keeps that answer (no flapping between Ready and busy) and is asked again on a
+          // later read; one with no answer yet says the computer is busy and checks again by itself.
+          if (this.#status?.status) this.#status = {...this.#status, at: this.#now()};
+          else { this.#status = {status: null, server: error.server, at: this.#now(), slow: true}; this.#checkAgain(); }
+        } else {
+          this.#timeouts = 0;
+          this.#status = {status: null, server: this.#status?.server ?? 'your printer MCP', at: this.#now(), error: error instanceof Error ? error.message : String(error)};
+        }
       }
       if (JSON.stringify(this.current()) !== before) await this.#changed();
     })().finally(() => { this.#refreshing = undefined; });
@@ -204,6 +263,14 @@ export class CadSettings {
       }
     })();
     return this.current();
+  }
+
+  #checkAgain(): void {
+    clearTimeout(this.#retry);
+    const delay = this.#retryMs[this.#timeouts - 1];
+    if (delay === undefined) return;
+    this.#retry = setTimeout(() => { this.#retry = undefined; void this.refresh().catch(() => undefined); }, delay);
+    this.#retry.unref?.();
   }
 
   async #changed(): Promise<void> {
