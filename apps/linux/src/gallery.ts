@@ -73,14 +73,16 @@ export function printableParts(p: Project): PrintablePart[] {
 /**
  * The mesh the part's stage turns (CounterpartKit `Project.partMesh`, #769): `model.stl` for a one-colour design, a sealed
  * design's own file (`versions/<id>/touched.stl`), or the merged `model.stl` a pass writes beside a multi-part design's 3MF
- * (`current/model.stl`, `versions/<id>/model.stl`). None for a designer's published 3MF, which has no merged mesh.
+ * (`current/model.stl`, `versions/<id>/model.stl`), only when the computer lists it (`mergedMesh`, there only while the
+ * file is: review of #770). None for a designer's published 3MF, or a 3MF whose merged mesh isn't listed: its picture.
  */
 export function partMesh(p: Project): string | undefined {
   const model = p.current?.model;
   if (!model) return undefined;
   if (!model.toLowerCase().endsWith(".3mf")) return model.startsWith("versions/") ? model : "model.stl";
   if (p.kind === "published" || !(model.startsWith("current/") || model.startsWith("versions/"))) return undefined;
-  return `${model.slice(0, model.lastIndexOf("/"))}/model.stl`;
+  const sibling = `${model.slice(0, model.lastIndexOf("/"))}/model.stl`;
+  return p.current?.mergedMesh === sibling ? sibling : undefined;
 }
 
 export function scanModels(p: Project): string[] {

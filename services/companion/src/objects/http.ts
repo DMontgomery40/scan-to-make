@@ -430,7 +430,8 @@ export function createObjectRoutes(service: ObjectService, options: {printerSetu
           // beside its 3MF (current/model.stl). A designer's published 3MF has none. Nothing else under current/ is
           // served here (renders by name under renders/). model.stl stays the file that prints.
           const model = object.current?.model;
-          const allowed = model?.startsWith('current/') ? [model, ...(model.toLowerCase().endsWith('.3mf') && object.kind !== 'published' ? ['current/model.stl'] : [])] : [];
+          // For a multi-part design only the merged mesh: its 3MF comes from model.stl, as the doc says (review of #770).
+          const allowed = !model?.startsWith('current/') ? [] : model.toLowerCase().endsWith('.3mf') ? (object.kind !== 'published' ? ['current/model.stl'] : []) : [model];
           if (!allowed.includes(action)) throw new HttpFailure(404, 'not-found');
           await exportFile(response, service.dir(id), action, {'content-type': action.toLowerCase().endsWith('.3mf') ? 'model/3mf' : 'model/stl', 'cache-control': 'private, no-store', 'x-content-type-options': 'nosniff'}, header('if-none-match'));
           return;

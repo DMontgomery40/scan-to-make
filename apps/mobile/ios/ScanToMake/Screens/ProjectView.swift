@@ -41,7 +41,7 @@ struct ProjectView: View {
     @State private var confirmDelete = false
     @Environment(\.scenePhase) private var scenePhase
     /// The part's AR file once the stage's AR chip has prepared it, with the model it was written from (Share offers it too).
-    @State private var arFile: ProjectGalleryView.ARFile?
+    @State private var arFile: PreparedAR?
     @State private var scanURL: URL?
     @State private var captureWarning: String?
     @State private var askWorking = false
@@ -426,7 +426,8 @@ struct ProjectView: View {
                         Divider()
                     }
                     if let modelURL = viewingDesign == nil ? modelURL(object) : nil { ShareLink(object.preservesPublishedFilaments ? "Share 3MF" : "Share STL", item: modelURL) }
-                    if let arURL = arFile?.usdz { ShareLink("Share USDZ", item: arURL) } else if let scanURL { ShareLink("Share Your Scan (USDZ)", item: scanURL) }
+                    // Only the AR file of the model and colour on the stage now (review of #770), the AR chip's own test.
+                    if let arURL = ProjectGalleryView.arUSDZ(arFile, store: store, project: object.showingDesign(viewingDesign), modelURL: modelURL(object)) { ShareLink("Share USDZ", item: arURL) } else if let scanURL { ShareLink("Share Your Scan (USDZ)", item: scanURL) }
                     Divider()
                     Button("Delete Project", systemImage: "trash", role: .destructive) { confirmDelete = true }.disabled(away)
                 } label: { Image(systemName: "ellipsis") }

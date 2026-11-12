@@ -498,12 +498,15 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
         public var filaments: [DeclaredFilament]?
         /// A fit's places for the scanned object, as the pass that made it said (docs/protocols/seats.md).
         public var seats: [Seat]?
+        /// The merged mesh beside a multi-part design's 3MF (`current/model.stl`, `versions/<id>/model.stl`), listed by the Mac
+        /// only while that file is there (#769, review of #770). Absent: no mesh to turn, so the design is its picture.
+        public var mergedMesh: String?
         public init(model: String, renders: [String], sizeMm: [Double]? = nil, summary: String? = nil, changes: [Change]? = nil, ownSettings: Bool? = nil,
-                    filaments: [DeclaredFilament]? = nil, seats: [Seat]? = nil) {
+                    filaments: [DeclaredFilament]? = nil, seats: [Seat]? = nil, mergedMesh: String? = nil) {
             self.model = model; self.renders = renders; self.sizeMm = sizeMm; self.summary = summary; self.changes = changes; self.ownSettings = ownSettings
-            self.filaments = filaments; self.seats = seats
+            self.filaments = filaments; self.seats = seats; self.mergedMesh = mergedMesh
         }
-        private enum CodingKeys: String, CodingKey { case model, renders, sizeMm, summary, changes, engine, ownSettings, filaments, seats }
+        private enum CodingKeys: String, CodingKey { case model, renders, sizeMm, summary, changes, engine, ownSettings, filaments, seats, mergedMesh }
         /// A malformed optional (say, `changes`) is left out; the model and renders still show.
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -516,6 +519,7 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
             ownSettings = (try? c.decodeIfPresent(Bool.self, forKey: .ownSettings)) ?? nil
             filaments = (try? c.decodeIfPresent([DeclaredFilament].self, forKey: .filaments)) ?? nil
             seats = (try? c.decodeIfPresent([Seat].self, forKey: .seats)) ?? nil
+            mergedMesh = (try? c.decodeIfPresent(String.self, forKey: .mergedMesh)) ?? nil
         }
     }
 

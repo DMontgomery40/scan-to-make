@@ -14,7 +14,7 @@ struct ProjectGalleryView: View {
     let modelURL: URL?
     /// The part's AR file once the AR chip has prepared it, with the model and colour it was written from (the page's
     /// Share offers it too). Only the file for the model on the stage now is shown: never the newest design's on an earlier one.
-    @Binding var arFile: ARFile?
+    @Binding var arFile: PreparedAR?
     /// The scan while it is still only on this phone (before the Mac has it).
     let localScan: URL?
     var working = false
@@ -36,16 +36,22 @@ struct ProjectGalleryView: View {
     /// The part's own mesh when it isn't the page's `model.stl` (`Project.partMesh`, #769): a sealed design's file
     /// (`versions/<id>/touched.stl`, #616), or a multi-part design's merged `current/model.stl`. Fetched like any project file.
     private var ownMesh: String? { project.partMesh.flatMap { $0 == "model.stl" ? nil : $0 } }
-    private var effectiveModelURL: URL? {
-        if let ownMesh { return store.models.file(project, ownMesh) }
+    private var effectiveModelURL: URL? { Self.stageModel(store: store, project: project, modelURL: modelURL) }
+    /// The colour the part's AR file is written in (`Project.arTint`).
+    private var arTint: String? { project.arTint }
+    /// The AR file for the model and colour on the stage now, if one was written (`PreparedAR`, as Share asks it).
+    private var arURL: URL? { Self.arUSDZ(arFile, store: store, project: project, modelURL: modelURL) }
+
+    /// The part's mesh file on the stage: its own mesh when it has one (an earlier design's, a multi-part design's merged
+    /// mesh), else the page's model.
+    static func stageModel(store: ProjectsStore, project: Project, modelURL: URL?) -> URL? {
+        if let own = project.partMesh, own != "model.stl" { return store.models.file(project, own) }
         return modelURL
     }
-    /// The colour the part's AR file is written in: its spool, none for a multi-part design (neutral, as on the stage).
-    private var arTint: String? { if case .spool(let hex)? = gallery.entries.first(where: { $0.kind == .part })?.colour { hex } else { nil } }
-    /// The AR file for the model on the stage now, if one was written.
-    private var arURL: URL? {
-        guard let arFile, arFile.from == effectiveModelURL, arFile.tint == arTint else { return nil }
-        return arFile.usdz
+
+    /// The USDZ the AR chip and the page's Share offer: only one written from the model and colour on the stage now.
+    static func arUSDZ(_ file: PreparedAR?, store: ProjectsStore, project: Project, modelURL: URL?) -> URL? {
+        file?.usdz(for: stageModel(store: store, project: project, modelURL: modelURL), tint: project.arTint)
     }
     private var gallery: ProjectGallery { ProjectGallery(project: project, scanOnThisDevice: localScan != nil) }
     private var entry: ProjectGallery.Entry? {
@@ -326,12 +332,9 @@ struct ProjectGalleryView: View {
             }
             guard !Task.isCancelled else { return }
             arPreparing = false
-            if let prepared, ARModel.show(prepared) { arFile = ARFile(from: stl, tint: tint, usdz: prepared) } else { arFailed = true }
+            if let prepared, ARModel.show(prepared) { arFile = PreparedAR(from: stl, tint: tint, usdz: prepared) } else { arFailed = true }
         }
     }
-
-    /// A written AR file and what it was written from.
-    struct ARFile: Equatable { var from: URL; var tint: String?; var usdz: URL }
 
     private func cancelAR() { arTask?.cancel(); arTask = nil; arPreparing = false }
 

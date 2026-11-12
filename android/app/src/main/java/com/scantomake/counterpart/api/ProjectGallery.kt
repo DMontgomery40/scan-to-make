@@ -77,13 +77,14 @@ data class ProjectGallery(val entries: List<Entry>) {
         /**
          * The mesh the part's stage turns (CounterpartKit `Project.partMesh`, #769): `model.stl` for a one-colour design, a
          * sealed design's own file (`versions/<id>/touched.stl`), or the merged `model.stl` a pass writes beside a multi-part
-         * design's 3MF (`current/model.stl`, `versions/<id>/model.stl`). Null for a designer's published 3MF.
+         * design's 3MF (`current/model.stl`, `versions/<id>/model.stl`), only when the computer lists it (`mergedMesh`, review
+         * of #770). Null for a designer's published 3MF, or a 3MF whose merged mesh isn't listed: its picture.
          */
         fun partMesh(project: Project): String? {
             val model = project.current?.model ?: return null
             if (!model.lowercase(Locale.ROOT).endsWith(".3mf")) return if (model.startsWith("versions/")) model else "model.stl"
             if (project.kind == "published" || !(model.startsWith("current/") || model.startsWith("versions/"))) return null
-            return versionMesh(model)
+            return versionMesh(model).takeIf { it == project.current?.mergedMesh }
         }
 
         /** The one spool the result prints in: the last print's spools, else the colour the printer reported printing it. */

@@ -670,6 +670,30 @@ final class LayoutParityUITests: XCTestCase {
         offers3DAndAR("the printed earlier design, touched.stl")
     }
 
+    /// Review of #770: the same multi-part design when the Mac lists no merged mesh beside its 3MF (none was written, or an
+    /// older Mac that doesn't say) is its picture alone, as before #769: no Explore in 3D, no AR chip, no line or Try Again
+    /// for a model that can't come.
+    func testAMultiPartDesignWithNoMergedMeshShowsOnlyItsPictureWithProjectsPresent() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try Self.boxSTL().write(to: folder.appendingPathComponent("mic.stl"))
+        let app = XCUIApplication()
+        app.launchArguments = ["-CounterpartFixtures", folder.path, "-CounterpartFixtureSet", "design-history",
+                               "-CounterpartOpen", "counterpart://project/6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a06"]
+        app.launch()
+        let title = app.buttons["project-title"]
+        XCTAssertTrue(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", "Caliper card logo"), object: title)], timeout: 20) == .completed)
+        XCTAssertTrue(app.images["gallery-stage-picture"].waitForExistence(timeout: 10), "its picture on the stage: \(app.debugDescription)")
+        // Long enough for a model fetch to have started, refused and said so, had one been asked for.
+        RunLoop.current.run(until: Date().addingTimeInterval(4))
+        XCTAssertFalse(app.buttons["Explore in 3D"].exists, "no 3D to turn")
+        XCTAssertFalse(app.buttons["gallery-ar"].exists, "no AR from a picture")
+        XCTAssertFalse(app.descendants(matching: .any)["gallery-model-unavailable"].exists, "no line for a model that can't come")
+        XCTAssertFalse(app.buttons["gallery-model-retry"].exists, "no Try Again that can't succeed")
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "770 multi-part, no merged mesh"; shot.lifetime = .keepAlways; add(shot)
+    }
+
     /// #616 follow-up: the page's cards and Status act on the newest design, so with an earlier design on the stage they
     /// wait for Show the newest, as the Mac's and Android's do. Did it fit? here would answer for the newest print.
     func testAnEarlierDesignOnTheStageLeavesTheNewestsCardsAndStatusAloneWithProjectsPresent() {
