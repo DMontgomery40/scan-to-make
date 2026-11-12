@@ -998,6 +998,18 @@ class HomeLayoutTests {
         compose.runOnIdle { org.junit.Assert.assertEquals(1, printers) }
     }
 
+    /** On-device library, PRD §6.1: Settings → Keep on this phone offers the three choices, the space it uses and Clear,
+     *  with projects present, as on the iPhone and iPad. */
+    @Test fun settingsOffersKeepOnThisPhoneWithProjectsPresent() {
+        state.projects.value = listOf(project("a", "Existing project", "ready"))
+        state.loaded.value = true
+        compose.setContent { WithApp { SettingsScreen(back = {}, pairAgain = {}, openPrinters = {}) } }
+        compose.onNodeWithText("Keep on this phone").performScrollTo().assertExists()
+        for (choice in listOf("Pictures only", "Pictures and 3D models", "Everything, scans included")) compose.onNodeWithText(choice).assertExists()
+        compose.onNodeWithTag("library-usage").assertExists()
+        compose.onNodeWithTag("library-clear").assertExists()
+    }
+
     /** PRD §8.9, §6.1: Settings shows the code design engine from the computer's settings, and Set Up asks the computer to set it up. */
     @Test fun settingsShowsTheCodeDesignEngineAndSetsItUpOnTheComputer() {
         app.pairingStore.save(v2Record(), false)

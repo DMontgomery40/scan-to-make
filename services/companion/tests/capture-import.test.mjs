@@ -117,6 +117,25 @@ test('snapshot ETag pins commit and reopen even if a trusted local writer change
  assert.equal((await f.captures.loadCapture('test',0,saved.captureId,savedProjectETag(replacement))).captureId,saved.captureId);
 });
 
+test('a capture keeps its normal and occlusion maps beside the base colour (#734)',async t=>{
+ const maps={'mesh_normal_0.png':Buffer.from('synthetic normal map'),'mesh_occlusion_0.png':Buffer.from('synthetic occlusion map')};
+ const next=texturedOutput(),report=JSON.parse(next.report);
+ next.assets={...next.assets,...maps};
+ report.outputs=Object.entries({'mesh.obj':next.derived,...next.assets}).map(([path,bytes])=>({path,bytes:bytes.length,sha256:sha(bytes)}));
+ next.report=Buffer.from(JSON.stringify(report));
+ const f=await fixture(t,{convert:async()=>next});
+ const saved=await f.captures.importCapture(request());
+ const loaded=await f.captures.loadCapture('test',0,saved.captureId);
+ for(const [name,bytes] of Object.entries(maps))assert.deepEqual(loaded.materials[name],bytes);
+ // Other names stay refused.
+ const odd=texturedOutput(),oddReport=JSON.parse(odd.report);
+ odd.assets={...odd.assets,'mesh_roughness_0.png':Buffer.from('x')};
+ oddReport.outputs=Object.entries({'mesh.obj':odd.derived,...odd.assets}).map(([path,bytes])=>({path,bytes:bytes.length,sha256:sha(bytes)}));
+ odd.report=Buffer.from(JSON.stringify(oddReport));
+ const g=await fixture(t,{convert:async()=>odd});
+ await assert.rejects(g.captures.importCapture(request()));
+});
+
 test('material assets must match the converter manifest and share the derived byte budget',async t=>{
  const f=await fixture(t);
  const material=Buffer.from('newmtl skin\nKd 1 1 1\n');

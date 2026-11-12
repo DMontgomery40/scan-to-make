@@ -53,7 +53,7 @@ export function receiptFromConvertedBytes(original:Buffer,derived:Buffer,reportB
 /** Converter-owned basenames only; the report already records their byte identities. */
 export function captureMaterialManifest(reportBytes:Buffer) {
  const report=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(reportBytes));
- const outputs=z.array(identity.extend({path:z.string().regex(/^mesh(?:\.obj|\.mtl|_basecolor_[0-9]+\.png)$/)})).max(256).parse(report.outputs??[]);
+ const outputs=z.array(identity.extend({path:z.string().regex(/^mesh(?:\.obj|\.mtl|_(?:basecolor|normal|occlusion)_[0-9]+\.png)$/)})).max(256).parse(report.outputs??[]);
  if(new Set(outputs.map(item=>item.path)).size!==outputs.length)throw new Error('Duplicate converter output');
  const obj=outputs.find(item=>item.path==='mesh.obj');
  if(obj&&(obj.sha256!==report.output?.sha256||obj.bytes!==report.output?.bytes))throw new Error('Inconsistent converter OBJ identity');

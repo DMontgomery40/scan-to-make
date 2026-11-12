@@ -158,6 +158,34 @@ class CompanionClientTests {
         return CompanionClient(PairingClient(store, fake), fake, "Pixel 8", "David’s Pixel", File(System.getProperty("java.io.tmpdir"), "cp-test-${System.nanoTime()}"))
     }
 
+    /** #741 review (Codex P1): a file the library doesn't keep (Keep → pictures only, a model) carries its validator in
+     *  the cache, so the next version asks with If-None-Match and a 304 reuses the copy instead of downloading it again. */
+    @Test fun anUnchangedModelTheLibraryDoesNotKeepIsNotDownloadedAgainAfterANewVersion() = kotlinx.coroutines.runBlocking {
+        val etag = "\"sha256-abc\""
+        val fake = FakeTransport { request, _ ->
+            when {
+                !request.url.endsWith("/model.stl") -> json(200, emptyMap<String, Any>())
+                request.headers.entries.any { it.key.equals("If-None-Match", true) && it.value == etag } -> HttpReply(304, ByteArray(0), mapOf("ETag" to etag))
+                else -> HttpReply(200, "solid model".toByteArray(), mapOf("ETag" to etag))
+            }
+        }
+        val companion = client(fake)
+        val pid = "0b6f0f43-7c35-4b8a-9a3c-8f0b4c4b2a11"
+        fun version(endedAt: Int) = Project.decode(parseObject("""{"id":"$pid","createdAtMs":1,"updatedAtMs":2,"state":"ready","photos":[],"passes":[{"startedAtMs":${endedAt - 1},"endedAtMs":$endedAt,"status":"done"}]}""")!!)!!
+        val first = companion.download(version(10), "model.stl")
+        val second = companion.download(version(20), "model.stl")
+        val asks = fake.calls.map { it.request }.filter { it.url.endsWith("/model.stl") }
+        assertEquals(2, asks.size)
+        assertEquals(null, asks[0].headers.entries.firstOrNull { it.key.equals("If-None-Match", true) }?.value)
+        assertEquals(etag, asks[1].headers.entries.firstOrNull { it.key.equals("If-None-Match", true) }?.value)
+        assertEquals("solid model", second.readText())
+        assertEquals("20", second.parentFile!!.name)
+        assertEquals(false, first.exists())
+        assertEquals(false, java.io.File(first.parentFile, "model.stl.etag").exists())
+        // The next version again: still one copy, still asked by its validator.
+        assertEquals("solid model", companion.download(version(30), "model.stl").readText())
+    }
+
     @Test fun scopes() {
         assertEquals("projects:read", CompanionClient.scope("GET", "/v1/objects"))
         assertEquals("generation:health", CompanionClient.scope("GET", "/healthz"))

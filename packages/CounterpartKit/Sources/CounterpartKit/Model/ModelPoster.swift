@@ -30,6 +30,12 @@ import simd
         return image
     }
 
+    /// The still already drawn for this model and pose, if this process has it: a stage shows it at once on a revisit,
+    /// before its mesh is loaded again (#720, audit row 3: the stage loaded the mesh before asking for the still).
+    public static func cached(key: String, yaw: Float, pitch: Float, fit: Float) -> CGImage? {
+        images.object(forKey: "\(key)#\(yaw)#\(pitch)#\(fit)" as NSString)
+    }
+
     /// End pending demand when its scene deactivates; completed pictures remain usable.
     public static func deferPending() { work.cancelAll() }
 

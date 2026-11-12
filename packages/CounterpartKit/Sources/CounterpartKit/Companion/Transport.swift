@@ -105,19 +105,26 @@ public struct PinnedTransport: HTTPTransport {
     /// its declared length, or by what arrived) the file is deleted and the transfer refused.
     public func download(_ request: URLRequest, trust: TrustPolicy, limit: Int, resourceTimeout: TimeInterval) async throws -> (reply: HTTPReply, file: URL?) {
         let delegate = TrustDelegate(trust: trust)
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.urlCache = nil
-        configuration.httpShouldSetCookies = false
-        configuration.timeoutIntervalForRequest = request.timeoutInterval
-        configuration.timeoutIntervalForResource = resourceTimeout
-        let session = URLSession(configuration: configuration)
-        defer { session.finishTasksAndInvalidate() }
+        // The paired Mac's files share one session, so they share its connections: one TLS handshake, then each picture
+        // and model rides the open connection (audit row 3: a new session, and handshake, for every file).
+        let pooled = SessionPool.shared.session(for: trust, resourceTimeout: resourceTimeout)
+        let session = pooled ?? {
+            let configuration = URLSessionConfiguration.ephemeral
+            configuration.urlCache = nil
+            configuration.httpShouldSetCookies = false
+            configuration.timeoutIntervalForRequest = request.timeoutInterval
+            configuration.timeoutIntervalForResource = resourceTimeout
+            return URLSession(configuration: configuration)
+        }()
+        defer { if pooled == nil { session.finishTasksAndInvalidate() } }
         let file: URL, answer: URLResponse
         do { (file, answer) = try await session.download(for: request, delegate: delegate) }
         catch {
             if Task.isCancelled || error is CancellationError { throw TransportError("cancelled") }
+            if delegate.rejectedPin { SessionPool.shared.drop(trust) }
             throw TransportError(delegate.rejectedPin ? "certificate-changed" : Self.code(for: error))
         }
+        if let reused = delegate.reusedConnection { MediaTrace.record("request.connection", ["reused": String(reused)]) }
         var headers: [String: String] = [:]
         for (key, value) in (answer as? HTTPURLResponse)?.allHeaderFields ?? [:] {
             if let key = key as? String, let value = value as? String { headers[key] = value }
@@ -134,9 +141,9 @@ public struct PinnedTransport: HTTPTransport {
             try? FileManager.default.removeItem(at: file)
             throw TransportError("too-large")
         }
-        // URLSession owns the file it hands back and may remove it once the session is invalidated (the `defer` above
-        // runs as this returns). The caller is promised a file that is its own to move or delete, so it is moved to one
-        // of ours before the session goes (review of #527, part 2, F1).
+        // URLSession owns the file it hands back and may remove it once the session is invalidated or the call returns.
+        // The caller is promised a file that is its own to move or delete, so it is moved to one of ours at once (review
+        // of #527, part 2, F1).
         let kept = FileManager.default.temporaryDirectory.appending(path: "download-\(UUID().uuidString)")
         do { try FileManager.default.moveItem(at: file, to: kept) }
         catch { try? FileManager.default.removeItem(at: file); throw TransportError("network") }
@@ -204,8 +211,15 @@ public struct PinnedTransport: HTTPTransport {
         let trust: TrustPolicy
         private let lock = NSLock()
         private var pinRejected = false
+        private var reused: Bool?
         var rejectedPin: Bool { lock.lock(); defer { lock.unlock() }; return pinRejected }
+        /// Whether the request rode a connection already open (`URLSessionTaskTransactionMetrics.isReusedConnection`).
+        var reusedConnection: Bool? { lock.lock(); defer { lock.unlock() }; return reused }
         init(trust: TrustPolicy) { self.trust = trust }
+
+        func urlSession(_ session: URLSession, task: URLSessionTask, didFinishCollecting metrics: URLSessionTaskMetrics) {
+            lock.lock(); reused = metrics.transactionMetrics.last?.isReusedConnection; lock.unlock()
+        }
 
         func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
                         newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
@@ -286,6 +300,52 @@ public struct PinnedTransport: HTTPTransport {
             } else { result = .success(HTTPReply(status: status, body: received, headers: headers)) }
             lock.unlock()
             continuation?.resume(with: result)
+        }
+    }
+}
+
+/// One URLSession per paired Mac (its pin, address and transfer budget), kept for the app's life, so file transfers reuse
+/// open connections. Only the paired record is pooled: a pairing attempt and nearby pairing keep a session per request.
+/// The session has no delegate of its own; each task's delegate checks the pin. With no session delegate, URLSession
+/// gives the server-trust challenge to the task's delegate (Apple, `URLSessionTaskDelegate.urlSession(_:task:didReceive:
+/// completionHandler:)`), and a connection is only reused within the session it was checked in, so a reused connection
+/// is always one this pin accepted.
+final class SessionPool: @unchecked Sendable {
+    static let shared = SessionPool()
+    private let lock = NSLock()
+    private var sessions: [String: URLSession] = [:]
+    private var order: [String] = []
+
+    private static func key(_ trust: TrustPolicy) -> String? {
+        guard case .record(let record) = trust, let base = record.requestBaseURL else { return nil }
+        return [record.publicKeySha256 ?? "", record.certificateSha256 ?? "", base.scheme ?? "", base.host ?? "", String(base.port ?? 0)].joined(separator: "|")
+    }
+
+    func session(for trust: TrustPolicy, resourceTimeout: TimeInterval) -> URLSession? {
+        guard let identity = Self.key(trust) else { return nil }
+        let key = identity + "|" + String(Int(resourceTimeout))
+        return lock.withLock {
+            if let session = sessions[key] { return session }
+            let configuration = URLSessionConfiguration.ephemeral
+            configuration.urlCache = nil
+            configuration.httpShouldSetCookies = false
+            configuration.timeoutIntervalForResource = resourceTimeout
+            configuration.timeoutIntervalForRequest = 90  // a file transfer's inactivity limit (`fetchFile`)
+            configuration.httpMaximumConnectionsPerHost = 4
+            let session = URLSession(configuration: configuration)
+            sessions[key] = session; order.append(key)
+            // Another address or a new pairing makes a new session; the oldest goes.
+            while order.count > 6 { let old = order.removeFirst(); sessions.removeValue(forKey: old)?.finishTasksAndInvalidate() }
+            return session
+        }
+    }
+
+    /// A pin was refused on this Mac's session: it is not used again.
+    func drop(_ trust: TrustPolicy) {
+        guard let identity = Self.key(trust) else { return }
+        lock.withLock {
+            for key in sessions.keys where key.hasPrefix(identity + "|") { sessions.removeValue(forKey: key)?.finishTasksAndInvalidate() }
+            order.removeAll { $0.hasPrefix(identity + "|") }
         }
     }
 }

@@ -52,6 +52,15 @@ async function source(f){
 const route='/v1/saved-projects/phone/captures?projectRevision=7';
 const importOptions=(etag,body)=>({method:'POST',headers:{'content-type':'model/vnd.usdz+zip','if-match':etag},body});
 
+test('project file routes keep the phone\'s connection open; every other route closes it (#720)',async t=>{
+ const f=await fixture(t);
+ const media=await wire(f,'/v1/objects/0b6f0f43-7c35-4b8a-9a3c-8f0b4c4b2a11/model.stl',{headers:{connection:'keep-alive'}});
+ assert.notEqual(String(media.headers.connection??'').toLowerCase(),'close','a project file never closes the connection');
+ const other=await wire(f,'/v1/saved-projects');
+ assert.equal(String(other.headers.connection??'').toLowerCase(),'close');
+ const upload=await wire(f,'/v1/objects',{method:'POST',headers:{'content-type':'application/json',connection:'keep-alive'},body:'{}'});
+ assert.equal(String(upload.headers.connection??'').toLowerCase(),'close','an upload or command still closes it');
+});
 test('authenticated HTTP sync imports real USDZ then reopens metadata and exact source bytes',async t=>{
  const f=await fixture(t),etag=await sync(f),bytes=await source(f);
  const imported=await wire(f,route,importOptions(etag,bytes));assert.equal(imported.status,201);
