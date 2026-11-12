@@ -6,7 +6,64 @@ Updated in place; git history keeps the rest. This is the only handoff: no dated
 
 **What is running and owed this hour is the pinned issue [#610](https://github.com/DMontgomery40/scan-to-make/issues/610), which the lead updates at every wake. Read it first.**
 
-## Now (2026-11-12, 01:39Z): the lead's state of play
+## Now (2026-11-12, 17:15Z): what the night delivered, and what needs David
+
+Lead: Claude Opus 5.5 (high), T3 thread "Recover Work and Stabilize Counterpart" on agents-173. Live list: pinned issue [#610](https://github.com/DMontgomery40/scan-to-make/issues/610). David, ~08:15Z: "finish everything outstanding by morning, except what needs a physical print."
+
+**Installed on David's devices**
+- **Mac and iPad: build 202611121212 from main `b1e1cfd9` (trains 12a + 12b + 12c)**, 12:2xZ. Mac checks: health 21 ms, project list 10 ms, a real estimate 2.21 s, and all 22 projects, 38 designs and 38 print attempts kept. Receipts are in `~/scan-to-make-work/{mac,ipad}-202611121212/`; report on [#763](https://github.com/DMontgomery40/scan-to-make/pull/763#issuecomment-6823538483).
+- **iPhone: 202611121019 (trains 12a + 12b).** iOS refused 202611121212 while the phone was locked (devicectl 12040/10003). The signed app and `install-when-reachable.sh` are in `~/scan-to-make-work/iphone-202611121212/`. Run that script once the phone is unlocked; no rebuild.
+- **MCPs in the app: bambu-printer-mcp 1.1.93, mcp-3D-printer-server 1.2.75**, installed through Settings → Printers → Update.
+
+**Landed on main tonight (three trains)**
+- 12a (#741): the phone keeps every model and picture it has shown, revalidating with an ETag (#556/#720). Touch-up keeps the capture's normal and occlusion maps (#738).
+- 12b (#750):
+  - the camera check of each print (#745, the app half of #630): no "first layer's down" from counters, and one notification plus a card line that stays when the first-layer frame shows nothing coming out;
+  - every size keeps its source (#747, #622);
+  - earlier designs and prints are kept as versions (#602, #616). The Mac's first start migrated all 22 projects into 38 designs and 38 print attempts, with every current model unchanged.
+- 12c (#763):
+  - Linux (#753) and Android (#755): earlier designs and prints on the project page, a made project's history, and a stage picture that settles (#744, #743, #613, #626, #748). The Android and Linux device installs are stale; that is #667.
+  - Companion (#758): a slow Mac is not a broken MCP (#639), a wordless designer 3MF is kept as is (#641), and a printed project closes its question (#638).
+  - Engine: a Blender project moves to the code engine, and each pass gets only its own engine's tools (#754, #609). The worker schema states its length limits in words (#759, #734).
+  - Phone: the AR chip waits while the model downloads, and the stage has one Try Again (#729, #606). Versions follow-ups (#760, #616).
+  - Gate reliability (#757: #650, #689, #690, #703).
+
+**The printer MCPs tonight (both repos, published on npm and in the app)**
+- 1.1.91 / 1.2.73: a per-job flight record (#628), the sticky "nothing's coming out" verdict and layer-10 check (#630), and Studio-loadable 3MF (#737).
+- 1.1.92 / 1.2.74:
+  - design engine round 2 (#734): product-first `cad_design` and 19 cookbook examples, each with "Use for:". The worker reads the render after every run, and fit checks queue. Sonnet 5.5 now makes the bought-product desk hook, the USB-C rail and the capo, mostly by copying the closest example;
+  - P1S calibration like Studio (#736);
+  - P1P with the enclosure kit (#140, by ianhyzy) and X1C firmware 01.12 (#128, by geooff). Both landed as integration PRs that keep their authorship and thank them.
+- 1.1.93 / 1.2.75 (round 3a):
+  - `counterpart_self_check` and the counterpart npm metadata (#644);
+  - the maker in the printer name (#698; the app reading it is #766);
+  - a progress reset on a new job (#702);
+  - the slicer cancel fixed at its cause (#699);
+  - the .mcpb self-check fixed.
+- **Held: round 3b** (bambu #157, mcp-3D #111). These PRs let the code engine edit multi-part, multi-colour 3MF projects (#642), report plate parts and colours (#645) and port the 3MF tools to mcp-3D (#643). Three edit-fidelity defects block them, recorded on both PRs and on #642:
+  - replacing a shared mesh changes the unselected object;
+  - inspection keys omit the model path;
+  - touching colour parts keep internal faces.
+
+  Its Mac slice preflight passed. Report: `~/scan-to-make-work/mcp-release-3-2026-11-12/REPORT.md` on the Mac.
+
+**Needs David's hands (the only things not finished)**
+1. **The P1S nozzle and extruder (#605).** It stopped extruding about 30 mm into the hanger, then printed air three times, from the app and from Bambu Studio, with no error. The P1S has no clog detection. Check by hand, then make one test print; the camera check (#630) watches that print.
+2. **Unlock the phone** so the 202611121212 install goes on. Then open a project twice (#752, #617, #606): the second open should draw from the phone with no "coming from your Mac", a drag turns the part, and the AR chip is there while a model downloads. The media trace on the Mac records it.
+3. **Look at a changed project** (#616, #622): What you have / Earlier designs, and a sizes question with one number typed and one accepted.
+4. Not urgent: the hanger's Nov 4 print record. An older copy survives on the Mac; should it go back into the hanger's history?
+
+**How the night ran (for the next lead)**
+- Trains: one conductor (Opus 5.5, Mac) gated each train. The lead built train 12c on Linux while 12b's gate ran, so 12c only had to merge main. A train's review loop stops after one review and one round of fixes; later findings become issues.
+- Reviews: one Muse Wonder full (high) review per PR on agents-171, plus one focused re-check. The lead fixed small findings directly.
+- MCP releases: GPT-6.1 Sol on the Mac merged, published, verified npm, the .mcpb and the changelog, and pressed Update in the app. Contributor PRs land as integration PRs that keep authorship.
+- Hazards seen:
+  - Android Gradle runs out of memory on agents-173 beside other builders: cap the heap, or use agents-136.
+  - thread_send turns on old threads don't wake the lead, so poll them.
+  - The Mac's two build slots are the bottleneck: gate UI jobs hold both, and installs and captures queue.
+  - An install needs the phone unlocked at that moment. Start the iPhone install when David is up, or leave the retry script running.
+
+## Before that (2026-11-12, 01:39Z): the lead's state of play
 
 Lead: Claude Opus 5.5 (high), T3 thread "Recover Work and Stabilize Counterpart" on agents-173, since 18:46Z Nov 11. Live list: pinned issue [#610](https://github.com/DMontgomery40/scan-to-make/issues/610). Pipeline explainer for David (every step, the exact worker prompts): https://claude.ai/artifact/GGte9gZZuoYH3spiJo3Snj
 
