@@ -663,9 +663,11 @@ struct ProjectView: View {
         })) {
             ForEach(ProjectStatus.choices, id: \.self) { Label($0.label, systemImage: $0.symbol).tag($0) }
         } label: { Label("Status", systemImage: "flag") }
-        // On the capsule the choices are right there, one tap; in ••• they're a Status submenu. Disabled on the picker
-        // itself: in a Menu, `.disabled` on this group dims Hide from Home but leaves the Status submenu enabled (train 12c).
-        if inline { picker.pickerStyle(.inline).disabled(disabled) } else { picker.pickerStyle(.menu).disabled(disabled) }
+        // On the capsule the choices are right there, one tap; in ••• they're a Status submenu. While the status can't be
+        // set (an earlier design on the stage, the Mac away) it is a plain dimmed Status row instead: inside a Menu, iOS 27
+        // keeps a menu-style Picker's submenu enabled whatever `.disabled` says, on the group or on the picker (train 12c).
+        if disabled { Button {} label: { Label("Status", systemImage: "flag") }.disabled(true) }
+        else if inline { picker.pickerStyle(.inline) } else { picker.pickerStyle(.menu) }
         // Apart from the status: a Done project hidden from Home is still Done.
         Section {
             if object.isArchived {
