@@ -42,20 +42,32 @@ import CounterpartKit
     /// At most this many files at once, so a list of 40 projects never floods a slow link.
     static let width = 3
 
-    init(client: CompanionClient) {
+    /// `watchesLink` false (tests): the link is only what `linkChanged` says.
+    init(client: CompanionClient, watchesLink: Bool = true) {
         self.client = client
+        defer { refreshUsage() }
+        guard watchesLink else { return }
         monitor.pathUpdateHandler = { [weak self] path in
             Task { @MainActor in
                 guard let self else { return }
-                let changed = self.expensive != path.isExpensive || self.constrained != path.isConstrained
-                self.expensive = path.isExpensive; self.constrained = path.isConstrained
-                // Back on Wi-Fi: what waited for it comes now.
-                if changed, let last = self.last { self.fill(last.projects, fromMac: last.fromMac) }
+                self.linkChanged(expensive: path.isExpensive, constrained: path.isConstrained)
             }
         }
         monitor.start(queue: DispatchQueue(label: "counterpart.library.path"))
-        refreshUsage()
     }
+
+    /// The link changed (NWPathMonitor; tests call it directly). Back on Wi-Fi, what waited for it comes now; on cellular
+    /// or Low Data Mode, what is still queued is checked again before it starts (`drain`).
+    func linkChanged(expensive: Bool, constrained: Bool) {
+        let changed = self.expensive != expensive || self.constrained != constrained
+        self.expensive = expensive; self.constrained = constrained
+        if changed, let last { fill(last.projects, fromMac: last.fromMac) }
+    }
+
+    /// Files queued or in flight, by `project#name#version` (tests).
+    var pending: Set<String> { inFlight }
+    /// Whether a fill is fetching now (tests).
+    var isFilling: Bool { pump != nil }
 
     /// Which Mac's library is in use, from a pairing that was read: another Mac's is cleared. Nothing else clears it here:
     /// a failed or locked read, or a Mac that wants pairing again, is not the person forgetting the Mac (board X96).
@@ -86,8 +98,11 @@ import CounterpartKit
     /// project missing from it is deleted and its files go.
     func fill(_ projects: [Project], fromMac: Bool) {
         last = (projects, fromMac)
-        guard library.isActive, !projects.isEmpty else { return }
+        guard library.isActive else { return }
+        // The Mac's whole list is the truth even when it is empty: every project was deleted, so every file goes (review
+        // of #741, P1). A saved or partial list never prunes.
         if fromMac { library.prune(keeping: Set(projects.map(\.id))) }
+        guard !projects.isEmpty else { return }
         let wants = LibraryPlan.wants(projects, opened: opened.union(projects.compactMap { library.lastOpened($0.id) != nil ? $0.id : nil }), keep: keep)
             .filter { LibraryPlan.fetches($0, keep: keep, expensive: expensive, constrained: constrained) }
             .filter { library.file(project: $0.project.id, name: $0.name, version: Int64($0.project.mediaVersion)) == nil }
@@ -111,6 +126,14 @@ import CounterpartKit
             while true {
                 while running < Self.width, !queue.isEmpty {
                     let want = queue.removeFirst(), key = Self.key(want)
+                    // The link now, not when it was queued: a model queued on Wi-Fi waits once the phone is on cellular or
+                    // Low Data Mode (review of #741, P2; David is often on 5G through his tunnel). Released, so the next
+                    // fill on an unmetered link queues it again.
+                    guard LibraryPlan.fetches(want, keep: keep, expensive: expensive, constrained: constrained) else {
+                        inFlight.remove(key)
+                        MediaTrace.record("library.deferred", ["kind": want.kind.rawValue])
+                        continue
+                    }
                     group.addTask { _ = try? await client.download(want.project, want.name); return key }
                     running += 1
                 }
@@ -126,6 +149,9 @@ import CounterpartKit
 
     /// Settings → Clear: this Mac's files go; the next list fills it again.
     func clear() {
+        // What was queued is released too, so the next list queues those files again (review of #741, P2); a transfer
+        // in flight releases its own key when it ends.
+        inFlight.subtract(queue.map(Self.key))
         queue = []
         library.clear()
         refreshUsage()
