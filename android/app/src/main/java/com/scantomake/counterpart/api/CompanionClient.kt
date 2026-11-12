@@ -407,8 +407,9 @@ class CompanionClient(
         val target = File(folder, filename)
         if (target.exists()) {
             if (kept == null) return target
-            // Fetched before this kind was kept: into the library as it is, never over the network again.
-            runCatching { return kept.commit(target.readBytes(), project.id, name, project.mediaVersion, filename) }
+            // Fetched before this kind was kept: into the library as it is, with its validator (as the iPhone's
+            // `validator(of: target)`), so a later version is still answered 304 for unchanged bytes; never over the network again.
+            runCatching { return kept.commit(target.readBytes(), project.id, name, project.mediaVersion, filename, cachedValidator(target)) }
             return target
         }
         val path = "/v1/objects/${project.id}/${encodePath(resource)}"
