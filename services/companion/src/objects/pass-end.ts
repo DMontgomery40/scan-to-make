@@ -1,5 +1,6 @@
 import {limitWords, type WorkerLimit} from '../touchup/runner.js';
 import type {ObjectPass, StmObject} from './store.js';
+import type {DesignEngine} from '../touchup/invocation.js';
 
 /** How a design pass ended, as stored and as every client reads it (`passes[].status`). A pass with none is running. */
 export const PASS_STATUSES = ['done', 'unchanged', 'needs_closeup', 'needs_file', 'capped', 'failed', 'interrupted'] as const;
@@ -44,10 +45,13 @@ export function lastDesignPass(passes: ObjectPass[]): ObjectPass | undefined {
   return passes.filter(pass => pass.trigger !== 'locate').at(-1);
 }
 
-/** The session the next request on this project continues, when its last pass ended in a way that allows it. */
-export function passResume(pass: ObjectPass | undefined): {sessionId: string; passDir: string; sessionCwd?: string} | undefined {
+/**
+ * The session the next request on this project continues, when its last pass ended in a way that allows it, with the
+ * engine that session worked in: a pass that runs on another engine starts fresh instead (#609).
+ */
+export function passResume(pass: ObjectPass | undefined): {sessionId: string; passDir: string; sessionCwd?: string; engine?: DesignEngine} | undefined {
   if (!pass || pass.endedAtMs === undefined || pass.resumable !== true || !pass.sessionId || !pass.dir) return undefined;
-  return {sessionId: pass.sessionId, passDir: pass.dir, ...(pass.sessionCwd ? {sessionCwd: pass.sessionCwd} : {})};
+  return {sessionId: pass.sessionId, passDir: pass.dir, ...(pass.sessionCwd ? {sessionCwd: pass.sessionCwd} : {}), ...(pass.engine ? {engine: pass.engine} : {})};
 }
 
 /**

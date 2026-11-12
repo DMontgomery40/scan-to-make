@@ -24,6 +24,15 @@ export const passCadDir = (pass: Pick<TouchupPass, 'dir'>) => join(pass.dir, 'ca
 export const passDesignDir = (pass: Pick<TouchupPass, 'dir'>) => join(pass.dir, 'design');
 
 export type CodeEngineState = 'ready' | 'not-set-up' | 'absent';
+
+/**
+ * How long Counterpart waits for `cad_status`, wherever it reads it: a pass choosing its engine and the Settings row.
+ * After an MCP update that changed the engine, the first `cad_status` re-runs the engine's confined round trip itself
+ * (bambu-printer-mcp 1.1.90, mcp-3D-printer-server 1.2.72: 14–22 s measured, waiting at most 25 s for a busy engine),
+ * and a caller that gives up cancels it. At 15 s the pass gave up first and fell back to Blender, saying the engine
+ * "isn't set up" (#609).
+ */
+export const CAD_STATUS_TIMEOUT_MS = 30_000;
 type Client = Pick<PrinterMcpClient, 'hasTool' | 'callTool'>;
 
 /**
@@ -33,7 +42,7 @@ type Client = Pick<PrinterMcpClient, 'hasTool' | 'callTool'>;
 export async function codeEngineState(client: Client, signal?: AbortSignal): Promise<CodeEngineState> {
   if (!client.hasTool('cad_status') || !client.hasTool('cad_run')) return 'absent';
   try {
-    const reply = await client.callTool('cad_status', {}, {...(signal ? {signal} : {}), timeoutMs: 15_000});
+    const reply = await client.callTool('cad_status', {}, {...(signal ? {signal} : {}), timeoutMs: CAD_STATUS_TIMEOUT_MS});
     if (reply.isError) return 'not-set-up';
     return toolResultJson<{ready?: unknown}>(reply).ready === true ? 'ready' : 'not-set-up';
   } catch (error) {

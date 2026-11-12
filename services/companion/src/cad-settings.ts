@@ -3,6 +3,7 @@ import {PrinterMcpClient, PrinterMcpError, toolResultJson, type PrinterHandoffCo
 import {toolErrorText} from './touchup/blender.js';
 import {mcpPackageName} from './printing/print-settings.js';
 import type {EventDraft} from './printing/monitor.js';
+import {CAD_STATUS_TIMEOUT_MS} from './touchup/code-engine.js';
 
 /**
  * Settings → the code design engine (PRD §5.9, §7.5, §8.9): the printer MCP's own `cad_status`, and Set Up, which runs
@@ -96,7 +97,7 @@ export function cadCalls(running: () => PrinterHandoffConfig, client: (config: P
     } finally { await mcp.close().catch(() => undefined); }
   };
   return {
-    status: async signal => { const {result, ...rest} = await call('cad_status', {}, {timeoutMs: 30_000, ...(signal ? {signal} : {})}); return {status: result, ...rest}; },
+    status: async signal => { const {result, ...rest} = await call('cad_status', {}, {timeoutMs: CAD_STATUS_TIMEOUT_MS, ...(signal ? {signal} : {})}); return {status: result, ...rest}; },
     // The MCP reports progress every few seconds while it installs; each one restarts the wait, up to the companion's ceiling.
     // The companion's ceiling for one install is 20 minutes.
     setup: async (onProgress, signal) => { const {result, ...rest} = await call('cad_setup', {install: true}, {timeoutMs: 120_000, onProgress, signal: signal ?? AbortSignal.timeout(20 * 60_000)}); return {setup: result, ...rest}; },

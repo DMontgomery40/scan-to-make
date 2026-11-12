@@ -9,7 +9,7 @@ import {PrinterMcpClient} from '@scan-to-make/printer-handoff';
 import type {AiTweakOptions} from './ai-tweak.js';
 import {aiTweakInternals} from './ai-tweak.js';
 import {runClaudeWorker,publicTouchupText,TOUCHUP_TIMEOUT_MS,TOUCHUP_INACTIVITY_MS,TOUCHUP_MAX_TOOL_CALLS,limitWords,type WorkerRun,type WorkerLimit,type TouchupProgress} from './touchup/runner.js';
-import type {TouchupInvocation,McpServerEntry} from './touchup/invocation.js';
+import {toolBlocked,type TouchupInvocation,type McpServerEntry} from './touchup/invocation.js';
 
 type Request = Pick<TouchupInvocation,'args'|'cwd'|'mcpConfig'> & {timeoutMs?:number;inactivityMs?:number;maxToolCalls?:number};
 const textBlock=(text:string)=>({type:'text' as const,text});
@@ -74,7 +74,12 @@ export async function runProjectModel(request:Request,options:AiTweakOptions,sig
     await writeFile(join(codex,'auth.json'),bytes,{mode:0o600});
    }
    let config=plan.codexConfig!+'\n';
-   for(const [name,entry] of Object.entries(mcpConfig.mcpServers))config+=`[mcp_servers.${JSON.stringify(name)}]\ncommand = ${JSON.stringify(entry.command)}\nargs = ${JSON.stringify(entry.args)}\nstartup_timeout_sec = 120\ntool_timeout_sec = 120\n`;
+   for(const [name,entry] of Object.entries(mcpConfig.mcpServers)){
+    config+=`[mcp_servers.${JSON.stringify(name)}]\ncommand = ${JSON.stringify(entry.command)}\nargs = ${JSON.stringify(entry.args)}\nstartup_timeout_sec = 120\ntool_timeout_sec = 120\n`;
+    // The pass's tool set (its --disallowedTools): Codex takes tool names, so read the server's catalog once.
+    const blocked=await blockedTools(request.args,name,entry,controller.signal);
+    if(blocked.length)config+=`disabled_tools = ${JSON.stringify(blocked)}\n`;
+   }
    // All modeling goes through the same MCP; no shell execution, hooks, user skills or connectors.
    config+='\n[tools]\n';
    await writeFile(join(codex,'config.toml'),config,{mode:0o600});
@@ -122,6 +127,14 @@ export async function runProjectModel(request:Request,options:AiTweakOptions,sig
  } finally {clearTimeout(timer);clearTimeout(idleTimer);signal?.removeEventListener('abort',abort);}
 }
 
+/** The tools of `server` that the request's --disallowedTools takes away, by name, from the server's own catalog. */
+async function blockedTools(args:string[],server:string,entry:McpServerEntry,signal:AbortSignal):Promise<string[]>{
+ if(!args.includes('--disallowedTools'))return [];
+ const client=new PrinterMcpClient({backend:'bambu-printer-mcp',process:entry});
+ try{return (await client.connect(signal)).tools.map(tool=>tool.name).filter(tool=>toolBlocked(args,server,tool));}
+ finally{await client.close().catch(()=>undefined);}
+}
+
 class ProviderLimitError extends Error {constructor(readonly limit:WorkerLimit){super(limitWords(limit));}}
 type Block={type:string;text?:string;data?:string;mimeType?:string};
 type Tool={name:string;description?:string;inputSchema:Record<string,unknown>};
@@ -141,7 +154,7 @@ async function runApi(request:Request,options:AiTweakOptions,signal:AbortSignal,
   for(const [name,entry] of Object.entries(request.mcpConfig.mcpServers)){
    const client=new PrinterMcpClient({backend:'bambu-printer-mcp',process:await isolatedMcp(entry,privateDir,options.env)});clients.set(name,client);
    const catalog=await client.connect(signal);
-   for(const tool of catalog.tools){const id=`mcp_${name}_${tool.name}`;tools.push({name:id,description:tool.description,inputSchema:tool.inputSchema});dispatch.set(id,{client,name:tool.name});}
+   for(const tool of catalog.tools){if(toolBlocked(request.args,name,tool.name))continue;const id=`mcp_${name}_${tool.name}`;tools.push({name:id,description:tool.description,inputSchema:tool.inputSchema});dispatch.set(id,{client,name:tool.name});}
   }
   if(!request.args.includes('--tools')||value(request.args,'--tools')!=='')tools.push({name:'read_file',description:'Read a project file, including images. Paths must be inside the pass folder.',inputSchema:{type:'object',properties:{path:{type:'string'}},required:['path']}},
    {name:'fetch_url',description:'Read a public web page, or download an original STL/3MF into the project output folder.',inputSchema:{type:'object',properties:{url:{type:'string'},filename:{type:'string'}},required:['url']}});
