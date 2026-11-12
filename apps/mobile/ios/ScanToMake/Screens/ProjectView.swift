@@ -418,7 +418,7 @@ struct ProjectView: View {
                         Button("Rename Project", systemImage: "pencil") { projectName = words.title; renaming = true }.disabled(away)
                     }
                     if store.projectSettings {
-                        statusChoices(object, words).disabled(away || earlierShown)
+                        statusChoices(object, words, disabled: away || earlierShown)
                         Divider()
                     }
                     if object.canMakeFromScan {
@@ -657,14 +657,15 @@ struct ProjectView: View {
     static let afterPrinting = NotificationActions.afterPrinting
 
     /// Status (Not printed, Printed, Done, Needs changes), then Hide from Home apart from it: in ••• and on the capsule.
-    @ViewBuilder private func statusChoices(_ object: Project, _ words: ProjectWords, inline: Bool = false) -> some View {
+    @ViewBuilder private func statusChoices(_ object: Project, _ words: ProjectWords, inline: Bool = false, disabled: Bool = false) -> some View {
         let picker = Picker(selection: Binding(get: { shownStatus(object, words) }, set: { status in
             act { try await store.mac.client.setStatus(object.id, status) }
         })) {
             ForEach(ProjectStatus.choices, id: \.self) { Label($0.label, systemImage: $0.symbol).tag($0) }
         } label: { Label("Status", systemImage: "flag") }
-        // On the capsule the choices are right there, one tap; in ••• they're a Status submenu.
-        if inline { picker.pickerStyle(.inline) } else { picker.pickerStyle(.menu) }
+        // On the capsule the choices are right there, one tap; in ••• they're a Status submenu. Disabled on the picker
+        // itself: in a Menu, `.disabled` on this group dims Hide from Home but leaves the Status submenu enabled (train 12c).
+        if inline { picker.pickerStyle(.inline).disabled(disabled) } else { picker.pickerStyle(.menu).disabled(disabled) }
         // Apart from the status: a Done project hidden from Home is still Done.
         Section {
             if object.isArchived {
@@ -673,6 +674,7 @@ struct ProjectView: View {
                 Button("Hide from Home", systemImage: "archivebox") { act { try await store.archive(object, true) } }
             }
         }
+        .disabled(disabled)
     }
 
     /// The status in Project Settings; archived shows what's under it, and none set shows what the state says.
