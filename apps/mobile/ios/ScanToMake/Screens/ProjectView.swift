@@ -24,6 +24,8 @@ struct ProjectView: View {
     /// Another project, from a line that names it (where this scan came from, what else was made from it).
     var openProject: (String) -> Void = { _ in }
     @State private var viewingDesign: String?
+    /// An earlier design is on the stage: what acts on the project (its cards, Status, the bar) waits for the newest (#616).
+    private var earlierShown: Bool { viewingDesign != nil }
     @State private var section = ProjectSection.result
     @State private var note = ""
     @State private var attempts = NoteAttempts()
@@ -289,7 +291,7 @@ struct ProjectView: View {
                         HStack {
                             Button("Try Again") { store.retryQueuedChange(object) }.disabled(object.changesWait)
                             Button("Discard Saved Change") { store.discardQueuedChange(object) }
-                        }.disabled(working || away)
+                        }.disabled(working || away || earlierShown)
                     }.padding(.horizontal, 20)
                 }
                 if let pending = object.pendingFollowup {
@@ -307,7 +309,7 @@ struct ProjectView: View {
                                 store.corrections.sent(pending, for: object.id)
                                 return next
                             } }
-                        }.disabled(working || away)
+                        }.disabled(working || away || earlierShown)
                     }.padding(.horizontal, 20)
                 }
                 if let previous = object.completionUndoStatus {
@@ -315,13 +317,15 @@ struct ProjectView: View {
                         Label("Marked Done", systemImage: "checkmark.circle.fill")
                         Spacer()
                         Button("Undo") { act { try await store.mac.client.setStatus(object.id, previous) } }
-                            .disabled(working || away)
+                            .disabled(working || away || earlierShown)
                     }.font(.subheadline).padding(.horizontal, 20)
                 }
                 // Every card's actions need the Mac (Try Again, Did it fit?, an answer, Send, Scan): they wait while it
                 // isn't answering. A print's card handles its own, so Watch the Print still opens (X100).
+                // They act on the newest design: with an earlier one on the stage they wait for Show the newest, as the
+                // Mac's and Android's do (#616).
                 stateCard(object, words).padding(.horizontal, 16)
-                    .disabled(away && !(words.phase == .preparing || words.phase == .printing || object.printConfirmation != nil))
+                    .disabled(earlierShown || (away && !(words.phase == .preparing || words.phase == .printing || object.printConfirmation != nil)))
                     .id(Self.answerCard)
                     .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(Self.pageSpace)).maxY.rounded() } action: { bottom in
                         // Where the card ends below the stage, in the order the card sits now under the title. Measured once
@@ -414,7 +418,7 @@ struct ProjectView: View {
                         Button("Rename Project", systemImage: "pencil") { projectName = words.title; renaming = true }.disabled(away)
                     }
                     if store.projectSettings {
-                        statusChoices(object, words).disabled(away)
+                        statusChoices(object, words, disabled: away || earlierShown)
                         Divider()
                     }
                     if object.canMakeFromScan {
@@ -432,7 +436,7 @@ struct ProjectView: View {
         }
             // A failed pass that left an earlier model still offers changes and Print; with no model, the failed card's Try Again is the way on.
             if object.canAskForChanges || (words.phase != .needsYou && !(words.phase == .failed && object.current == nil)) {
-                bottomBar(object, words).disabled(viewingDesign != nil).padding(.top, 8)
+                bottomBar(object, words).disabled(earlierShown).padding(.top, 8)
             }
         }
         .background(Color.black)
@@ -653,14 +657,17 @@ struct ProjectView: View {
     static let afterPrinting = NotificationActions.afterPrinting
 
     /// Status (Not printed, Printed, Done, Needs changes), then Hide from Home apart from it: in ••• and on the capsule.
-    @ViewBuilder private func statusChoices(_ object: Project, _ words: ProjectWords, inline: Bool = false) -> some View {
+    @ViewBuilder private func statusChoices(_ object: Project, _ words: ProjectWords, inline: Bool = false, disabled: Bool = false) -> some View {
         let picker = Picker(selection: Binding(get: { shownStatus(object, words) }, set: { status in
             act { try await store.mac.client.setStatus(object.id, status) }
         })) {
             ForEach(ProjectStatus.choices, id: \.self) { Label($0.label, systemImage: $0.symbol).tag($0) }
         } label: { Label("Status", systemImage: "flag") }
-        // On the capsule the choices are right there, one tap; in ••• they're a Status submenu.
-        if inline { picker.pickerStyle(.inline) } else { picker.pickerStyle(.menu) }
+        // On the capsule the choices are right there, one tap; in ••• they're a Status submenu. While the status can't be
+        // set (an earlier design on the stage, the Mac away) it is a plain dimmed Status row instead: inside a Menu, iOS 27
+        // keeps a menu-style Picker's submenu enabled whatever `.disabled` says, on the group or on the picker (train 12c).
+        if disabled { Button {} label: { Label("Status", systemImage: "flag") }.disabled(true) }
+        else if inline { picker.pickerStyle(.inline) } else { picker.pickerStyle(.menu) }
         // Apart from the status: a Done project hidden from Home is still Done.
         Section {
             if object.isArchived {
@@ -669,6 +676,7 @@ struct ProjectView: View {
                 Button("Hide from Home", systemImage: "archivebox") { act { try await store.archive(object, true) } }
             }
         }
+        .disabled(disabled)
     }
 
     /// The status in Project Settings; archived shows what's under it, and none set shows what the state says.
@@ -1411,8 +1419,12 @@ enum ARModel {
         return SIMD3(Float(r), Float(g), Float(b))
     }
 
-    /// The STL as USDZ for AR Quick Look, written once beside it, off the main actor. Nil when it can't be made.
-    @MainActor static func usdz(fromSTL url: URL, tint hex: String? = nil) async -> URL? {
+    /// How long writing a part's USDZ may take before the chip offers Try Again (#606: it had no deadline, so a conversion
+    /// that never returned left "Preparing AR…" up for good). A large part takes seconds.
+    static let exportDeadline: Duration = .seconds(60)
+
+    /// The STL as USDZ for AR Quick Look, written once beside it, off the main actor. Nil when it can't be made in time.
+    @MainActor static func usdz(fromSTL url: URL, tint hex: String? = nil, deadline: Duration = exportDeadline) async -> URL? {
         let target = target(forSTL: url, tint: hex)
         removeStale(beside: url)
         if PartUSDZ.isUSDZ(target) { return target }
@@ -1425,7 +1437,7 @@ enum ARModel {
             return triangles.count
         }
         do {
-            let triangles = try await withTaskCancellationHandler { try await work.value } onCancel: { work.cancel() }
+            let triangles = try await bounded(work, deadline: deadline)
             let bytes = (try? FileManager.default.attributesOfItem(atPath: target.path)[.size] as? Int) ?? 0
             MediaTrace.record("ar.export-end", ["success": "true", "format": "usdz", "triangles": String(triangles), "bytes": String(bytes),
                                                 "preview": String(QLPreviewController.canPreview(target as NSURL))])
@@ -1435,10 +1447,55 @@ enum ARModel {
             case .empty?: "empty-export"
             case .notUSDZ?: "not-usdz"
             case .cancelled?: "cancelled"
-            case nil: String((error as NSError).code)
+            case nil: error is Deadline ? "deadline" : String((error as NSError).code)
             }
             MediaTrace.record("ar.export-end", ["success": "false", "format": "usdz", "code": code])
             return nil
+        }
+    }
+
+    struct Deadline: Error {}
+
+    /// `work`'s result, or `Deadline` once `deadline` passes, or `CancellationError` when the caller is cancelled: whichever
+    /// comes first. It never waits for work that ignores cancellation (Model I/O's conversion can't be stopped): that work
+    /// is cancelled and left to finish on its own, and `PartUSDZ.write` moves its file into place only once it is whole.
+    static func bounded<T: Sendable>(_ work: Task<T, Error>, deadline: Duration) async throws -> T {
+        let once = Once<T>()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                once.install(continuation)
+                let timer = Task {
+                    do { try await Task.sleep(for: deadline) } catch { return }
+                    if once.finish(.failure(Deadline())) { work.cancel() }
+                }
+                Task {
+                    let result: Result<T, Error>
+                    do { result = .success(try await work.value) } catch { result = .failure(error) }
+                    timer.cancel(); once.finish(result)
+                }
+            }
+        } onCancel: {
+            work.cancel(); once.finish(.failure(CancellationError()))
+        }
+    }
+
+    /// The first result wins, including one that arrives before the continuation is installed.
+    private final class Once<T: Sendable>: @unchecked Sendable {
+        private let lock = NSLock()
+        private var result: Result<T, Error>?
+        private var continuation: CheckedContinuation<T, Error>?
+        func install(_ continuation: CheckedContinuation<T, Error>) {
+            lock.lock()
+            if let result { lock.unlock(); continuation.resume(with: result) } else { self.continuation = continuation; lock.unlock() }
+        }
+        @discardableResult func finish(_ value: Result<T, Error>) -> Bool {
+            lock.lock()
+            guard result == nil else { lock.unlock(); return false }
+            result = value
+            let continuation = continuation; self.continuation = nil
+            lock.unlock()
+            continuation?.resume(with: value)
+            return true
         }
     }
 

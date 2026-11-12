@@ -1,17 +1,15 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {execFileSync} from 'node:child_process';
-import {readFile,rm} from 'node:fs/promises';
+import {readFile} from 'node:fs/promises';
 import {join} from 'node:path';
-import {X509Certificate} from 'node:crypto';
 import {createServer} from 'node:net';
 import {request} from 'node:https';
 import {authority,bindable,computerName,discoverAddresses,localHostName,macDisplayName,pairingOrigins} from '../dist/lan-addresses.js';
 import {certificatePublicKeySha256} from '../dist/lan-transport.js';
-import {RemoteAuthStore} from '../dist/remote-auth.js';
 import {startCompanionServer} from '../dist/server.js';
 import {parsePairingLink} from '@scan-to-make/contracts/pairing-link';
-import {tempDir} from './support/temp.mjs';
+import {lanFixture} from './support/lan.mjs';
 
 const v4=(address,internal=false)=>({address,family:'IPv4',internal,netmask:'255.255.255.0',mac:'',cidr:null});
 const v6=(address)=>({address,family:'IPv6',internal:false,netmask:'ffff:ffff:ffff:ffff::',mac:'',cidr:null,scopeid:0});
@@ -67,16 +65,7 @@ test('v2 origins: the configured address first, then other LANs, the .local name
  assert.equal(pairingOrigins('10.0.0.1',9077,{lan:many,tailscale:[]}).length,8);
 });
 
-async function fixture(t) {
- const root=await tempDir('lan-v2-'); t.after(()=>rm(root,{recursive:true,force:true}));
- execFileSync('openssl',['req','-x509','-newkey','rsa:2048','-nodes','-days','1','-subj','/CN=127.0.0.1','-addext','subjectAltName=IP:127.0.0.1','-keyout',join(root,'key.pem'),'-out',join(root,'cert.pem')],{stdio:'ignore'});
- const cert=await readFile(join(root,'cert.pem')),key=await readFile(join(root,'key.pem'));
- const reservation=createServer(); await new Promise(r=>reservation.listen(0,'127.0.0.1',r));
- const port=reservation.address().port; await new Promise(r=>reservation.close(r));
- const certificateSha256=new X509Certificate(cert).fingerprint256.replaceAll(':','').toLowerCase();
- const store=await RemoteAuthStore.create(join(root,'auth'),{transport:'lan',host:`127.0.0.1:${port}`,certificateSha256,allowedLogins:['lan']});
- return {root,store,cert,key,port};
-}
+const fixture=t=>lanFixture(t,{prefix:'lan-v2-'});
 // The phone pins the key, not the name, so certificate hostname checks are off here as they are there.
 function wire(address,port,cert,path,{method='GET',headers={},body}={}) {
  return new Promise((resolve,reject)=>{
@@ -95,7 +84,7 @@ test('certificate public-key pin matches OpenSSL', async t => {
 
 test('off by default: only the configured address, and v1 links', async t => {
  const f=await fixture(t);
- const server=await startCompanionServer({remoteAuth:f.store,lanTls:{cert:f.cert,key:f.key}}); t.after(()=>server.close());
+ const server=await f.serve(); t.after(()=>server.close());
  assert.deepEqual(server.addresses(),[`https://127.0.0.1:${f.port}`]);
  assert.equal(parsePairingLink((await f.store.createPairing('lan')).qrPayload).version,1);
 });
@@ -104,7 +93,7 @@ test('off by default: only the configured address, and v1 links', async t => {
 test('one credential and one certificate across every bound address; addresses follow the network', {skip:process.platform==='darwin'}, async t => {
  const f=await fixture(t);
  let found={lan:['127.0.0.1','127.0.0.2','0.0.0.0'],tailscale:[]};
- const server=await startCompanionServer({remoteAuth:f.store,lanTls:{cert:f.cert,key:f.key},lanAddresses:()=>found,localName:'Mac-Test.local',rediscoverMs:50});
+ const server=await f.serve({lanAddresses:()=>found,localName:'Mac-Test.local',rediscoverMs:50});
  t.after(()=>server.close());
  const one=`https://127.0.0.1:${f.port}`,two=`https://127.0.0.2:${f.port}`;
  // The wildcard is never bound; the configured address is listed once, first.
@@ -138,7 +127,7 @@ test('looks never overlap, and close() leaves no listener behind', {skip:process
  const f=await fixture(t);
  let flip=false,looks=0;
  // Rediscovery every 5 ms, toggling the extra address: ticks must queue behind a running look.
- const server=await startCompanionServer({remoteAuth:f.store,lanTls:{cert:f.cert,key:f.key},rediscoverMs:5,
+ const server=await f.serve({rediscoverMs:5,
   lanAddresses:()=>{looks++;flip=!flip;return {lan:flip?['127.0.0.2','127.0.0.3']:['127.0.0.3'],tailscale:[]};}});
  await new Promise(r=>setTimeout(r,200));
  assert.ok(looks>3);

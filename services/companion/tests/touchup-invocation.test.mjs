@@ -384,3 +384,14 @@ test('cleanup rules: relief from the normal map and, for a textile, the colour; 
   }
   assert.doesNotMatch(systemRules({kind: 'fit', request: true}), /normal map/, 'a new design has no scan to clean');
 });
+
+test('every length-limited text in the worker\'s answer says its limit in words (#734: Sonnet overran maxLength and had to resubmit)', () => {
+  const unstated = [];
+  const walk = (node, path) => {
+    if (!node || typeof node !== 'object') return;
+    if (node.type === 'string' && typeof node.maxLength === 'number' && !String(node.description ?? '').includes(`at most ${node.maxLength} characters`)) unstated.push(path);
+    for (const [key, value] of Object.entries(node)) if (value && typeof value === 'object') walk(value, `${path}.${key}`);
+  };
+  walk(TOUCHUP_RESULT_SCHEMA, 'schema');
+  assert.deepEqual(unstated, []);
+});

@@ -1,5 +1,5 @@
 import {starterModelId, starterProject as bundledStarter, type StarterProject} from '../starters/catalog.js';
-import {acknowledgePlate, plateNeedsPrinterCheck, projectPlates, retainedPlateProgress, selectedPlateIdentity, selectingPlate} from './plates.js';
+import {acknowledgePlate, keptFile, plateNeedsPrinterCheck, projectPlates, retainedPlateProgress, selectedPlateIdentity, selectingPlate} from './plates.js';
 import {copyFile, lstat, mkdir, mkdtemp, open, readFile, readdir, rename, rm, stat, writeFile} from 'node:fs/promises';
 import {createHash, randomUUID} from 'node:crypto';
 import {constants as fsConstants} from 'node:fs';
@@ -47,7 +47,7 @@ import {ObjectNotFoundError, ObjectStore, restoreLocate, type LocateSnapshot, ty
 import {fitRequest, workerRequest} from './fit.js';
 import {inheritHistory} from './inherited.js';
 import {sealVersion} from './versions.js';
-import {answeredSizes, askKind, InvalidSizesError, mergeCheckedSizes, sizesMessage, sizesNote, withCheckedSizes} from './asks.js';
+import {answeredSizes, askKind, closedByPrint, InvalidSizesError, mergeCheckedSizes, sizesMessage, sizesNote, withCheckedSizes} from './asks.js';
 /** An answer to an open question: photos, words, Best Guess, and for a sizes question its numbers with `measured`,
  *  the ids the person typed or edited (contracts `SizesAnswerSchema`); any together. */
 export type AskAnswer = {bestGuess?: boolean; text?: string; photoNames?: string[]; sizes?: {id: string; mm: number}[]; measured?: string[]};
@@ -474,6 +474,18 @@ function isMultipart(object: Pick<StmObject, 'current'>): boolean {
   return object.current?.model.toLowerCase().endsWith('.3mf') === true;
 }
 
+/** What a designer's 3MF kept as it came says next (#641). */
+const DESIGNER_AS_IS = 'The designer’s file as they made it, with its plates and print settings. It’s ready to print. To change something, say what.';
+
+/**
+ * #641: a copy whose scan is a designer's 3MF and that has no words prints as the designer made it, with no pass.
+ * Photos alone ask for no change. Words with it (or later) run the designer-copy pass.
+ */
+function designerAsIs(object: StmObject): boolean {
+  return passKind(object) === 'copy' && !object.current && !!object.scan?.toLowerCase().endsWith('.3mf')
+    && !object.instructions?.trim() && !object.capture?.length;
+}
+
 /**
  * PRD §8.9: a copy is cleaned up in Blender; a new design may use Fusion. Set at creation; otherwise a project
  * with a scan (LiDAR or a handheld capture) is a copy, even with a request ("Copy this. Close up the bottom."),
@@ -686,7 +698,7 @@ export class ObjectService {
         // A copy keeps the scan it copies, or with nothing scanned its request would read as a new design.
         const scan = kind === 'copy' ? source.scan : undefined;
         // Duplicate the chosen original, not every alternate file or an earlier plate.
-        const receipt = source.kind === 'published' ? source.files?.receipts?.find(file => file.path === current.model) : undefined;
+        const receipt = keptFile(source) ? source.files?.receipts?.find(file => file.path === current.model) : undefined;
         const files = receipt ? {original: [receipt.path], current: receipt.path, receipts: [receipt]} : undefined;
         const publishedSelection = source.publishedSelection ? {...source.publishedSelection, fileIndex: 0} : undefined;
         // A designed multi-colour model prints its 3MF but is corrected from the merged mesh beside it: both copy.
@@ -880,7 +892,10 @@ export class ObjectService {
     }
     if (object.state === 'touching-up' || object.state === 'printing') throw new InvalidStateError('Wait until the current step finishes.');
     if ((status === 'works' || status === 'printed') && !object.current) throw new InvalidStateError("There's no model yet, so it can't be marked printed.");
-    const updated = await this.#deps.store.update(id, o => {
+    const updated = await this.#deps.store.update(id, stored => {
+      // A question a recorded print closed stays closed, also one stored open before that rule (#638): Not printed
+      // must not bring back a question nobody can answer.
+      const o = closedByPrint(stored);
       const {outcome: _outcome, ...rest} = o;
       if (o.publishedSelection && (status === 'works' || status === 'printed' || status === 'not-printed'))
         rest.plateProgress = acknowledgePlate(o, status === 'not-printed' ? 'not-printed' : 'printed');
@@ -894,8 +909,9 @@ export class ObjectService {
       const settled = o.print?.uncertain ? {print: {...o.print, uncertain: undefined}} : {};
       switch (status) {
         // Hide from Home: the project keeps its status (Done stays Done) and gets it back when unhidden.
-        case 'works': return {...rest, ...settled, state: o.state === 'printing' ? o.state : 'confirmed', outcome: 'works'};
-        case 'printed': return {...rest, ...settled, state: 'printed'};
+        // Printed or Works records a print: it closes any open question (#638).
+        case 'works': return closedByPrint({...rest, ...settled, state: o.state === 'printing' ? o.state : 'confirmed', outcome: 'works'});
+        case 'printed': return closedByPrint({...rest, ...settled, state: 'printed'});
         // Without a model, only the flags clear: a draft stays a draft.
         case 'not-printed': return {...rest, ...settled, ...(o.current ? {state: 'ready' as const} : {})};
         case 'needs-changes': return {...rest, outcome: 'needs-changes', ...(o.state === 'confirmed' ? {state: 'printed' as const} : {})};
@@ -1101,7 +1117,8 @@ export class ObjectService {
   }
 
   async #read(id: string): Promise<StmObject> {
-    let object = await this.#scanFiles(await this.#deps.store.get(id));
+    // A printed project's question is closed (#638), also one stored open before that rule: the service and every client agree.
+    let object = closedByPrint(await this.#scanFiles(await this.#deps.store.get(id)));
     if (object.state === 'touching-up') object = await this.#freshEstimate(object);
     if (!object.print) return object;
     // A watched print reads its monitor's last report instead of asking the printer again.
@@ -1652,12 +1669,14 @@ export class ObjectService {
     // Photos only show what something looks like; without a scan, the description says what to make.
     if (!object.scan && !object.capture?.length && !object.captureDepth?.length && !object.instructions?.trim() && !object.credit?.url && object.state === 'new')
       throw new InvalidStateError('Describe what to make, or add a scan.');
+    // A designer's 3MF with no words prints as the designer made it: nothing to clean up, so no pass and no photos needed.
+    if (designerAsIs(object) && (object.state === 'new' || object.state === 'failed')) return this.#keepDesignerFile(id, object);
     // A touch-up works from photos; a model with neither photos nor a request has nothing to go on. A scan brought over
     // from another project with no words is a copy of it: kept as it is, like a copy's scan sent on its own.
     if (object.scan && !object.scanFrom && !object.photos.length && !object.capture?.length && !object.instructions?.trim() && (object.state === 'new' || object.state === 'failed'))
       throw new InvalidStateError("Add photos of it, or describe what you'd like changed.");
     if (object.state === 'touching-up') return object;
-    if (object.kind === 'published' && object.current && ['ready', 'needs-closeup'].includes(object.state)) return object;
+    if (keptFile(object) && object.current && ['ready', 'needs-closeup'].includes(object.state)) return object;
     const waiting = !object.current && ['new', 'failed', 'needs-closeup'].includes(object.state);
     // A starter downloads its files at most once per computer. Its own cache needs no Downloads access, so it comes first.
     const starter = object.starterId && waiting ? this.#starter(object.starterId) : undefined;
@@ -1681,6 +1700,16 @@ export class ObjectService {
     if (object.state === 'ready' && object.scanSource === 'phone-preview' && object.captureCompletion?.source === 'object-capture') return this.#pass(object, {});
     if (object.state !== 'new' && object.state !== 'failed') throw new InvalidStateError('This object has already been touched up.');
     return this.#pass(object, {});
+  }
+
+  /**
+   * #641: a designer's 3MF sent with no words becomes the model as it came: kept the way a published file is (every
+   * plate listed, sliced or not; the person picks when there are several), so it prints as the designer made it. No
+   * pass runs (there is no scan to clean up) and no request is made up for one. It stays a copy: words sent later
+   * start the designer-copy pass on this file as before (`designerFile`). Its summary says what happens next.
+   */
+  #keepDesignerFile(id: string, object: StmObject): Promise<StmObject> {
+    return this.#keepPublished(id, [join(this.dir(id), 'scan', object.scan!)], {kind: 'copy', summary: DESIGNER_AS_IS});
   }
 
   async #captureFilesPresent(object: StmObject): Promise<void> {
@@ -1919,12 +1948,18 @@ export class ObjectService {
     const manifest = await bundles.create({...(object.kind === 'published' || isMultipart(object) ? {model: {bytes: stl, format: isMultipart(object) ? '3mf' as const : 'stl' as const}} : {stl}), prompt: '', backend: runner.backend, ...(selected ? {selection:selected} : {})});
     const printId = randomUUID();
     const plate = selectedPlateIdentity(object);
-    // Every print names the design it printed (#616). A designed project with a model and no sealed design yet (made
-    // before designs were kept, or by a path that doesn't seal) has its model sealed now, so this print can't be orphaned.
-    let design = object.versions?.at(-1);
+    // Every print names the design whose bytes it slices (#616): the kept design holding exactly these bytes. A designed
+    // project's model that no design holds (made before designs were kept, a path that doesn't seal, or a checkpoint a
+    // pass kept when it stopped at a limit or failed) is sealed now as its own design, so this print can't be orphaned
+    // or credited to the design before it.
+    const modelSha256 = createHash('sha256').update(stl).digest('hex');
+    let design = object.kind === 'published' ? object.versions?.at(-1) : [...(object.versions ?? [])].reverse().find(v => v.modelSha256 === modelSha256);
     if (!design && object.kind !== 'published' && object.current) {
       const sealed = await sealVersion(object, this.dir(id), object.current, {endedAtMs: Date.now()});
-      await this.#deps.store.update(id, o => ({...o, versions: [...(o.versions ?? []), sealed]}), {keepUpdatedAt: true});
+      // A new design after earlier ones hasn't been shown to work: like a finished pass's, it drops the project's answer
+      // (the earlier designs keep theirs). The first design sealed here is the model the answer was given about.
+      await this.#deps.store.update(id, o => o.versions?.some(v => v.id === sealed.id) ? o
+        : {...(o.versions?.length ? (({outcome: _outcome, ...rest}) => rest)(o) : o), versions: [...(o.versions ?? []), sealed]}, {keepUpdatedAt: true});
       design = sealed;
     }
     const print = {bundleId: manifest.id, printId, ...(design ? {versionId: design.id} : {}), ...(plate ? {plate} : {}), ...(printDestination ? {destination: printDestination, destinationId: printDestination.id} : {}),
@@ -2125,7 +2160,8 @@ export class ObjectService {
     const dispatchedAt = new Date().toISOString();
     if (!watchable || !session) {
       // PRD §2.6: no evidence, no "printed". The printer has it; Counterpart can't follow it.
-      const sentObject = await this.#deps.store.update(id, o => o.print?.bundleId !== bundleId ? o : ({...o, state: 'sent', progress: undefined, printConfirmation: undefined,
+      // Sent to a printer Counterpart can't follow records the print: it closes any open question (#638).
+      const sentObject = await this.#deps.store.update(id, o => o.print?.bundleId !== bundleId ? o : closedByPrint({...o, state: 'sent', progress: undefined, printConfirmation: undefined,
         failure: undefined, print: {...o.print, spools: sent, dispatchedAt, uncertain: true, ...(dispatch?.jobName ? {jobName: dispatch.jobName} : {}), ...(dispatch?.taskId ? {taskId: dispatch.taskId} : {}),
           ...(bambuConnect ? {sentVia: 'bambu-connect' as const} : {})}}));
       if (sentObject.print?.printId) await this.#emit({id: randomUUID(), type: 'print.sent', projectId: id, printId: sentObject.print.printId,
@@ -2215,12 +2251,13 @@ export class ObjectService {
       // A new print after changes asks "Did it fit?" again: needs-changes ends with it (KAN-217).
       case 'done': {
         const {outcome, ...rest} = base;
-        return outcome === 'works' ? {...base, state: 'confirmed', failure: undefined} : {...rest, state: 'printed', failure: undefined};
+        // A finished print closes any open question (#638).
+        return closedByPrint(outcome === 'works' ? {...base, state: 'confirmed', failure: undefined} : {...rest, state: 'printed', failure: undefined});
       }
       case 'cancelled': return {...base, state: o.outcome === 'works' ? 'confirmed' : 'ready', failure: undefined};
       case 'not-started': return {...base, state: 'failed', failure: printEndFailure('not-started', context), print: {...o.print!, uncertain: undefined}};
       case 'replaced': return {...base, state: 'failed', failure: printEndFailure('replaced', context)};
-      case 'sent': return {...base, state: 'sent', failure: undefined, print: {...o.print!, uncertain: true}};
+      case 'sent': return closedByPrint({...base, state: 'sent', failure: undefined, print: {...o.print!, uncertain: true}});
       case 'failed': return {...base, state: 'failed', failure: printEndFailure('failed', context)};
     }
   }
@@ -2860,7 +2897,7 @@ export class ObjectService {
       const currentMesh = object.current && isMultipart(object) && object.kind !== 'published' ? join('current', 'model.stl') : object.current?.model;
       const scan = opts.locate ? [join(dir, 'current', 'model.stl'), join(dir, 'scan', scanName!)]
         : designer
-        ? [...new Set([fromCurrent && isMultipart(object) ? object.current!.model : designer, designer])].map(path => join(dir, path))
+        ? [...new Set([fromCurrent && isMultipart(object) && !keptFile(object) ? object.current!.model : designer, designer])].map(path => join(dir, path))
         : fromCurrent ? [join(dir, currentMesh!)] : scanName ? [join(dir, 'scan', scanName)] : [];
       const previous = lastDesignPass(object.passes);
       const continued = worker?.browser !== false ? passResume(previous) : undefined;
@@ -3161,7 +3198,7 @@ export class ObjectService {
   }
 
   /** The designer's file becomes the project's model, exactly as published: original/<name> and current/model.<ext>. */
-  async #keepPublished(id: string, files: string[], info: {startedAtMs?: number; now?: number; model?: PublishedModel; summary?: string; credit?: StmObject['credit']}): Promise<StmObject> {
+  async #keepPublished(id: string, files: string[], info: {startedAtMs?: number; now?: number; model?: PublishedModel; summary?: string; credit?: StmObject['credit']; kind?: 'copy'}): Promise<StmObject> {
     const store = this.#deps.store, dir = store.dir(id), now = info.now ?? Date.now();
     const object = await store.get(id);
     // Every starter file passes here (a worker's download, a pickup, the cache, the person's file): a starter is its
@@ -3210,7 +3247,7 @@ export class ObjectService {
     // from the plate picker, so it is ready without a question. Any other published model asks which to print.
     const ask = options.length > 1 && !object.starterId ? {id: randomUUID(), type: 'choice' as const, kind: 'choice' as const, question: 'Which file and plate would you like to print?', options,
       multiple: false, answers: ['choice' as const], status: 'open' as const, askedAtMs: now} : undefined;
-    const updated = await store.update(id, o => ({...o, ...(o.print ? {plateProgress: retainedPlateProgress(o)} : {}), print: undefined, printConfirmation: undefined, state: ask ? 'needs-closeup' : 'ready', progress: undefined, failure: undefined, kind: 'published', current, files: published,
+    const updated = await store.update(id, o => ({...o, ...(o.print ? {plateProgress: retainedPlateProgress(o)} : {}), print: undefined, printConfirmation: undefined, state: ask ? 'needs-closeup' : 'ready', progress: undefined, failure: undefined, kind: info.kind ?? 'published', current, files: published,
       publishedSelection: {fileIndex: 0, plateIndex: firstPlate?.index ?? 0, sliced: firstPlate?.sliced ?? false},
       ...(!o.title && (first.title || info.model?.title) ? {title: first.title ?? info.model!.title} : {}), ...(credit.url ? {credit: credit as NonNullable<StmObject['credit']>} : {}),
       ...(ask ? {ask} : o.ask?.status === 'open' ? {ask: {...o.ask, status: 'answered' as const}} : {}),
@@ -3243,7 +3280,7 @@ export class ObjectService {
       if (!ask || ask.id !== askId || ask.status !== 'open' || ask.type !== 'choice') throw new InvalidStateError('That question has been answered or replaced. Look again.');
       const known = new Set((ask.options ?? []).map(option => option.id));
       if (!choices.length || choices.some(choice => !known.has(choice)) || (!ask.multiple && choices.length > 1)) throw new InvalidStateError('Pick one of the choices.');
-      if (object.kind === 'published' && object.files?.receipts) {
+      if (keptFile(object) && object.files?.receipts) {
         const [fileIndex, plateIndex] = choices[0]!.split(':').map(Number);
         const file = object.files.receipts[fileIndex!];
         const plate = file?.plates.find(item => item.index === plateIndex);
@@ -3400,9 +3437,9 @@ export class ObjectService {
 
   /**
    * PRD §5.3: a touch-up runs only when the person asked for one, by sending a request with the scan or asking for
-   * changes later. A copy's scan sent on its own becomes the project's model as it is and waits for them. Where this
-   * computer can't make that model's STL (no `scanToStl`), or the scan isn't a mesh it can keep (a designer's 3MF),
-   * the touch-up runs as before.
+   * changes later. A copy's scan sent on its own becomes the project's model as it is and waits for them; a designer's
+   * 3MF sent on its own never gets here (`#keepDesignerFile`). Where this computer can't make that model's STL (no
+   * `scanToStl`), the touch-up runs as before.
    */
   #touchupAsked(object: StmObject, note: string | undefined, kind: PassKind): boolean {
     if (kind !== 'copy' || note !== undefined || object.instructions?.trim()) return true;
@@ -3575,6 +3612,8 @@ export class ObjectService {
       state: state === 'ready' && !changed && o.outcome === 'works' ? 'confirmed' : state, progress: undefined,
       ...(current ? {current} : {}),
       ...(version && changed ? {versions: [...(o.versions ?? []), version]} : {}),
+      // A copy's new model is no longer the kept designer file: its plate selection (and sliced plate) went with it.
+      ...(current && o.kind !== 'published' && o.publishedSelection ? {publishedSelection: undefined} : {}),
       ...(!o.title && result.title ? {title: result.title} : {}),
       ...(o.kind ? {} : {kind}),
       ...(ask ? {ask} : {}),

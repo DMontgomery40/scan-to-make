@@ -640,6 +640,40 @@ final class LayoutParityUITests: XCTestCase {
         XCTAssertFalse(other.descendants(matching: .any).matching(identifier: "design-history").firstMatch.exists, "one design: the page is today's page")
     }
 
+    /// #616 follow-up: the page's cards and Status act on the newest design, so with an earlier design on the stage they
+    /// wait for Show the newest, as the Mac's and Android's do. Did it fit? here would answer for the newest print.
+    func testAnEarlierDesignOnTheStageLeavesTheNewestsCardsAndStatusAloneWithProjectsPresent() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-CounterpartFixtures", NSTemporaryDirectory() + "no-assets", "-CounterpartFixtureSet", "design-history",
+                               "-CounterpartOpen", "counterpart://project/6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a04"]
+        app.launch()
+        let works = app.buttons["it-works"], changes = app.buttons["needs-changes"]
+        XCTAssertTrue(works.waitForExistence(timeout: 20), "the newest design's print asks Did it fit?")
+        XCTAssertTrue(works.isEnabled)
+        let earlier = app.buttons["design-30000000-0000-4000-8000-000000000001"]
+        scrollProjectPage(app, until: earlier)
+        earlier.tap()
+        let bar = app.descendants(matching: .any).matching(identifier: "viewing-earlier-design").firstMatch
+        XCTAssertTrue(bar.waitForExistence(timeout: 5))
+        XCTAssertFalse(works.exists && works.isEnabled, "It works would answer for the newest design, not the one shown")
+        XCTAssertFalse(changes.exists && changes.isEnabled, "Needs changes would answer for the newest design, not the one shown")
+        app.buttons["More"].tap()
+        let status = app.buttons["Status"]
+        XCTAssertTrue(status.waitForExistence(timeout: 5))
+        XCTAssertFalse(status.isEnabled, "the project's status waits until the newest design is shown again")
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Earlier design — the newest's status waits"; shot.lifetime = .keepAlways; add(shot)
+        // Close the menu without choosing anything: a tap left of it, on the page's plain text. On an iPhone the top 8% is
+        // the status bar, where a tap doesn't dismiss a menu (train 12c).
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.08, dy: 0.37)).tap()
+        XCTAssertTrue(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: status)], timeout: 5) == .completed)
+        let newest = app.buttons["Show the newest"]
+        scrollProjectPage(app, until: newest)
+        newest.tap()
+        XCTAssertTrue(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: bar)], timeout: 5) == .completed)
+        XCTAssertTrue(works.waitForExistence(timeout: 5))
+        XCTAssertTrue(works.isEnabled, "the newest design on the stage: its card answers again")
+    }
+
     func testACopysScanMakesAFitFromItsPageWithoutScanningAgainWithProjectsPresent() {
         let source = "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01"
         let app = XCUIApplication()
@@ -1498,7 +1532,9 @@ final class LayoutParityUITests: XCTestCase {
             if id == "gallery-together" || id.hasPrefix("gallery-plate-") { XCTAssertFalse(ar.exists, "no AR on \(id)") }
         }
         result.tap()
-        XCTAssertTrue(ar.waitForExistence(timeout: 30), "the part's model came, so its AR chip is there")
+        XCTAssertTrue(ar.waitForExistence(timeout: 30), "the part's AR chip is there")
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "ready"), object: ar)
+        XCTAssertEqual(XCTWaiter().wait(for: [ready], timeout: 30), .completed, "the part's model came, so AR opens: \(String(describing: ar.value))")
         ar.tap()
         // A device opens Quick Look; a simulator without a previewer must keep a visible retry.
         #if targetEnvironment(simulator)
@@ -1515,6 +1551,27 @@ final class LayoutParityUITests: XCTestCase {
         #if !targetEnvironment(simulator)
         XCTAssertNotEqual(ar.exists ? ar.value as? String : nil, "failed")
         #endif
+    }
+
+    /// #606: on a slow link the part's AR chip is there while its model comes, saying so, and becomes AR once it is here.
+    func testThePartsARChipSaysItIsComingWhileTheModelDownloads() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try Self.boxSTL().write(to: folder.appendingPathComponent("mic.stl"))
+        let app = XCUIApplication()
+        app.launchArguments = ["-CounterpartFixtures", folder.path, "-CounterpartFixtureSet", "ar-stage", "-CounterpartScreen", "printed",
+                               "-CounterpartSlowModel", "12"]
+        app.launch()
+        XCTAssertTrue(app.buttons["gallery-result"].waitForExistence(timeout: 20))
+        app.buttons["gallery-result"].tap()
+        let ar = app.buttons["gallery-ar"]
+        XCTAssertTrue(ar.waitForExistence(timeout: 8), "the AR chip is there while the model comes")
+        XCTAssertEqual(ar.value as? String, "loading")
+        XCTAssertFalse(ar.isEnabled, "nothing to open yet")
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot()); shot.name = "ar-chip-loading"; shot.lifetime = .keepAlways; add(shot)
+        let arrived = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "ready"), object: ar)
+        XCTAssertEqual(XCTWaiter().wait(for: [arrived], timeout: 40), .completed, "AR once the model is here: \(String(describing: ar.value))")
     }
 
     /// #606, David, Nov 11: "you can't rotate the thing and zoom in on the 3d thing anymore". On the iPhone and the iPad a

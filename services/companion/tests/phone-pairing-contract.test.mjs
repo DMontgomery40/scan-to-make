@@ -1,26 +1,13 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {execFileSync} from 'node:child_process';
-import {readFile,rm} from 'node:fs/promises';
+import {readFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {X509Certificate} from 'node:crypto';
-import {createServer} from 'node:net';
 import {request} from 'node:https';
-import {RemoteAuthStore} from '../dist/remote-auth.js';
 import {startCompanionServer} from '../dist/server.js';
-import {tempDir} from './support/temp.mjs';
-async function fixture(t) {
- const root=await tempDir('lan-auth-'); t.after(()=>rm(root,{recursive:true,force:true}));
- execFileSync('openssl',['req','-x509','-newkey','rsa:2048','-nodes','-days','1','-subj','/CN=127.0.0.1','-addext','subjectAltName=IP:127.0.0.1','-keyout',join(root,'key.pem'),'-out',join(root,'cert.pem')],{stdio:'ignore'});
- const cert=await readFile(join(root,'cert.pem')),key=await readFile(join(root,'key.pem'));
- const reservation=createServer(); await new Promise(r=>reservation.listen(0,'127.0.0.1',r));
- const port=reservation.address().port; await new Promise(r=>reservation.close(r));
- const host=`127.0.0.1:${port}`;
- const certificateSha256=new X509Certificate(cert).fingerprint256.replaceAll(':','').toLowerCase();
- const store=await RemoteAuthStore.create(join(root,'auth'),{transport:'lan',host,certificateSha256,allowedLogins:['lan']});
- return {root,store,cert,key,port,certificateSha256};
-}
+import {lanFixture} from './support/lan.mjs';
+const fixture=t=>lanFixture(t,{prefix:'lan-auth-'});
 function wire(url,cert,path,{method='GET',headers={},body}={}) {
  return new Promise((resolve,reject)=>{
   const req=request(new URL(path,url),{method,headers,ca:cert,servername:''},res=>{
@@ -37,12 +24,12 @@ async function phonePairingParser() {
 for(const command of ['pair-capture','pair-capture-and-printer-handoff'])test(`${command} CLI QR with certificate f is accepted by the current phone parser and pairs over HTTPS`,async t=>{
  const f=await fixture(t),parse=await phonePairingParser();
  const cli=fileURLToPath(new URL('../dist/remote-auth-cli.js',import.meta.url));
- const invite=JSON.parse(execFileSync(process.execPath,[cli,command,join(f.root,'auth')],{encoding:'utf8',stdio:['ignore','pipe','pipe']}));
+ const server=await f.serve();t.after(()=>server.close()); // first: the store and port are final once it listens
+ const invite=JSON.parse(execFileSync(process.execPath,[cli,command,f.authDir],{encoding:'utf8',stdio:['ignore','pipe','pipe']}));
  assert.equal(new URL(invite.qrPayload).searchParams.get('f'),f.certificateSha256);
  const parsed=parse(invite.qrPayload);
  assert.equal(parsed.baseUrl,f.store.baseUrl);assert.equal(parsed.code,invite.code);
  assert.equal(parsed.certificateSha256,f.certificateSha256);
- const server=await startCompanionServer({remoteAuth:f.store,lanTls:{cert:f.cert,key:f.key}});t.after(()=>server.close());
  const paired=await wire(parsed.baseUrl,f.cert,'/v1/pair',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({code:parsed.code,deviceName:'Phone parser contract'})});
  assert.equal(paired.status,200);
  const device=JSON.parse(paired.body);
@@ -80,7 +67,7 @@ test('the shared pairing-link vectors are exactly what the parser answers',async
 
 test('every phone HTTP response logs one bounded secret-free completion, including auth refusal', async t => {
  const f=await fixture(t);
- const server=await startCompanionServer({remoteAuth:f.store,lanTls:{cert:f.cert,key:f.key}});
+ const server=await f.serve();
  t.after(()=>server.close());
  const logs=[], original=console.info;
  console.info=line=>logs.push(line);
@@ -96,4 +83,17 @@ test('every phone HTTP response logs one bounded secret-free completion, includi
  assert.ok(rows.every(row=>row.event==='phone.http'&&row.route==='health'&&row.device===issued.deviceId.slice(-6)&&row.ms>=0&&row.bytes>0));
  assert.equal(rows[1].refusal,'unauthorized');
  assert.ok(logs.every(line=>line.length<512&&!line.includes(issued.token)&&!line.includes(issued.deviceId)&&!line.includes(invite.code)));
+});
+test('a port taken between choosing it and the companion binding it is chosen again, and the pairing host follows (#690)',async t=>{
+ const f=await fixture(t),parse=await phonePairingParser();
+ const {createServer}=await import('node:net');
+ // The other Node version's job, listening on port 0, is handed this fixture's port in the gap.
+ const thief=createServer();await new Promise(r=>thief.listen(f.port,'127.0.0.1',r));t.after(()=>new Promise(r=>thief.close(r)));
+ const taken=f.port;
+ const server=await f.serve();t.after(()=>server.close());
+ assert.notEqual(f.port,taken);
+ assert.equal(server.url,`https://127.0.0.1:${f.port}`);assert.equal(f.store.baseUrl,server.url);
+ const invite=await f.store.createPairing('lan');
+ const paired=await wire(parse(invite.qrPayload).baseUrl,f.cert,'/v1/pair',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({code:invite.code,deviceName:'Moved port'})});
+ assert.equal(paired.status,200);
 });

@@ -24,37 +24,37 @@ export const TOUCHUP_RESULT_SCHEMA = {
     status: {enum: ['done', 'needs_closeup', 'failed']},
     closeup: {type: 'string', description: 'What to photograph, in a few plain words'},
     summary: {type: 'string', description: 'What you changed, in one or two plain sentences the person will read: no file names, tool or Blender details. When status is failed: what went wrong, in one sentence.'},
-    title: {type: 'string', maxLength: 40, description: 'A short name for the thing, two to four words, like "Mic mount" or "Crochet potato"'},
+    title: {type: 'string', maxLength: 40, description: 'A short name for the thing, two to four words and at most 40 characters, like "Mic mount" or "Crochet potato"'},
     changes: {type: 'array', maxItems: 12, description: 'What changed, one short line each, for the person to check',
       items: {type: 'object', additionalProperties: false, required: ['tag', 'text'], properties: {
         tag: {enum: ['added', 'changed', 'assumed', 'estimated'], description: 'added: new geometry; changed: altered geometry; assumed: a choice made without evidence; estimated: a size not measured or published'},
-        text: {type: 'string', maxLength: 200},
+        text: {type: 'string', maxLength: 200, description: 'One short line, at most 200 characters'},
         toleranceMm: {type: 'number', minimum: 0, description: 'For estimated sizes: plus or minus this many millimetres'},
       }}},
     parts: {type: 'array', maxItems: 64, description: 'Only for a request in more than one colour: the parts of out/touched.3mf in filament order (the first prints on filament 1), each with the colour the person asked for as #RRGGBB, so Counterpart can put it on the nearest loaded spool',
       items: {type: 'object', additionalProperties: false, required: ['colour'], properties: {
-        name: {type: 'string', maxLength: 128, description: 'The part’s name in the 3MF, like "body" or "letters"'},
+        name: {type: 'string', maxLength: 128, description: 'The part’s name in the 3MF, at most 128 characters, like "body" or "letters"'},
         colour: {type: 'string', pattern: '^#[0-9A-Fa-f]{6}$', description: 'The colour this part should print in, as #RRGGBB'},
-        material: {type: 'string', maxLength: 64, description: 'The material, only when the request names one for this part (for example PLA or PETG)'},
+        material: {type: 'string', maxLength: 64, description: 'The material, at most 64 characters, only when the request names one for this part (for example PLA or PETG)'},
       }}},
     ask: {type: 'object', additionalProperties: false, required: ['question'], description: 'When status is needs_closeup: the one question, and where to look',
       properties: {
-        question: {type: 'string', maxLength: 200, description: 'One plain question, like "Can you take a close-up of the clip on the left side?"'},
+        question: {type: 'string', maxLength: 200, description: 'One plain question of at most 200 characters, like "Can you take a close-up of the clip on the left side?"'},
         photo: {type: 'string', description: 'The file name of one supplied photo or one of your renders in out/ that shows the region'},
         region: {type: 'object', additionalProperties: false, required: ['x', 'y', 'width', 'height'], description: 'The region on that photo, as fractions of its width and height from the top-left',
           properties: {x: {type: 'number', minimum: 0, maximum: 1}, y: {type: 'number', minimum: 0, maximum: 1}, width: {type: 'number', minimum: 0, maximum: 1}, height: {type: 'number', minimum: 0, maximum: 1}}},
         sizes: {type: 'array', minItems: 1, maxItems: 6, description: 'Only when the question asks the person to confirm or correct sizes: each size you need, so they can check a number instead of writing a sentence. Name each one so a person holding the object and a caliper knows exactly where to measure ("width at the widest point", "height to the cap tip"); an object that is not a plain box needs more than three',
           items: {type: 'object', additionalProperties: false, required: ['label', 'mm', 'from'], properties: {
-            label: {type: 'string', maxLength: 120, description: 'What to measure, in plain words'},
+            label: {type: 'string', maxLength: 120, description: 'What to measure, in plain words, at most 120 characters'},
             mm: {type: 'number', exclusiveMinimum: 0, maximum: 10000, description: 'Your number for it, in millimetres'},
             from: {enum: ['published', 'scan', 'estimate'], description: 'Where your number came from. published: the maker published it for the product you name in product, at reference; scan: you read it off the scan; estimate: your own guess, neither published nor read off the scan. The person sees which, and a number they confirm untouched stays exactly as certain as this source: it is never a measurement'},
-            product: {type: 'string', maxLength: 120, description: 'Required when from is published: the exact product and variant the published number is for, as the person has it. When they said it is in a case or has something attached, that is the case or the attachment (its maker and model), never the bare product: a bare product\'s published size is not its size in a case'},
-            reference: {type: 'string', maxLength: 300, description: 'Required when from is published: where the maker published it, as a link to the page you read or the name of the maker\'s document'},
+            product: {type: 'string', maxLength: 120, description: 'Required when from is published: the exact product and variant the published number is for, as the person has it, at most 120 characters. When they said it is in a case or has something attached, that is the case or the attachment (its maker and model), never the bare product: a bare product\'s published size is not its size in a case'},
+            reference: {type: 'string', maxLength: 300, description: 'Required when from is published: where the maker published it, as a link to the page you read or the name of the maker\'s document, at most 300 characters'},
           }}},
       }},
     seats: {type: 'array', minItems: 1, maxItems: 32, description: 'For a part made to fit the scanned object: where that object sits in the finished part, one entry per place it goes (three for a holder of three), as your rules under "Where the scanned object sits" define them',
       items: {type: 'object', additionalProperties: false, required: ['rotationDeg', 'translationMm'], properties: {
-        name: {type: 'string', maxLength: 40, description: 'A short name for this place, like "left", "middle" or "right"; only when there is more than one'},
+        name: {type: 'string', maxLength: 40, description: 'A short name for this place, at most 40 characters, like "left", "middle" or "right"; only when there is more than one'},
         rotationDeg: {type: 'array', minItems: 3, maxItems: 3, items: {type: 'number'}, description: 'Turn the scan about the fixed X, then Y, then Z axes through the origin, in degrees: cad_check_fit\'s rotation_deg'},
         translationMm: {type: 'array', minItems: 3, maxItems: 3, items: {type: 'number'}, description: 'Then move it, in millimetres: cad_check_fit\'s translation_mm'},
         check: {type: 'object', additionalProperties: false, description: 'What cad_check_fit returned for this seat, when you ran it',
@@ -74,7 +74,18 @@ export const TOUCHUP_RESULT_SCHEMA = {
  */
 export type DesignEngine = 'blender' | 'fusion' | 'code';
 
-const FUSION_RULES = `- Design it in Autodesk Fusion through the printer MCP's fusion_mcp_* tools: fusion_mcp_call reaches Fusion's own tools (create_sketch, extrude, revolve, fillet, shell, boolean_operation, create_parameter, set_parameter, get_parameters, check_interference, …). A separate document is already prepared for this pass. Its identity is fixed by the tools: work with the provided design and component, without opening or switching documents.
+/**
+ * The first line of every pass's rules says which engine it runs on (#609: a Blender pass hunted across ~20 cad_run
+ * calls for a folder the code engine would write to). The other engines' tools aren't offered either (`--disallowedTools`).
+ */
+const ON_ENGINE = {
+  blender: "- This pass runs on Blender. The printer MCP's code design engine isn't part of this pass.",
+  fusion: "- This pass runs on Fusion. The printer MCP's code design engine isn't part of this pass.",
+  code: "- This pass runs on the printer MCP's code design engine.",
+} as const;
+
+const FUSION_RULES = `${ON_ENGINE.fusion}
+- Design it in Autodesk Fusion through the printer MCP's fusion_mcp_* tools: fusion_mcp_call reaches Fusion's own tools (create_sketch, extrude, revolve, fillet, shell, boolean_operation, create_parameter, set_parameter, get_parameters, check_interference, …). A separate document is already prepared for this pass. Its identity is fixed by the tools: work with the provided design and component, without opening or switching documents.
 - Make every functional dimension a named user parameter, so a later change is one set_parameter.
 - When the design is finished, call fusion_mcp_export with output_dir set to the output folder and name "touched": it writes touched.stl, touched.f3d and touched.parameters.json. Use body_name when the design has more than one body; for several colours, export each colour's body under its own name and combine them as the colour section below says.
 - If you can, save clear PNG views of the design to the output folder, named so the clearest overall view sorts first.`;
@@ -83,7 +94,8 @@ const FUSION_RULES = `- Design it in Autodesk Fusion through the printer MCP's f
  * The code engine's lines (PRD §8.9). How a script looks, which libraries it has and how a scan is prepared are the
  * printer MCP's (its cad_design prompt, added below); these lines are only where Counterpart keeps each run.
  */
-const CODE_RULES = `- Build it with the printer MCP's code design engine (its cad_* tools), following its cad_design prompt below. Give every cad_run the design folder from the files list as its output_dir.
+const CODE_RULES = `${ON_ENGINE.code}
+- Build it with the printer MCP's code design engine (its cad_* tools), following its cad_design prompt below. Give every cad_run the design folder from the files list as its output_dir.
 - After each fix, mark the run of the whole model you select as the result so far final: Counterpart files each final run as a checkpoint, the latest one's model, views, script and parameters become this pass's result (Counterpart copies them to the output folder), and a later change starts from that script and those parameters. Never mark final a run that measures or prepares the scan, or makes one colour's part: it never becomes the model.`;
 
 /** How the core's checkpoint and final-export lines read for each engine. The code engine's runs are filed by Counterpart. */
@@ -186,7 +198,7 @@ const CODE_FIT_CHECK = `
 4. When there is a scan, check the finished part against it with cad_check_fit as the printer MCP's cad_design prompt describes, and report the interference and gap, with what you changed in the reference, in your changes.`;
 
 /** The code engine's one line for a locate pass: its tools, and that nothing it runs becomes the model. */
-const CODE_LOCATE_CORE = "- Reach the part and the scan only through the printer MCP's code design engine (its cad_* tools). Give every cad_run the design folder from the files list as its output_dir.";
+const CODE_LOCATE_CORE = `${ON_ENGINE.code}\n` + "- Reach the part and the scan only through the printer MCP's code design engine (its cad_* tools). Give every cad_run the design folder from the files list as its output_dir.";
 
 /** Only what Claude Code needs to find the user's own login. Never printer tokens or provider keys. */
 const ENV_ALLOWLIST = ['HOME', 'USER', 'LOGNAME', 'PATH', 'TMPDIR', 'LANG', 'SHELL', 'CLAUDE_CONFIG_DIR'] as const;
@@ -277,8 +289,27 @@ function locatePrompt(pass: TouchupPass, instructions?: string, summary?: string
       `- Output folder: ${pass.outDir}`].join('\n')}`].join('\n\n');
 }
 
-/** The lean, isolated `claude -p` call for one touch-up pass. Writes the pass's MCP config file. */
-export const BLENDER_RULES = "- Reach Blender only through the printer MCP's blender_mcp_* tools. Start in the empty scene you are given, and work only with objects in the current scene (bpy.context.scene.objects).";
+/**
+ * The tools a pass on each engine doesn't get: the other engines'. Nov 11 (#609): a Blender pass ran cad_setup twice and
+ * about twenty cad_run calls hunting for a folder the code engine would write to; a Blender pass with Fusion's tools
+ * could open an unbound Fusion document without the Fusion lock. Claude Code's own rule syntax (a trailing * is a
+ * prefix; checked against 2.1.322), carried in the request's --disallowedTools to every worker.
+ */
+export const OTHER_ENGINES_TOOLS: Record<DesignEngine, readonly string[]> = {
+  blender: ['mcp__printer__cad_*', 'mcp__printer__fusion_mcp_*'],
+  fusion: ['mcp__printer__cad_*', 'mcp__printer__blender_mcp_*'],
+  code: ['mcp__printer__blender_mcp_*', 'mcp__printer__fusion_mcp_*'],
+};
+
+/** Whether a worker request's --disallowedTools takes `server`'s tool `tool` away, as Claude Code reads the flag. */
+export function toolBlocked(args: readonly string[], server: string, tool: string): boolean {
+  const flag = args.indexOf('--disallowedTools');
+  if (flag < 0) return false;
+  const name = `mcp__${server}__${tool}`;
+  return (args[flag + 1] ?? '').split(/[\s,]+/).filter(Boolean).some(rule => rule.endsWith('*') ? name.startsWith(rule.slice(0, -1)) : name === rule);
+}
+
+export const BLENDER_RULES = `${ON_ENGINE.blender}\n` + "- Reach Blender only through the printer MCP's blender_mcp_* tools. Start in the empty scene you are given, and work only with objects in the current scene (bpy.context.scene.objects).";
 /**
  * The printer MCP's own guidance for a pass: how to design for its printers (`fdm_design`) and how its slicer
  * orients, supports and checks a slice (`fdm_slicing`). The app holds no slicer knowledge (PRD §8.0 item 10).
@@ -342,6 +373,7 @@ function passRules(input: {pass: TouchupPass; kind?: 'copy' | 'fit'; engine?: De
     ...(input.locate ? {locate: true} : {})};
 }
 
+/** The lean, isolated `claude -p` call for one touch-up pass. Writes the pass's MCP config file. */
 export function buildTouchupInvocation(input: {resumeSessionId?: string; pass: TouchupPass; printer: PrinterMcpProcess; claudePath: string; instructions?: string; note?: string; summary?: string; currentModel?: boolean; designerCopy?: boolean; sourceEnv?: NodeJS.ProcessEnv;
   engine?: DesignEngine; documentId?: string; handoff?: PrinterHandoffConfig; design?: DesignSource; guidance?: DesignGuidance;
   /** A code pass's converted capture: its unit and up axis, from the conversion report. */
@@ -380,6 +412,8 @@ export function buildTouchupInvocation(input: {resumeSessionId?: string; pass: T
     '--strict-mcp-config',
     '--tools', 'Read,WebSearch,WebFetch',
     '--allowedTools', 'Read,WebSearch,WebFetch,mcp__printer',
+    // Only this pass's engine's tools. Every worker reads this flag: Claude Code itself, Codex and API workers through toolBlocked.
+    '--disallowedTools', OTHER_ENGINES_TOOLS[input.engine ?? 'blender'].join(','),
     '--disable-slash-commands',
     '--setting-sources', '',
     '--settings', '{"disableAllHooks":true}',

@@ -1,7 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { canLocate, gallery, drawnColour, photoPicture, still } from "../src/gallery";
+import { canLocate, gallery, drawnColour, photoPicture, still, filePath, stageStill, pictureClock, PICTURE_PATIENCE_MS, NOT_DRAWN_LINE } from "../src/gallery";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { ProjectPage } from "../src/ProjectView";
+import { NEWEST_WAITS, earlierOnStage, designAnswer, designHistory, designThumbnail, inheritedConversation, sealedLine, showingDesign, twoTruthsLine, viewingLine } from "../src/designs";
 import {
   MAKE_FROM_SCAN, FIT_CHOICE, COPY_CHOICE, USE_EXISTING_SCAN, canMakeFromScan, scanLineage, scansToReuse, scannedLine,
   FIT_SIZE_SOURCES, fitSizeDetail, fitMissing, makeFromScanParams, newFitChoice,
@@ -1101,4 +1105,236 @@ test("a print whose camera shows nothing coming out says so on its card and in i
   // After the printer says it finished, the card keeps the warning.
   assert.equal(words(doc.printedProject as Project), doc.printedProject.status.text);
   assert.ok(words(doc.printedProject as Project).endsWith(doc.line), "the printer MCP's own words");
+});
+
+// #616 slice 1 (#744): earlier designs and prints, the same fixture Kit and the contracts read.
+const versionsDoc = JSON.parse(readFileSync(new URL("../../../packages/contracts/fixtures/project-versions.json", import.meta.url), "utf8"));
+const hanger = versionsDoc.project as Project;
+const [firstDesign, widerDesign, newestDesign] = hanger.versions!;
+
+test("project-versions.json: What you have, Earlier designs and the list line, as Kit derives them", () => {
+  const history = designHistory(hanger, "UTC");
+  assert.ok(history.showsSections);
+  assert.deepEqual(history.have.map((v) => v.id), versionsDoc.expected.have);
+  assert.deepEqual(history.earlier.map((v) => v.id), versionsDoc.expected.earlier);
+  assert.equal(twoTruthsLine(hanger, "UTC"), versionsDoc.expected.line);
+  assert.equal(history.printedLine(firstDesign!), "Printed Nov 4 · Workshop printer");
+  assert.equal(history.outcomeLine(firstDesign!), "It works");
+  assert.equal(history.label(firstDesign!), "A rest for a 25 mm desk.");
+  assert.equal(history.printedLine(widerDesign!), "Not printed yet");
+  // A companion that writes its own line wins; with none, the derived one (as Kit's ProjectWords).
+  assert.equal(words(hanger), twoTruthsLine(hanger));
+  assert.equal(words({ ...hanger, status: { text: "Ready to print", phase: "ready", tint: "accent" } }), "Ready to print");
+  // Done stays Done, and a project with one design reads exactly as before: no sections, no new line.
+  assert.equal(twoTruthsLine({ ...hanger, state: "confirmed" }), undefined);
+  const single = { ...hanger, versions: [newestDesign!], prints: [] } as Project;
+  assert.equal(designHistory(single).showsSections, false);
+  assert.equal(twoTruthsLine(single), undefined);
+  assert.equal(words(single), "Ready to print");
+});
+
+test("an earlier design opens on the same stage from its own files, with Show the newest, with projects present (#744)", () => {
+  const others = [{ ...project, id: "other-1", title: "Pink box" }, { ...project, id: "other-2", title: "Wall holder" }] as Project[];
+  const page = [others[0]!, hanger, others[1]!].find((p) => p.id === hanger.id)!;
+  const history = designHistory(page, "UTC");
+  const shown = showingDesign(page, history.have[0]!.id);
+  assert.equal(shown.current?.model, `versions/${firstDesign!.id}/model.stl`);
+  assert.equal(filePath(shown, "model.stl"), `versions/${firstDesign!.id}/model.stl`, "Explore in 3D reads the design's own model");
+  assert.equal(filePath(shown, `renders/front.png`), `versions/${firstDesign!.id}/renders/front.png`);
+  assert.equal(shown.state, "confirmed");
+  assert.equal(words(shown), "Done", "the header shows the design's own state, never the newest's words");
+  assert.equal(shown.versions?.length, 1, "no sections inside the design's own view");
+  assert.equal(shown.print?.destination?.name, "Workshop printer");
+  assert.equal(viewingLine(page, firstDesign!, "UTC"), "Earlier design · Printed Nov 4 · Workshop printer");
+  assert.equal(designThumbnail(firstDesign!), firstDesign!.picture);
+  assert.equal(designThumbnail(widerDesign!), undefined, "no render: the placeholder");
+  assert.equal(showingDesign(page, undefined), page, "Show the newest is the project as it is");
+  assert.equal(showingDesign(page, "gone"), page);
+  // A merged mesh sits beside a sealed 3MF.
+  const three = showingDesign({ ...page, versions: [{ ...firstDesign!, result: { ...firstDesign!.result, model: `versions/${firstDesign!.id}/model.3mf` } }, newestDesign!] }, firstDesign!.id);
+  assert.equal(filePath(three, "model.stl"), `versions/${firstDesign!.id}/model.stl`);
+  // Its own Did it fit? goes to that design only.
+  assert.deepEqual(designAnswer(page, widerDesign!.id, "needs-changes"), { id: hanger.id, status: "needs-changes", versionId: widerDesign!.id });
+});
+
+test("a design that went to the printer is never called unprinted, and Activity names the pass that sealed it", () => {
+  const sent = {
+    ...hanger,
+    versions: hanger.versions!.map((v, i) => (i === 1 ? { ...v, passStartedAtMs: 1793836000000 } : v)),
+    prints: [...hanger.prints!, ...[1, 2, 3].map((n) => ({ id: `old-${n}`, bundleId: "b", versionId: widerDesign!.id, startedAtMs: 1793836900000 + n }))],
+  } as Project;
+  const history = designHistory(sent, "UTC");
+  assert.equal(history.printedLine(widerDesign!), "Sent to the printer 3 times · how they ended wasn’t kept");
+  assert.equal(showingDesign(sent, widerDesign!.id).state, "sent");
+  const failed = { ...hanger, prints: [...hanger.prints!, { id: "f", bundleId: "b", versionId: widerDesign!.id, startedAtMs: 1, monitor: { endState: "failed" } }] } as Project;
+  assert.equal(designHistory(failed).printedLine(widerDesign!), "Not printed · 1 try didn’t finish");
+  assert.equal(sealedLine(sent, 1793836000000, "UTC"), "This became the Nov 5 design");
+  assert.equal(sealedLine(sent, 42), undefined);
+  assert.equal(sealedLine({ ...sent, versions: [sent.versions![1]!] }, 1793836000000), undefined, "one design: no mark");
+});
+
+// #613: a project made from another shows what was asked and answered there.
+test("inherited-history.json: a made project shows its source's conversation, read-only, with projects present", () => {
+  const [source, made] = JSON.parse(readFileSync(new URL("../../../packages/contracts/fixtures/inherited-history.json", import.meta.url), "utf8")) as Project[];
+  const others = [{ ...project, id: "o", title: "Hook" }] as Project[];
+  const history = inheritedConversation(made!, [...others, source!, made!])!;
+  assert.equal(history.line, "From “Forester phone mount”");
+  assert.equal(history.from.exists, true);
+  assert.deepEqual(history.entries.map((e) => [e.role, e.text]), [
+    ["person", "A mount for my phone."],
+    ["counterpart", "Which case is on the phone?"],
+    ["person", "The case is a JETech clear case."],
+    ["counterpart", "Made a holder for that case."],
+  ]);
+  assert.deepEqual(history.entries.map((e) => e.showsTime), [true, false, false, false]);
+  const renamed = inheritedConversation(made!, [{ ...source!, title: "Phone mount v2" }])!;
+  assert.equal(renamed.line, "From “Phone mount v2”", "the source's name now");
+  const gone = inheritedConversation(made!, others)!;
+  assert.equal(gone.line, "From “Forester phone mount”, since deleted");
+  assert.equal(gone.from.exists, false);
+  assert.equal(gone.entries.length, 4, "deleting the source never changes the copy");
+  assert.equal(inheritedConversation(source!, [source!, made!]), undefined);
+});
+
+// #626: the stage never says a picture is coming forever.
+test("a picture the computer never draws settles into a reason with Try again, never an endless coming (#626)", () => {
+  // As a Linux companion leaves it: an STL result, no renders, no pictures, no pictureStates.
+  const linux = { ...project, id: "l", state: "ready", current: { model: "current/model.stl", renders: [] } } as Project;
+  const entry = gallery(linux)[0]!;
+  assert.equal(still(linux, entry), "waiting");
+  assert.deepEqual(stageStill(linux, "waiting", entry.label, "x", 0, entry.kind), { state: "waiting", line: "Your part: coming from your computer" });
+  assert.deepEqual(stageStill(linux, "waiting", entry.label, "x", PICTURE_PATIENCE_MS, entry.kind), { state: "not available", line: NOT_DRAWN_LINE, retry: true });
+  // While a pass runs, or while the computer says it is drawing it, it is still coming.
+  assert.equal(stageStill({ ...linux, state: "touching-up" }, "waiting", entry.label, "x", 10 * PICTURE_PATIENCE_MS, entry.kind).state, "waiting");
+  assert.equal(stageStill({ ...linux, pictureStates: { part: "drawing" } }, "waiting", entry.label, "x", 10 * PICTURE_PATIENCE_MS, entry.kind).state, "waiting");
+  // A failed drawing says so at once; a picture shows.
+  assert.equal(still({ ...linux, pictureStates: { part: "failed" } }, entry), "not available");
+  assert.deepEqual(stageStill(linux, "not available", entry.label, "Your computer couldn't draw a picture of this.", 0, entry.kind),
+    { state: "not available", line: "Your computer couldn't draw a picture of this.", retry: false });
+  assert.deepEqual(stageStill(linux, { picture: "renders/front.png" }, entry.label, "x", 0, entry.kind), { state: "picture", picture: "renders/front.png" });
+  // A draft with nothing to show yet ends in its own line.
+  assert.deepEqual(stageStill({ ...linux, state: "new" }, "waiting", "Your project", "Nothing to show yet.", PICTURE_PATIENCE_MS),
+    { state: "not available", line: "Nothing to show yet.", retry: false });
+  // A scan's picture (no Linux route to draw it) settles too.
+  const scanned = { ...linux, scan: "scan.usdz" } as Project;
+  const scanEntry = gallery(scanned).find((e) => e.kind === "scan")!;
+  assert.equal(stageStill(scanned, still(scanned, scanEntry), scanEntry.label, "x", PICTURE_PATIENCE_MS, scanEntry.kind).state, "not available");
+});
+
+// Review of #753 (Muse, P2 ×2): the page itself, with other projects present; every send and answer for the newest
+// waits while an earlier design is on the stage (the Mac's `blocked`); and the stage's own 20 s clock.
+const pageOf = (p: Project, viewing: string | undefined, projects: Project[], queue: object[] = []) =>
+  renderToStaticMarkup(createElement(ProjectPage, {
+    project: p, printers: [], apply() {}, mutate: async () => ({}), onBack() {}, onView() {}, viewing,
+    changes: { queue, loaded: true, error: "", enqueue: async () => {}, discard: async () => {}, retry: async () => {} } as never,
+    capabilities: { projectSettings: true }, projects, onOpenProject() {},
+  }));
+/** The opening tag of the first button whose text starts with `text`. */
+const buttonTag = (html: string, text: string) => {
+  const at = html.indexOf(`>${text}`);
+  assert.ok(at > 0, `a "${text}" control is on the page`);
+  return html.slice(html.lastIndexOf("<button", at), at + 1);
+};
+const fieldsetTag = (html: string, id: string) => {
+  const match = new RegExp(`<fieldset[^>]*data-testid="${id}"[^>]*>`).exec(html);
+  assert.ok(match, `${id} is on the page`);
+  return match[0];
+};
+const disabled = (tag: string) => /\sdisabled=""/.test(tag);
+
+test("the project page with other projects present: designs under the stage, an earlier one on it, and every action for the newest waits (#744)", () => {
+  const pink = { ...project, id: "pink", title: "Pink box", plates: undefined } as Project;
+  const holder = { ...project, id: "holder", title: "Wall holder", plates: undefined } as Project;
+  // Two printed designs (the earlier one unanswered, so its own answer shows), a saved follow-up, an open question,
+  // a plate, and a history carried from another project on the list.
+  const page = {
+    ...hanger,
+    prints: [...hanger.prints!, { id: "p2", bundleId: "b", versionId: widerDesign!.id, startedAtMs: 1793900000000, monitor: { endState: "done" } }],
+    pendingFollowup: "Make the hook longer",
+    ask: { id: "ask-1", question: "How thick is the desk?", answers: ["text", "best-guess"], status: "open" },
+    plates: [{ id: "1:1", fileIndex: 0, plateIndex: 1, name: "Plate 1", fileName: "hanger.3mf", selected: true, sliced: false, status: "ready" }],
+    inherited: { from: { id: "pink", title: "Pink box (old name)" }, items: [{ at: 1, who: "you", text: "A box." }] },
+  } as Project;
+  const projects = [pink, page, holder];
+  const queue = [{ id: "q1", projectId: page.id, note: "Round the edges", state: "uncertain" }];
+  // An open question holds Print by itself, so Print is checked on the page without it.
+  const quiet = { ...page, ask: undefined } as Project;
+  const live = pageOf(page, undefined, projects, queue), quietLive = pageOf(quiet, undefined, projects, queue);
+  const viewing = pageOf(page, firstDesign!.id, projects, queue), quietViewing = pageOf(quiet, firstDesign!.id, projects, queue);
+  assert.equal(disabled(/<button[^>]*data-testid="print"[^>]*>/.exec(quietViewing)![0]), true, "Print waits while an earlier design is on the stage");
+  assert.equal(disabled(/<button[^>]*data-testid="print"[^>]*>/.exec(quietLive)![0]), false, "Print works with the newest on the stage");
+  for (const html of [live, viewing]) {
+    assert.match(html, /data-testid="design-history"/);
+    assert.match(html, /What you have/);
+    assert.match(html, />From “Pink box”</, "the list's own project, by its name now");
+  }
+  // The newest on the stage: nothing waits.
+  assert.doesNotMatch(live, /data-testid="viewing-earlier-design"/);
+  assert.equal(earlierOnStage(page, newestDesign!.id), undefined, "choosing the newest is showing the newest");
+  // An earlier design on the stage: its bar, Show the newest, and its own state in the header.
+  assert.match(viewing, /data-testid="viewing-earlier-design"/);
+  assert.match(viewing, /Earlier design · Printed \w{3} \d{1,2} · Workshop printer/);
+  assert.match(viewing, />Show the newest</);
+  assert.match(viewing, /<p class="status ">Done<\/p>/);
+  assert.ok(viewing.includes(NEWEST_WAITS));
+  const paths: [string, (html: string) => string][] = [
+    ["Ask for changes", (h) => buttonTag(h, "Ask for changes…")],
+    ["Retry saved request (objects.correct)", (h) => buttonTag(h, "Retry saved request")],
+    ["a queued change's retry", (h) => buttonTag(h, "I checked the conversation; retry")],
+    ["the open question", (h) => fieldsetTag(h, "ask-wait")],
+    ["the plates", (h) => fieldsetTag(h, "plates-wait")],
+  ];
+  for (const [name, tag] of paths) {
+    assert.equal(disabled(tag(viewing)), true, `${name} waits while an earlier design is on the stage`);
+    assert.equal(disabled(tag(live)), false, `${name} works with the newest on the stage`);
+  }
+  // The question's own controls sit inside the waiting card.
+  const ask = viewing.slice(viewing.indexOf('data-testid="ask-wait"'));
+  assert.ok(ask.indexOf("Use your best guess") < ask.indexOf("</fieldset>"));
+  // What stays live: each printed design's own answer, and Show the newest.
+  assert.equal(disabled(buttonTag(viewing, "It works")), false);
+  assert.equal(disabled(buttonTag(viewing, "Needs changes")), false);
+  assert.equal(disabled(buttonTag(viewing, "Show the newest")), false);
+  // A reconstruction review (which replaces the question card) waits too.
+  const review = { ...page, ask: undefined, reconstructionReview: { id: "r1", kind: "scale", preview: "reconstruction-preview.stl?reviewId=r1",
+    boundsMin: [0, 0, 0], boundsMax: [1, 1, 1], extents: { x: 1, y: 1, z: 1 }, scaleKnown: false } } as Project;
+  assert.equal(disabled(fieldsetTag(pageOf(review, firstDesign!.id, projects), "review-wait")), true);
+  assert.equal(disabled(fieldsetTag(pageOf(review, undefined, projects), "review-wait")), false);
+  assert.ok(pageOf(review, firstDesign!.id, projects).slice(pageOf(review, firstDesign!.id, projects).indexOf('data-testid="review-wait"')).includes("Confirm this size"));
+});
+
+test("the stage's clock: coming for 20 s, then the reason with Try again; Try again and a new picture start it again (#626)", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 1_000_000 });
+  const ready = { ...project, id: "c", state: "ready", current: { model: "current/model.stl", renders: [] } } as Project;
+  const entry = gallery(ready)[0]!;
+  let woke = 0;
+  const clock = pictureClock(() => woke++);
+  const shownAt = (p: Project, key: string) => stageStill(p, "waiting", entry.label, "x", clock.waited(key), entry.kind);
+  clock.watch("c#part#0", true);
+  assert.equal(shownAt(ready, "c#part#0").state, "waiting");
+  t.mock.timers.tick(PICTURE_PATIENCE_MS - 1);
+  assert.equal(woke, 0);
+  assert.equal(shownAt(ready, "c#part#0").state, "waiting", "19.999 s: still coming");
+  t.mock.timers.tick(51);
+  assert.equal(woke, 1, "the page is woken to settle");
+  assert.deepEqual(shownAt(ready, "c#part#0"), { state: "not available", line: NOT_DRAWN_LINE, retry: true });
+  // While a pass runs it is still coming; when it ends the same wait settles at once.
+  assert.equal(shownAt({ ...ready, state: "touching-up" }, "c#part#0").state, "waiting");
+  // Try again is a new attempt: coming again, for another 20 s.
+  clock.watch("c#part#1", true);
+  assert.equal(shownAt(ready, "c#part#1").state, "waiting");
+  assert.equal(clock.waited("c#part#0"), 0, "the old wait is forgotten");
+  t.mock.timers.tick(PICTURE_PATIENCE_MS + 50);
+  assert.equal(woke, 2);
+  assert.equal(shownAt(ready, "c#part#1").state, "not available");
+  // The same key again keeps its clock; a picture that is shown sets none; a remount starts again.
+  clock.watch("c#part#1", true);
+  assert.equal(woke, 2);
+  clock.watch("c#renders/front.png#0", false);
+  t.mock.timers.tick(10 * PICTURE_PATIENCE_MS);
+  assert.equal(woke, 2, "no clock for a picture that came");
+  clock.stop();
+  clock.watch("c#renders/front.png#0", true);
+  t.mock.timers.tick(PICTURE_PATIENCE_MS + 50);
+  assert.equal(woke, 3, "after an unmount the same wait is timed again");
 });

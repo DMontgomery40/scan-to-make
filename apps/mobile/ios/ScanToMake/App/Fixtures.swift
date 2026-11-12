@@ -166,6 +166,60 @@ enum Fixtures {
       }
     ],
     "prints": []
+  },
+  {
+    "id": "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a04",
+    "title": "Phone stand",
+    "kind": "fit",
+    "instructions": "A phone stand.",
+    "state": "printed",
+    "createdAtMs": 1793750400000,
+    "updatedAtMs": 1793980800000,
+    "photos": [],
+    "passes": [],
+    "current": {"model": "current/model.stl", "renders": [], "summary": "A steeper lip."},
+    "print": {
+      "printId": "print-two",
+      "bundleId": "bundle-two",
+      "versionId": "30000000-0000-4000-8000-000000000002",
+      "destination": {"id": "current", "name": "Workshop printer"},
+      "monitor": {"phase": "ended", "endState": "done", "endedAt": "2026-11-06T18:00:00Z"}
+    },
+    "versions": [
+      {
+        "id": "30000000-0000-4000-8000-000000000001",
+        "sealedAtMs": 1793750400000,
+        "modelSha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "result": {"model": "versions/30000000-0000-4000-8000-000000000001/model.stl", "renders": [], "summary": "A flat lip."},
+        "outcome": "works"
+      },
+      {
+        "id": "30000000-0000-4000-8000-000000000002",
+        "sealedAtMs": 1793980800000,
+        "modelSha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "result": {"model": "versions/30000000-0000-4000-8000-000000000002/model.stl", "renders": [], "summary": "A steeper lip."}
+      }
+    ],
+    "prints": [
+      {
+        "id": "print-one",
+        "printId": "print-one",
+        "bundleId": "bundle-one",
+        "versionId": "30000000-0000-4000-8000-000000000001",
+        "startedAtMs": 1793808000000,
+        "destination": {"id": "current", "name": "Workshop printer"},
+        "monitor": {"phase": "ended", "endState": "done", "endedAt": "2026-11-04T23:32:00Z"}
+      },
+      {
+        "id": "print-two",
+        "printId": "print-two",
+        "bundleId": "bundle-two",
+        "versionId": "30000000-0000-4000-8000-000000000002",
+        "startedAtMs": 1794340000000,
+        "destination": {"id": "current", "name": "Workshop printer"},
+        "monitor": {"phase": "ended", "endState": "done", "endedAt": "2026-11-06T18:00:00Z"}
+      }
+    ]
   }
 ]
 """#.utf8)
@@ -657,6 +711,9 @@ struct FixtureTransport: HTTPTransport {
         // `-CounterpartSlowScan <seconds>`: a scan file takes that long to come (a busy Mac over Wi-Fi), for pictures.
         let slow = UserDefaults.standard.double(forKey: "CounterpartSlowScan")
         if path.contains("/scan/"), slow > 0 { try await Task.sleep(for: .seconds(slow)) }
+        // `-CounterpartSlowModel <seconds>`: the part's model takes that long to come (#606: the AR chip says it is coming).
+        let slowModel = UserDefaults.standard.double(forKey: "CounterpartSlowModel")
+        if path.hasSuffix("/model.stl"), slowModel > 0 { try await Task.sleep(for: .seconds(slowModel)) }
         // `-CounterpartSlowPictures <seconds>`: the Mac's pictures take that long too (review F4 on #525).
         let slowPictures = UserDefaults.standard.double(forKey: "CounterpartSlowPictures")
         // Renders too (a stage's still can be either): the stage stays "loading" for as long as a test looks, then the

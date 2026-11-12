@@ -162,13 +162,14 @@ class LocalWorkflowTests(unittest.TestCase):
     def route(self, kinds, alive):
         """Run main() on a pretend Mac with Linux hosts a, b, c; `alive` is the set that answers SSH."""
         jobs=[{'workflow':'w','key':str(i),'matrix':{},'env':{},'defaults':{},'job':{'runs-on':r,'steps':[]}} for i,r in enumerate(kinds)]
-        calls=[]; probes=[]
+        calls=self.calls=[]; probes=[]
         def fake_linux(spec,workspace,directory,host): calls.append((spec['key'],host)); return {'spec':spec,'status':'PASS','steps':[]}
         def fake_local(spec,workspace,directory): calls.append((spec['key'],'mac')); return {'spec':spec,'status':'PASS','steps':[]}
         real_run=subprocess.run
         def fake_run(argv,*a,**k):
             if argv[:1]==['ssh'] and argv[-1]=='true':
-                probes.append(argv[-2]); return subprocess.CompletedProcess(argv, 0 if argv[-2] in alive else 255)
+                probes.append(argv[-2]); up=argv[-2] in alive
+                return subprocess.CompletedProcess(argv, 0 if up else 255, stderr='' if up else "Can't open user config file /Volumes/Spillover/ssh/config: Operation not permitted\n")
             return real_run(argv,*a,**k)
         with tempfile.TemporaryDirectory() as folder, \
              patch.object(ci.platform,'system',return_value='Darwin'), patch.dict(os.environ,{'CI_LOCAL_LINUX_HOSTS':'a,b,c'}), \
@@ -185,15 +186,23 @@ class LocalWorkflowTests(unittest.TestCase):
         self.assertEqual(code,0)
         self.assertEqual(calls,[('0','a'),('1','mac'),('2','b'),('3','c'),('4','mac')])
 
-    def test_a_dead_linux_host_is_skipped_not_failed(self):
-        code,calls,probes,_=self.route(['ubuntu-latest','ubuntu-latest','ubuntu-latest','macos-27'],{'a','c'})
-        self.assertEqual(code,0); self.assertEqual(probes,['a','b','c'])
-        self.assertEqual(calls,[('0','a'),('1','c'),('2','a'),('3','mac')])
+    def test_an_unreachable_configured_linux_host_fails_the_gate_before_any_job_runs(self):
+        """#650: over ssh on the Mac an unreadable ~/.ssh/config include made the boxes look dead, and the gate skipped
+        their jobs with one stderr line. Now it stops, names the host and ssh's reason, and says how to choose hosts."""
+        jobs=['ubuntu-latest','ubuntu-latest','ubuntu-latest','macos-27']
+        with self.assertRaises(ValueError) as caught: self.route(jobs,{'a','c'})
+        message=str(caught.exception)
+        self.assertIn('  b: Can\'t open user config file',message); self.assertNotIn('  a:',message)
+        self.assertIn('CI_LOCAL_LINUX_HOSTS=a,c',message)
+        self.assertEqual(self.calls,[],'no job ran, Apple ones included: the run is one gate, not part of one')
 
-    def test_no_reachable_linux_host_fails_ubuntu_jobs_clearly_and_apple_jobs_still_run(self):
-        code,calls,_,summary=self.route(['ubuntu-latest','macos-27'],set())
-        self.assertEqual(code,1); self.assertEqual(calls,[('1','mac')])
-        self.assertIn('No Linux host reachable',summary)
+    def test_no_reachable_linux_host_fails_the_gate_and_names_every_host(self):
+        with self.assertRaises(ValueError) as caught: self.route(['ubuntu-latest','macos-27'],set())
+        for host in 'abc': self.assertIn('  '+host+': ',str(caught.exception))
+
+    def test_every_configured_host_is_probed_and_healthy_ones_take_the_jobs(self):
+        code,calls,probes,_=self.route(['ubuntu-latest','ubuntu-latest'],{'a','b','c'})
+        self.assertEqual(code,0); self.assertEqual(probes,['a','b','c']); self.assertEqual(calls,[('0','a'),('1','b')])
 
     def test_apple_only_runs_do_not_probe_linux_hosts(self):
         _,calls,probes,_=self.route(['macos-27','xcode-27.2'],{'a','b','c'})

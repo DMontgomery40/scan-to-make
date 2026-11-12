@@ -11,7 +11,10 @@ caller is not overtaken by normal callers that arrive after it.
 Slot 1 is ~/.stm-ios.lock, so `/usr/bin/lockf -k ~/.stm-ios.lock <command>` still excludes one slot.
 Slot 2 is ~/.stm-ios-2.lock. The kernel locks (flock(2) on those files) are the truth. Queue tickets
 (~/.stm-lane/queue) and holder records (~/.stm-lane/holders) only describe them; each is flock'ed by its
-live owner, so a killed caller's files are recognised as stale and blocks no one.
+live owner, so a killed caller's files are recognised as stale and blocks no one. A waiter that stops before its
+turn (a signal, or killed outright: a T3 restart cancelled every queued hold on Nov 10, #703) is kept in
+~/.stm-lane/cancelled, and --status lists it until the same label is queued again from the same folder, or for
+CANCELLED_KEEP_HOURS.
 
 Python 3.9 standard library only. Paths can be overridden for tests: STM_LANE_SLOT1 (or STM_IOS_LOCK),
 STM_LANE_SLOT2, STM_LANE_DIR; when only slot 1 is overridden, slot 2 and the state folder sit beside it.
@@ -29,6 +32,7 @@ import time
 
 DEFAULT_MAX_MINUTES = 10
 HELD_ENV = 'STM_LANE_HELD'
+CANCELLED_KEEP_HOURS = 24
 
 
 def paths():
@@ -88,8 +92,9 @@ class Record:
         self.handle.close()
 
 
-def live_records(folder):
-    """Records whose owner still holds them, oldest name first; stale ones are removed."""
+def live_records(folder, cancelled=None):
+    """Records whose owner still holds them, oldest name first; stale ones are removed (into `cancelled`, if given:
+    a queue ticket left behind by a killed waiter)."""
     found = []
     if not folder.is_dir():
         return found
@@ -101,6 +106,12 @@ def live_records(folder):
         try:
             with path.open() as handle:
                 if try_lock(handle):  # Its owner is gone: the description is stale.
+                    # No links left means its owner removed it on the way out (it got its turn, or recorded its own
+                    # cancellation) between our open and our lock: not a cancellation.
+                    if cancelled is not None and os.fstat(handle.fileno()).st_nlink:
+                        with contextlib.suppress(json.JSONDecodeError):
+                            record_cancelled(cancelled, path.name, json.loads(handle.read() or '{}'),
+                                             'its process ended without leaving the queue (killed, or its session restarted)')
                     with contextlib.suppress(FileNotFoundError):
                         path.unlink()
                     continue
@@ -127,9 +138,64 @@ def _remove_if_unlocked(path):
             path.unlink()
 
 
+def write_json(path, data):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.parent / ('.tmp-' + str(os.getpid()) + '-' + str(time.time_ns()))
+    temporary.write_text(json.dumps(data))
+    os.rename(temporary, path)
+
+
+def record_cancelled(folder, name, data, how):
+    """Keep what a waiter had queued, so whoever queued it (a restarted session) can see it and queue it again."""
+    data = {k: v for k, v in data.items() if not k.startswith('_')}
+    data.update(endedAt=time.time(), how=how)
+    write_json(folder / name, data)
+
+
+def cancelled_records(folder, now=None):
+    """Cancelled waiters, oldest first; ones older than CANCELLED_KEEP_HOURS are deleted."""
+    now = time.time() if now is None else now
+    found = []
+    if not folder.is_dir():
+        return found
+    for path in sorted(folder.iterdir()):
+        if path.name.startswith('.'):
+            if time.time() - _mtime(path) > 60:
+                with contextlib.suppress(FileNotFoundError):
+                    path.unlink()
+            continue
+        try:
+            data = json.loads(path.read_text() or '{}')
+        except (FileNotFoundError, json.JSONDecodeError):
+            data = {}
+        if now - float(data.get('endedAt', 0)) > CANCELLED_KEEP_HOURS * 3600:
+            with contextlib.suppress(FileNotFoundError):
+                path.unlink()
+            continue
+        data['_name'] = path.name
+        found.append(data)
+    return found
+
+
+def forget_cancelled(folder, label, cwd):
+    """Queued again from the same folder: the earlier cancellation is answered."""
+    for entry in cancelled_records(folder):
+        if entry.get('label') == label and entry.get('cwd') == cwd:
+            with contextlib.suppress(FileNotFoundError):
+                (folder / entry['_name']).unlink()
+
+
+def _cwd():
+    try:
+        return os.getcwd()
+    except OSError:
+        return None
+
+
 def enqueue(state, info):
     """Number a ticket and publish it under the sequence lock, so number order is the order tickets appear."""
     state.mkdir(parents=True, exist_ok=True)
+    forget_cancelled(state / 'cancelled', info.get('label'), info.get('cwd'))
     with (state / 'sequence').open('a+') as handle:
         try_lock(handle, blocking=True)
         handle.seek(0)
@@ -162,9 +228,12 @@ def status(now=None):
     now = time.time() if now is None else now
     slots, state = paths()
     holders = live_records(state / 'holders')
-    waiters = live_records(state / 'queue')
+    waiters = live_records(state / 'queue', state / 'cancelled')
+    cancelled = cancelled_records(state / 'cancelled', now)
     for entry in holders + waiters:
         entry['ageSeconds'] = round(now - entry['since'])
+    for entry in cancelled:
+        entry['endedSecondsAgo'] = round(now - entry['endedAt'])
     for entry in holders:
         entry['overdue'] = now - entry['since'] > 60 * entry['maxMinutes']
     rows = []
@@ -175,7 +244,7 @@ def status(now=None):
         if held and owner is None:
             row['unrecorded'] = legacy_holder(slot) or 'a process outside the lane (a direct lockf?)'
         rows.append(row)
-    return {'slots': rows, 'holders': holders, 'waiters': waiters}
+    return {'slots': rows, 'holders': holders, 'waiters': waiters, 'cancelled': cancelled}
 
 
 def _age(seconds):
@@ -207,12 +276,23 @@ def describe(report):
                                                         waiter['label'], _age(waiter['ageSeconds'])))
     else:
         lines.append('nobody waiting')
+    if report.get('cancelled'):
+        lines.append('stopped while waiting, never ran (queue again if still needed; listed for %dh):' % CANCELLED_KEEP_HOURS)
+        for entry in report['cancelled']:
+            where = ' in ' + entry['cwd'] if entry.get('cwd') else ''
+            thread = ' (T3 thread ' + entry['thread'] + ')' if entry.get('thread') else ''
+            command = '\n       ' + ' '.join(entry['command']) if entry.get('command') else ''
+            lines.append('  pid %s%s "%s"%s%s, queued %s before it stopped, %s ago: %s%s' % (
+                entry.get('pid'), ' [exclusive]' if entry.get('exclusive') else '', entry.get('label'), where, thread,
+                _age(entry['endedAt'] - entry.get('since', entry['endedAt'])), _age(entry['endedSecondsAgo']),
+                entry.get('how'), command))
     return '\n'.join(lines)
 
 
 @contextlib.contextmanager
-def hold(label, exclusive=False, max_minutes=DEFAULT_MAX_MINUTES, log=None):
-    """Wait in line, take one slot (or both if exclusive), and keep them until the block ends."""
+def hold(label, exclusive=False, max_minutes=DEFAULT_MAX_MINUTES, log=None, command=None):
+    """Wait in line, take one slot (or both if exclusive), and keep them until the block ends. `command` (a list) is
+    only described: it is shown if this waiter is stopped before its turn."""
     log = log or (lambda text: print(text, file=sys.stderr, flush=True))
     slots, state = paths()
     for slot in slots:
@@ -220,7 +300,10 @@ def hold(label, exclusive=False, max_minutes=DEFAULT_MAX_MINUTES, log=None):
     handles = [slot.open('a+') for slot in slots]
     held = []
     record = None
-    info = {'pid': os.getpid(), 'label': label, 'exclusive': exclusive, 'maxMinutes': max_minutes, 'since': time.time()}
+    info = {'pid': os.getpid(), 'label': label, 'exclusive': exclusive, 'maxMinutes': max_minutes, 'since': time.time(),
+            'cwd': _cwd(), 'thread': os.environ.get('T3CODE_THREAD_ID') or None}
+    if command:
+        info['command'] = [str(part) for part in command]
     ticket = enqueue(state, info)
     holder_name = ticket.path.name
 
@@ -229,7 +312,7 @@ def hold(label, exclusive=False, max_minutes=DEFAULT_MAX_MINUTES, log=None):
     announced = False
     try:
         while True:  # Wait until this ticket is the oldest live one.
-            waiters = live_records(state / 'queue')
+            waiters = live_records(state / 'queue', state / 'cancelled')
             if not waiters or waiters[0]['_name'] == ticket.path.name:
                 break
             if not announced:
@@ -263,6 +346,11 @@ def hold(label, exclusive=False, max_minutes=DEFAULT_MAX_MINUTES, log=None):
         if announced:
             log('lane: got slot %s for "%s".' % (' and '.join(str(s) for s in info['slots']), label))
         yield info
+    except BaseException as stopped:
+        if ticket:  # Stopped while still waiting for its turn: say so where a restarted session will look.
+            with contextlib.suppress(OSError):
+                record_cancelled(state / 'cancelled', ticket.path.name, info, _why(stopped))
+        raise
     finally:
         if ticket:
             ticket.close()
@@ -270,6 +358,17 @@ def hold(label, exclusive=False, max_minutes=DEFAULT_MAX_MINUTES, log=None):
             record.close()
         for handle in handles:
             handle.close()  # Closing releases the flock.
+
+
+def _why(stopped):
+    if isinstance(stopped, SystemExit) and isinstance(stopped.code, int) and stopped.code > 128:
+        try:
+            return 'stopped by ' + signal.Signals(stopped.code - 128).name + ' while waiting'
+        except ValueError:
+            pass
+    if isinstance(stopped, KeyboardInterrupt):
+        return 'interrupted while waiting'
+    return 'stopped while waiting: ' + (type(stopped).__name__ + ' ' + str(stopped)).strip()
 
 
 def nested_holder():
@@ -309,7 +408,7 @@ def _run(command, label, exclusive, max_minutes, sink):
             raise SystemExit(128 + signum)
     for signum in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
         signal.signal(signum, forward)
-    with hold(label, exclusive, max_minutes):
+    with hold(label, exclusive, max_minutes, command=command):
         child = subprocess.Popen(command, env=dict(os.environ, **{HELD_ENV: str(os.getpid())}), stdout=sink, stderr=sink)
         code = child.wait()
     return exit_code(code)

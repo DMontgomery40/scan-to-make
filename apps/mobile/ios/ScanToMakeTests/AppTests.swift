@@ -908,4 +908,28 @@ private actor HeldDownload {
         XCTAssertEqual(again, url)
         XCTAssertEqual(ARModel.target(forSTL: stl, tint: nil).lastPathComponent, "model.neutral.ar.usdz")
     }
+
+    /// #606 (audit 2026-11-11 §1): writing the AR file has a deadline. Work that ignores cancellation, as Model I/O's
+    /// conversion does, ends the wait at the deadline instead of leaving "Preparing AR…" up for good; work that finishes
+    /// in time gives its result; a cancelled caller is let go at once.
+    func testPreparingARStopsAtItsDeadlineEvenWhenTheWorkNeverListens() async throws {
+        let stuck = Task.detached { () throws -> Int in Thread.sleep(forTimeInterval: 4); return 1 }
+        let start = ContinuousClock.now
+        do { _ = try await ARModel.bounded(stuck, deadline: .milliseconds(200)); XCTFail("the deadline should have ended it") }
+        catch { XCTAssertTrue(error is ARModel.Deadline, "\(error)") }
+        XCTAssertLessThan(ContinuousClock.now - start, .seconds(2), "it never waits for the stuck work")
+        XCTAssertTrue(stuck.isCancelled, "the work is told to stop")
+
+        let quick = Task.detached { () throws -> Int in 7 }
+        let value = try await ARModel.bounded(quick, deadline: .seconds(5))
+        XCTAssertEqual(value, 7)
+
+        let slow = Task.detached { () throws -> Int in Thread.sleep(forTimeInterval: 4); return 1 }
+        let waiter = Task { try await ARModel.bounded(slow, deadline: .seconds(30)) }
+        try await Task.sleep(for: .milliseconds(100))
+        let cancelledAt = ContinuousClock.now
+        waiter.cancel()
+        do { _ = try await waiter.value; XCTFail("a cancelled caller gets no result") } catch { XCTAssertTrue(error is CancellationError, "\(error)") }
+        XCTAssertLessThan(ContinuousClock.now - cancelledAt, .seconds(2))
+    }
 }

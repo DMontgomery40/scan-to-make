@@ -27,6 +27,7 @@ import {
   scanLineage,
 } from "./domain";
 import { Picture, Stage } from "./Stage";
+import { NEWEST_WAITS, earlierOnStage, designAnswer, designHistory, designDate, designThumbnail, inheritedConversation, sealedLine, showingDesign, viewingLine } from "./designs";
 import { Question } from "./Question";
 import { PrintSheet } from "./PrintSheet";
 import { ReconstructionReviewCard } from "./ReconstructionReview";
@@ -382,7 +383,84 @@ function Camera({ id }: { id: string }) {
     </div>
   );
 }
-export function ProjectView({
+/**
+ * What you have and Earlier designs (#616 slice 1, Kit `DesignHistoryView`): under the stage, only with two or more
+ * designs. A row shows that design on the same stage; a printed design that has no answer asks its own Did it fit?.
+ */
+function DesignHistorySection({ project, viewing, select, answer }: {
+  project: Project;
+  viewing?: string;
+  select: (id: string) => void;
+  answer: (versionId: string, status: "works" | "needs-changes") => Promise<unknown>;
+}) {
+  const history = designHistory(project);
+  if (!history.showsSections) return null;
+  return (
+    <section className="designs" aria-label="Designs" data-testid="design-history">
+      {history.have.length > 0 && <h3>What you have</h3>}
+      {history.have.map((version) => (
+        <div className="design-card" key={version.id}>
+          <button className="design-row" data-testid={`design-${version.id}`} aria-pressed={viewing === version.id} onClick={() => select(version.id)}>
+            <Picture id={project.id} path={designThumbnail(version)} alt="" className="design-thumb" loadingText="…" />
+            <span className="design-words">
+              <strong>{history.printedLine(version)}</strong>
+              <span>{history.label(version)}</span>
+              <small>{version.outcome === "works" ? "✓ " : ""}{history.outcomeLine(version)}</small>
+            </span>
+            <span aria-hidden="true" className="chevron">›</span>
+          </button>
+          {version.outcome === undefined && (
+            <div className="actions">
+              <Action run={() => answer(version.id, "works")}>It works</Action>
+              <Action run={() => answer(version.id, "needs-changes")}>Needs changes</Action>
+            </div>
+          )}
+        </div>
+      ))}
+      {history.earlier.length > 0 && <h3>Earlier designs</h3>}
+      {history.earlier.map((version) => (
+        <button key={version.id} className="design-row earlier" data-testid={`design-${version.id}`} aria-pressed={viewing === version.id} onClick={() => select(version.id)}>
+          <span className="muted design-date">{designDate(version.sealedAtMs)}</span>
+          <span className="design-words">
+            <span>{history.label(version)}</span>
+            {/* A design that went to the printer says so, even when how it ended wasn't kept. */}
+            {(project.prints ?? []).some((attempt) => attempt.versionId === version.id) && <small>{history.printedLine(version)}</small>}
+          </span>
+          <span aria-hidden="true" className="chevron">›</span>
+        </button>
+      ))}
+      {project.historyRestored && <p className="muted design-restored">{project.historyRestored}</p>}
+    </section>
+  );
+}
+/** The project this one was made from, read-only above its own request (#600, #613; Kit `ProjectConversation`). */
+function InheritedHistoryView({ project, projects, onOpen }: { project: Project; projects: Project[]; onOpen?: (id: string) => void }) {
+  const history = inheritedConversation(project, projects);
+  if (!history) return null;
+  return (
+    <div className="inherited" data-testid="inherited-history">
+      {history.from.exists && onOpen
+        ? <button className="link" onClick={() => onOpen(history.from.id)}>{history.line}</button>
+        : <p className="muted">{history.line}</p>}
+      {history.entries.map((entry) => (
+        <div key={entry.id} className={`bubble ${entry.role === "person" ? "user" : "assistant"}`}>
+          {entry.showsTime && <small>{new Date(entry.atMs).toLocaleString()}</small>}
+          <p>{entry.text}</p>
+        </div>
+      ))}
+      <hr />
+    </div>
+  );
+}
+/** The project page; which design is on the stage is its own state (#616: undefined is the newest). */
+export function ProjectView(props: Omit<Parameters<typeof ProjectPage>[0], "viewing" | "onView">) {
+  const [viewing, setViewing] = useState<string>();
+  useEffect(() => setViewing(undefined), [props.project.id]);
+  return <ProjectPage {...props} viewing={viewing} onView={setViewing} />;
+}
+export function ProjectPage({
+  viewing,
+  onView: setViewing,
   project: p,
   printers,
   apply,
@@ -399,6 +477,9 @@ export function ProjectView({
   onOpenProject?: (id: string) => void;
   /** New, holding this project's scan: "Make something else from this scan". */
   onMakeFromScan?: (p: Project) => void;
+  /** The earlier design on the stage (#616); undefined is the newest. */
+  viewing?: string;
+  onView: (id: string | undefined) => void;
   /** The companion's capabilities (`status.get`): what it keeps decides what the page offers. */
   capabilities?: Record<string, unknown>;
   project: Project;
@@ -409,6 +490,12 @@ export function ProjectView({
   changes: ReturnType<typeof useChangeQueue>;
 }) {
   const [tab, setTab] = useState("Request");
+  // An earlier design on the stage (#616): every send and answer for the newest waits until it is shown again, as the
+  // Mac's `blocked` does. The design rows' own It works / Needs changes, and the running print's controls, stay live.
+  const earlier = earlierOnStage(p, viewing);
+  const shown = earlier ? showingDesign(p, earlier.id) : p;
+  const waitNewest = earlier ? NEWEST_WAITS : undefined;
+  const waits = !!earlier;
   const [note, setNote] = useState("");
   const [attached, setAttached] = useState<string[]>([]);
   const [print, setPrint] = useState(false);
@@ -438,7 +525,7 @@ export function ProjectView({
             ‹ Projects
           </button>
           <h1>{p.title}</h1>
-          <p className={`status ${p.status?.tint ?? ""}`}>{words(p)}</p>
+          <p className={`status ${earlier ? "" : p.status?.tint ?? ""}`}>{words(shown)}</p>
         </div>
         <div className="toolbar">
           <Action run={() => openProject(p.id, "folder")}>Files</Action>
@@ -461,9 +548,21 @@ export function ProjectView({
       </header>
       <div className="project-layout">
         <div className="project-main">
-          <Stage project={p} locate={() => void mutate("objects.locate", { id: p.id })} />
+          <Stage key={earlier?.id ?? "newest"} project={shown} locate={earlier ? undefined : () => void mutate("objects.locate", { id: p.id })} />
+          {earlier && (
+            <div className="viewing-bar" data-testid="viewing-earlier-design">
+              <div>
+                <small>{viewingLine(p, earlier)}</small>
+                <p>{designHistory(p).label(earlier)}</p>
+              </div>
+              <button onClick={() => setViewing(undefined)}>Show the newest</button>
+            </div>
+          )}
+          <DesignHistorySection project={p} viewing={viewing}
+            select={(id) => setViewing(id === p.versions?.at(-1)?.id ? undefined : id)}
+            answer={(versionId, status) => mutate("objects.settings.set", designAnswer(p, versionId, status))} />
           <ScanLineageRow project={p} projects={projects} onOpen={onOpenProject} onMake={onMakeFromScan} />
-          {fit && (
+          {fit && !earlier && (
             // After the print (Nov 8 walkthrough F1, PRD §5.4): the same question and answers as the other clients.
             <section className="question" aria-label={fit}>
               <div className="eyebrow">After printing</div>
@@ -502,6 +601,7 @@ export function ProjectView({
             </section>
           )}
           {p.reconstructionReview && (
+            <fieldset className="waits" disabled={waits} title={waitNewest} data-testid="review-wait">
             <ReconstructionReviewCard
               key={p.reconstructionReview.id}
               project={p}
@@ -509,13 +609,14 @@ export function ProjectView({
               mutate={mutate}
               apply={apply}
             />
+            </fieldset>
           )}
-          {p.current?.summary && (
-            <p className="result-summary">{p.current.summary}</p>
+          {shown.current?.summary && (
+            <p className="result-summary">{shown.current.summary}</p>
           )}
-          {p.current?.changes && (
+          {shown.current?.changes && (
             <div className="changes">
-              {p.current.changes.map((c, i) => (
+              {shown.current.changes.map((c, i) => (
                 <p key={i}>
                   <span>{c.tag}</span>
                   {c.text}
@@ -524,6 +625,7 @@ export function ProjectView({
             </div>
           )}
           {p.plates && p.plates.length > 0 && (
+            <fieldset className="waits" disabled={waits} title={waitNewest} data-testid="plates-wait">
             <section className="plates">
               <h3>
                 {p.plates.filter((x) => x.status === "printed").length} of{" "}
@@ -584,9 +686,12 @@ export function ProjectView({
                 Add original files…
               </Action>
             </section>
+            </fieldset>
           )}
           <footer className="project-bar">
             <button
+              disabled={!!earlier}
+              title={waitNewest}
               onClick={() => document.getElementById("changes-note")?.focus()}
             >
               Ask for changes…
@@ -594,6 +699,7 @@ export function ProjectView({
             {p.state === "new" && (
               <Action
                 className="primary"
+                disabled={!!earlier}
                 run={() => mutate("objects.start", { id: p.id })}
               >
                 Start making
@@ -602,16 +708,16 @@ export function ProjectView({
             {/* One filled control, the page's main action (`pageActions`): Try again when a pass stopped; Print
                 only when it leads. Printing is named for what it would print, and offered once. */}
             {page.main === "retry" && (
-              <Action className="primary" run={() => mutate("objects.start", { id: p.id })}>
+              <Action className="primary" disabled={!!earlier} run={() => mutate("objects.start", { id: p.id })}>
                 Try again
               </Action>
             )}
             {page.printWords && (
               <button
                 className={page.main === "print" ? "primary" : undefined}
-                title={page.printNote}
+                title={waitNewest ?? page.printNote}
                 data-testid="print"
-                disabled={!!p.reconstructionReview || p.ask?.status === "open"}
+                disabled={!!earlier || !!p.reconstructionReview || p.ask?.status === "open"}
                 onClick={() => setPrint(true)}
               >
                 {page.printWords}…
@@ -639,6 +745,7 @@ export function ProjectView({
           )}
           {p.failure && <p className="error">{p.failure}</p>}
           {!p.reconstructionReview && p.ask?.status === "open" && (
+            <fieldset className="waits" disabled={waits} title={waitNewest} data-testid="ask-wait">
             <AskCard
               key={p.ask.id}
               project={p}
@@ -646,9 +753,11 @@ export function ProjectView({
               mutate={mutate}
               apply={apply}
             />
+            </fieldset>
           )}{" "}
           {tab === "Request" && (
             <>
+              <InheritedHistoryView project={p} projects={projects} onOpen={onOpenProject} />
               <div className="conversation">
                 <div className="bubble user">
                   <p>{p.instructions || "A new project"}</p>
@@ -726,6 +835,7 @@ export function ProjectView({
                 <div className="notice">
                   <p>Saved for your review: {p.pendingFollowup}</p>
                   <Action
+                    disabled={waits}
                     run={() =>
                       mutate("objects.correct", {
                         id: p.id,
@@ -779,7 +889,7 @@ export function ProjectView({
                   </Action>
                   <Action
                     className="primary"
-                    disabled={!note.trim() || uncertain || !changes.loaded}
+                    disabled={!!earlier || !note.trim() || uncertain || !changes.loaded}
                     run={async () => {
                       if (active) {
                         await changes.enqueue(p.id, note.trim(), attached);
@@ -808,6 +918,7 @@ export function ProjectView({
                     {active ? "Queue change" : "Send"}
                   </Action>
                 </div>
+                {waitNewest && <p className="hint">{waitNewest}</p>}
                 {queue.length > 0 && (
                   <div className="notice">
                     Saved changes wait until this project is ready.
@@ -824,7 +935,7 @@ export function ProjectView({
                           Discard
                         </Action>
                         {q.state === "uncertain" && (
-                          <Action run={() => changes.retry(q.id)}>
+                          <Action disabled={waits} run={() => changes.retry(q.id)}>
                             I checked the conversation; retry
                           </Action>
                         )}
@@ -861,6 +972,7 @@ export function ProjectView({
                     {passHeading(pass, i)}
                   </h3>
                   {requestedChange(pass) && <p className="hint">Your change: “{requestedChange(pass)}”</p>}
+                  {sealedLine(p, pass.startedAtMs) && <p className="hint sealed" data-testid={`pass-${i + 1}-sealed`}>◈ {sealedLine(p, pass.startedAtMs)}</p>}
                   {pass.stages?.map((s, stage) => (
                     <p key={s.id}>
                       {stageMark(pass, stage)} {s.words}

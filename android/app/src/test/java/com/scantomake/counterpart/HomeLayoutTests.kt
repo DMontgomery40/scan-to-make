@@ -65,6 +65,7 @@ import com.scantomake.counterpart.api.Project
 import com.scantomake.counterpart.app.AppState
 import com.scantomake.counterpart.app.Counterpart
 import com.scantomake.counterpart.core.WireJson
+import com.scantomake.counterpart.core.parseObject
 import com.scantomake.counterpart.pairing.MemoryStore
 import com.scantomake.counterpart.pairing.PairingClient
 import com.scantomake.counterpart.pairing.PairingStore
@@ -94,6 +95,10 @@ import org.robolectric.annotation.Config
 import org.robolectric.util.ReflectionHelpers
 import org.robolectric.util.ReflectionHelpers.ClassParameter
 import java.io.File
+import androidx.compose.ui.test.hasAnySibling
+import androidx.compose.ui.test.isNotEnabled
+import com.scantomake.counterpart.api.ScanLineage
+import androidx.compose.ui.test.SemanticsNodeInteraction
 
 /**
  * Every layout reaches the same things (PRD §6.1, "Every layout"). David, Nov 5: "where did the 'start with these
@@ -228,6 +233,194 @@ class HomeLayoutTests {
         compose.onNode(hasTestTag("scan-use")).assertExists()
         compose.onNodeWithText("Make something that fits this").assertExists()
         compose.onNodeWithText("Just save this scan").assertDoesNotExist()
+    }
+
+    /** The companion answers `GET /v1/objects/<id>` with [data] and `PATCH …/settings` with it too, keeping the bodies. */
+    private fun answerProject(data: JsonObject, patches: MutableList<String> = mutableListOf()): FakeTransport {
+        val id = data["id"]!!.jsonPrimitive.content
+        val body = WireJson.encodeToString(JsonElement.serializer(), JsonObject(mapOf("object" to data))).toByteArray()
+        app.pairingStore.save(v2Record(ADDRESSES[0]), false)
+        val fake = FakeTransport { request, _ -> when {
+            request.method == "PATCH" && request.url.endsWith("/v1/objects/$id/settings") -> { synchronized(patches) { patches += String(request.body!!) }; HttpReply(200, body) }
+            request.url.endsWith("/v1/objects/$id") -> HttpReply(200, body)
+            else -> json(404, mapOf("error" to mapOf("code" to "not-found", "message" to "not here")))
+        } }
+        app.pairing = PairingClient(app.pairingStore, fake)
+        app.companion = CompanionClient(app.pairing, fake, null, null, app.cacheDir)
+        return fake
+    }
+
+    /** #616 slice 1 on Android (#743), with projects present (AGENTS.md "Every layout"). David (Nov 11): "my airpods max
+     *  hanger was printed and done and nothing changed that. and then i modified it and now it's no longer a thing that
+     *  was done". The changed-but-printed project's page lists its printed design under What you have, with that design's
+     *  own It works; opening it puts its own render on the stage with a bar back to the newest, while Print, changes and
+     *  the project's status wait. A one-design project's page has no sections at all. */
+    @Test fun aChangedButPrintedProjectStillShowsItsPrintedDesignWithProjectsPresent() {
+        val raw = parseObject(contractFixture("project-versions.json").readText())!!["project"]!!.jsonObject
+        val first = "10000000-0000-4000-8000-000000000001"
+        // The printed design not yet answered, so its own Did it fit? is offered.
+        val data = JsonObject(raw + ("versions" to JsonArray(raw["versions"]!!.jsonArray.map { v ->
+            if (v.jsonObject["id"]!!.jsonPrimitive.content == first) JsonObject(v.jsonObject - "outcome") else v })))
+        val id = data["id"]!!.jsonPrimitive.content
+        val patches = mutableListOf<String>()
+        val fake = answerProject(data, patches)
+        state.projects.value = listOf(project("other", "Existing project", "ready"), requireNotNull(Project.decode(data)))
+        state.loaded.value = true
+        compose.setContent { WithApp { com.scantomake.counterpart.ui.ProjectScreen(id, back = {}, print = {}, printing = {}, scan = {}) } }
+        compose.onNodeWithTag("design-history").performScrollTo().assertExists()
+        compose.onNodeWithText("What you have").assertExists()
+        compose.onNodeWithText("Earlier designs").assertExists()
+        compose.onNodeWithTag("design-$first").performScrollTo().assertTextContains("Printed Nov", substring = true)
+            .assertTextContains("Workshop printer", substring = true).assertTextContains("Did it fit?", substring = true)
+        compose.onNodeWithTag("design-10000000-0000-4000-8000-000000000002").assertExists()
+        compose.onNodeWithTag("design-10000000-0000-4000-8000-000000000003").assertDoesNotExist()
+        // That design's own answer names it.
+        compose.onNodeWithTag("design-$first-works").performScrollTo().performClick()
+        compose.waitUntil(5_000) { synchronized(patches) { patches.isNotEmpty() } }
+        assertEquals("""{"status":"works","versionId":"$first"}""", synchronized(patches) { patches.single() })
+        // Opened: its own picture on the stage, the bar, and the project's actions wait for the newest.
+        compose.onNodeWithTag("design-$first").performScrollTo().performClick()
+        compose.onNodeWithTag("viewing-earlier-design").performScrollTo().assertExists()
+        compose.onNodeWithText("Earlier design · Printed Nov", substring = true).assertExists()
+        compose.onNodeWithTag("print").performScrollTo().assertIsNotEnabled()
+        compose.waitUntil(5_000) { fake.paths.any { it.endsWith("/versions/$first/renders/front.png") } }
+        compose.onNodeWithContentDescription("More").performClick()
+        compose.onAllNodesWithText("Status:", substring = true).assertCountEquals(0)
+        compose.onNodeWithText("Duplicate").assertExists()
+        compose.onNodeWithTag("show-newest").performScrollTo().performClick()
+        compose.onNodeWithTag("viewing-earlier-design").assertDoesNotExist()
+        compose.onNodeWithTag("print").performScrollTo().assertIsEnabled()
+    }
+
+    @Test fun aProjectWithOneDesignHasNoDesignSectionsWithProjectsPresent() {
+        val raw = parseObject(contractFixture("project-versions.json").readText())!!["project"]!!.jsonObject
+        val data = JsonObject(raw + ("versions" to JsonArray(listOf(raw["versions"]!!.jsonArray.last()))) + ("prints" to JsonArray(emptyList())))
+        val id = data["id"]!!.jsonPrimitive.content
+        answerProject(data)
+        state.projects.value = listOf(project("other", "Existing project", "ready"), requireNotNull(Project.decode(data)))
+        state.loaded.value = true
+        compose.setContent { WithApp { com.scantomake.counterpart.ui.ProjectScreen(id, back = {}, print = {}, printing = {}, scan = {}) } }
+        compose.onNodeWithTag("print").performScrollTo().assertIsEnabled()
+        compose.onNodeWithTag("design-history").assertDoesNotExist()
+        compose.onNodeWithText("What you have").assertDoesNotExist()
+    }
+
+    private val firstDesign = "10000000-0000-4000-8000-000000000001"
+
+    /** The shared `project-versions.json` project with [extra] wire fields, on its page with another project present. */
+    private fun versionsPage(extra: String, before: (String) -> Unit = {}): String {
+        val raw = parseObject(contractFixture("project-versions.json").readText())!!["project"]!!.jsonObject
+        val data = JsonObject(raw + parseObject("{$extra}")!!)
+        val id = data["id"]!!.jsonPrimitive.content
+        answerProject(data)
+        state.projects.value = listOf(project("other", "Existing project", "ready"), requireNotNull(Project.decode(data)))
+        state.loaded.value = true
+        before(id)
+        compose.setContent { WithApp { com.scantomake.counterpart.ui.ProjectScreen(id, back = {}, print = {}, printing = {}, scan = {}) } }
+        compose.waitForIdle()
+        return id
+    }
+
+    /** #755 review (the Mac's `blocked = viewingDesign != nil`): every send or answer on the page goes to the newest
+     *  design, so each of [controls] acts with the newest on the stage, waits while the earlier printed design is shown,
+     *  and acts again after Show the Newest. */
+    private fun waitsWhileAnEarlierDesignIsShown(vararg controls: () -> SemanticsNodeInteraction) {
+        controls.forEach { it().performScrollTo().assertIsEnabled() }
+        compose.onNodeWithTag("design-$firstDesign").performScrollTo().performClick()
+        compose.onNodeWithTag("viewing-earlier-design").assertExists()
+        controls.forEach { it().performScrollTo().assertIsNotEnabled() }
+        compose.onNodeWithTag("show-newest").performScrollTo().performClick()
+        compose.onNodeWithTag("viewing-earlier-design").assertDoesNotExist()
+        controls.forEach { it().performScrollTo().assertIsEnabled() }
+    }
+
+    @Test fun theComputersQuestionWaitsWhileAnEarlierDesignIsShownWithProjectsPresent() {
+        versionsPage(""""state":"needs-closeup","ask":{"id":"1af638c1-ec63-46fc-aa2f-e74cd29df231","question":"Which side is the back?",
+            "answers":["camera","photos","best-guess","text"],"status":"open"}""")
+        compose.onNodeWithTag("ask-text").performScrollTo().performTextInput("The flat side.")
+        waitsWhileAnEarlierDesignIsShown({ compose.onNodeWithText("Make Your Best Guess") }, { compose.onNodeWithText("Take a Photo") },
+            { compose.onNodeWithText("Choose") }, { compose.onNodeWithText("Send Answer") })
+    }
+
+    @Test fun aSizeQuestionWaitsWhileAnEarlierDesignIsShownWithProjectsPresent() {
+        versionsPage(""""state":"needs-closeup","ask":{"id":"1af638c1-ec63-46fc-aa2f-e74cd29df231","question":"Can you confirm the size?",
+            "kind":"sizes","answers":["sizes","text","camera"],"status":"open","sizes":[{"id":"size-1","label":"width","mm":64,"from":"scan"}]}""")
+        waitsWhileAnEarlierDesignIsShown({ compose.onNodeWithTag("ask-sizes-confirm") }, { compose.onNodeWithText("Caliper Photo") })
+    }
+
+    @Test fun aPlateOrFileQuestionWaitsWhileAnEarlierDesignIsShownWithProjectsPresent() {
+        versionsPage(""""state":"needs-closeup","ask":{"id":"1af638c1-ec63-46fc-aa2f-e74cd29df231","question":"Which plate?","type":"choice","kind":"choice",
+            "options":[{"id":"plate-1","label":"Plate 1"}],"status":"open"}""")
+        waitsWhileAnEarlierDesignIsShown({ compose.onNodeWithText("Plate 1") })
+    }
+
+    @Test fun aModelFileQuestionWaitsWhileAnEarlierDesignIsShownWithProjectsPresent() {
+        versionsPage(""""state":"needs-closeup","ask":{"id":"1af638c1-ec63-46fc-aa2f-e74cd29df231","question":"Choose the model file.","type":"file","kind":"file","status":"open"}""")
+        waitsWhileAnEarlierDesignIsShown({ compose.onNodeWithText("Choose the Model File") })
+    }
+
+    @Test fun aRebuiltModelReviewWaitsWhileAnEarlierDesignIsShownWithProjectsPresent() {
+        versionsPage(""""state":"needs-closeup","reconstructionReview":{"id":"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee","kind":"region",
+            "preview":"reconstruction-preview.stl?reviewId=aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee","boundsMin":[0,0,0],"boundsMax":[2,3,4],
+            "extents":{"x":2,"y":3,"z":4},"scaleKnown":false}""")
+        waitsWhileAnEarlierDesignIsShown({ compose.onNodeWithText("Crop box") })
+    }
+
+    @Test fun thePrintersQuestionASavedSendAndTheMenuWaitWhileAnEarlierDesignIsShownWithProjectsPresent() {
+        versionsPage(""""scan":"scan.usdz","printConfirmation":{"id":"c1","message":"Is the plate clear?","expiresAtMs":9999999999999,"supported":true,
+            "fields":[{"name":"speed","title":"Speed","type":"string","enum":["a","b"],"enumNames":["Slow","Fast"],"default":"a"}]}""") { id ->
+            state.sendFailures.value = mapOf(id to "Your computer didn't answer.")
+        }
+        waitsWhileAnEarlierDesignIsShown({ compose.onNodeWithText("Don't Print") }, { compose.onAllNodes(hasText("Print") and hasAnySibling(hasText("Don't Print")))[0] },
+            { compose.onNodeWithText("Send to Your Computer") }, { compose.onNodeWithTag("make-from-scan") })
+        // The ⋮ menu: nothing in it acts on the project while the earlier design is shown.
+        compose.onNodeWithTag("design-$firstDesign").performScrollTo().performClick()
+        compose.onNodeWithContentDescription("More").performClick()
+        listOf("Hide from Home", "Duplicate", "Delete Project", ScanLineage.ACTION).forEach { compose.onAllNodesWithText(it).assertAll(isNotEnabled()) }
+    }
+
+    @Test fun importingMoreModelFilesWaitsWhileAnEarlierDesignIsShownWithProjectsPresent() {
+        versionsPage(""""kind":"published","plates":[{"id":"0:1","fileIndex":0,"plateIndex":1,"name":"Plate 1","fileName":"hanger.3mf",
+            "selected":true,"sliced":true,"status":"ready"}]""")
+        waitsWhileAnEarlierDesignIsShown({ compose.onNodeWithText("Import More Model Files") })
+    }
+
+    @Test fun finishingADraftsSendWaitsWhileAnEarlierDesignIsShownWithProjectsPresent() {
+        versionsPage(""""state":"new","scan":"scan.usdz"""")
+        waitsWhileAnEarlierDesignIsShown({ compose.onNodeWithText("Send to Your Computer") })
+    }
+
+    /** #613 (from #600's review, F4), with projects present: a project made from another shows that one's conversation,
+     *  read-only, above its own request; the From line opens the source, and says "since deleted" once it is gone. */
+    @Test fun aProjectMadeFromAnotherShowsThatOnesConversationWithProjectsPresent() {
+        val rows = WireJson.parseToJsonElement(contractFixture("inherited-history.json").readText()).jsonArray.map { it.jsonObject }
+        val source = requireNotNull(Project.decode(rows[0]))
+        val copy = requireNotNull(Project.decode(rows[1]))
+        answerProject(rows[1])
+        state.projects.value = listOf(project("other", "Existing project", "ready"), source, copy)
+        state.loaded.value = true
+        var opened: String? = null
+        compose.setContent { WithApp { com.scantomake.counterpart.ui.ProjectScreen(copy.id, back = {}, print = {}, printing = {}, scan = {}, open = { opened = it }) } }
+        compose.onNodeWithTag("inherited-from").performScrollTo().assertTextEquals("From “Forester phone mount”")
+        compose.onNodeWithText("Which case is on the phone?").assertExists()
+        compose.onNodeWithText("Made a holder for that case.").assertExists()
+        // Its own request comes after the conversation it was made from.
+        // Both read at one scroll position.
+        val asked = compose.onNodeWithText("You asked").performScrollTo().fetchSemanticsNode().positionInRoot.y
+        val from = compose.onNodeWithTag("inherited-from").fetchSemanticsNode().positionInRoot.y
+        assertTrue("the source's words come first: $from < $asked", from < asked)
+        compose.onNodeWithText("Add a swivel.").assertExists()
+        compose.onNodeWithTag("inherited-from").performScrollTo().performClick()
+        compose.waitForIdle()
+        assertEquals(source.id, opened)
+        // The source deleted: the line says so and opens nothing; the words stay.
+        opened = null
+        state.projects.value = listOf(project("other", "Existing project", "ready"), copy)
+        compose.waitForIdle()
+        compose.onNodeWithTag("inherited-from").performScrollTo().assertTextEquals("From “Forester phone mount”, since deleted").performClick()
+        compose.waitForIdle()
+        assertNull(opened)
+        compose.onNodeWithText("Which case is on the phone?").assertExists()
     }
 
     private val keptScan = "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a0a"
