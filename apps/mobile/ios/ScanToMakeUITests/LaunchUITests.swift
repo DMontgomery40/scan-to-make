@@ -2527,10 +2527,22 @@ final class OnDeviceLibraryUITests: XCTestCase {
     /// 4 ms, and `model.published ready=true` 40 ms later never reached the page: no Explore in 3D, no AR. The page's model
     /// came from `@State` that a one-shot task set. Here the model reaches the phone just after the page is pushed from
     /// Home's own row (not a launch link), and the stage must still offer Explore in 3D and AR.
+    ///
+    /// The trace after #770 (build 202611122043, Stacking letter toy): the model reached the page's `body`, and a drag's
+    /// live view loaded it, but the stage that stayed on screen never ran its `.task` (`stage.appear` and
+    /// `stage.disappear` in the same millisecond, no `stage.begin`): no still, no size. So the stage must also reach its
+    /// still ("still"), which only its load gives. Explore in 3D alone shows on a stage whose load never ran. Twice: the
+    /// model 1.5 s after the push, and 70 ms after it, as on the phone. The simulator has not yet reproduced the instant
+    /// disappear; this guards the path either way.
     func testAModelThatArrivesJustAfterThePageOpensIsOnTheStageWithProjectsPresent() throws {
+        for delay in ["1.5", "0.07"] { try openWithTheModelLate(delay) }
+    }
+
+    private func openWithTheModelLate(_ delay: String) throws {
         let folder = try folder()
         try cube(40).write(to: folder.appendingPathComponent("mic.stl"))
-        let app = launch(folder, ["-CounterpartSlowModel", "1.5", "-CounterpartStageIdle", "30"])
+        let app = launch(folder, ["-CounterpartSlowModel", delay, "-CounterpartStageIdle", "30"])
+        defer { app.terminate() }
         let search = app.textFields["project-search"]
         if app.collectionViews["Sidebar"].exists, search.waitForExistence(timeout: 20) {
             pick(app, search, "Mic mount", "sidebar-project-6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01", file: #filePath, line: #line)
@@ -2547,7 +2559,11 @@ final class OnDeviceLibraryUITests: XCTestCase {
         XCTAssertTrue(ar.waitForExistence(timeout: 10))
         let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "ready"), object: ar)
         XCTAssertEqual(XCTWaiter().wait(for: [ready], timeout: 20), .completed, "AR for the model that came: \(String(describing: ar.value))")
-        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "769-model-after-open"; shot.lifetime = .keepAlways; add(shot)
+        let stage = app.descendants(matching: .any)["model-stage"]
+        let still = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "still"), object: stage)
+        XCTAssertEqual(XCTWaiter().wait(for: [still], timeout: 20), .completed,
+                       "the stage loaded the model that came \(delay) s after the push: \(String(describing: stage.value))")
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "769-model-after-open-\(delay)"; shot.lifetime = .keepAlways; add(shot)
     }
 
     /// Back to Home and into Mic mount again (iPhone), or to another project and back by the sidebar (iPad). The iPad finds

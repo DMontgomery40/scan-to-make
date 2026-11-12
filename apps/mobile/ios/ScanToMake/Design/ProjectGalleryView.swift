@@ -11,7 +11,6 @@ struct ProjectGalleryView: View {
     let project: Project
     let words: ProjectWords
     let height: CGFloat
-    let modelURL: URL?
     /// The part's AR file once the AR chip has prepared it, with the model and colour it was written from (the page's
     /// Share offers it too). Only the file for the model on the stage now is shown: never the newest design's on an earlier one.
     @Binding var arFile: PreparedAR?
@@ -32,26 +31,33 @@ struct ProjectGalleryView: View {
     @State private var arPreparing = false
     @State private var arFailed = false
     @State private var arTask: Task<Void, Never>?
+    /// This gallery's own tag in the media trace (`gallery.url`), passed to its stage (`stage.url`).
+    @State private var instance = String(UUID().uuidString.prefix(8))
+    /// The downloads the stage needs start from `body` too, and `gallery.url` is logged from it (#769, `BodyKick`).
+    @State private var wants = BodyKick()
+    @State private var urlTrace = BodyKick()
 
     /// The part's own mesh when it isn't the page's `model.stl` (`Project.partMesh`, #769): a sealed design's file
     /// (`versions/<id>/touched.stl`, #616), or a multi-part design's merged `current/model.stl`. Fetched like any project file.
     private var ownMesh: String? { project.partMesh.flatMap { $0 == "model.stl" ? nil : $0 } }
-    private var effectiveModelURL: URL? { Self.stageModel(store: store, project: project, modelURL: modelURL) }
+    private var effectiveModelURL: URL? { Self.stageModel(store: store, project: project) }
     /// The colour the part's AR file is written in (`Project.arTint`).
     private var arTint: String? { project.arTint }
     /// The AR file for the model and colour on the stage now, if one was written (`PreparedAR`, as Share asks it).
-    private var arURL: URL? { Self.arUSDZ(arFile, store: store, project: project, modelURL: modelURL) }
+    private var arURL: URL? { Self.arUSDZ(arFile, store: store, project: project) }
 
     /// The part's mesh file on the stage: its own mesh when it has one (an earlier design's, a multi-part design's merged
-    /// mesh), else the page's model.
-    static func stageModel(store: ProjectsStore, project: Project, modelURL: URL?) -> URL? {
+    /// mesh), else the page's model (the newest design's `model.stl`). Read from the store here, where the stage draws it,
+    /// never handed down from the page (#769): the merged mesh and earlier designs always were, and reached the stage on
+    /// David's phone.
+    static func stageModel(store: ProjectsStore, project: Project) -> URL? {
         if let own = project.partMesh, own != "model.stl" { return store.models.file(project, own) }
-        return modelURL
+        return store.models.file(project, "model.stl")
     }
 
     /// The USDZ the AR chip and the page's Share offer: only one written from the model and colour on the stage now.
-    static func arUSDZ(_ file: PreparedAR?, store: ProjectsStore, project: Project, modelURL: URL?) -> URL? {
-        file?.usdz(for: stageModel(store: store, project: project, modelURL: modelURL), tint: project.arTint)
+    static func arUSDZ(_ file: PreparedAR?, store: ProjectsStore, project: Project) -> URL? {
+        file?.usdz(for: stageModel(store: store, project: project), tint: project.arTint)
     }
     private var gallery: ProjectGallery { ProjectGallery(project: project, scanOnThisDevice: localScan != nil) }
     private var entry: ProjectGallery.Entry? {
@@ -59,7 +65,13 @@ struct ProjectGalleryView: View {
         return entries.first { $0.id == selected } ?? entries.first
     }
 
+    /// What the stage's downloads depend on.
+    private var wantKey: String { "\(project.id)#\(ownMesh ?? "")#\(project.scan ?? "")#\(Int64(project.mediaVersion))#\(String(describing: project.scanFiles))#\(scenePhase)" }
+
     var body: some View {
+        // #769: a pushed page's instance can draw without running its `.task`s (`BodyKick`): the downloads start from here too.
+        let _ = traceURL()
+        let _ = wants.on(wantKey) { [self] in want() }
         VStack(spacing: 10) {
             stage
                 .frame(height: height)
@@ -72,14 +84,24 @@ struct ProjectGalleryView: View {
         .onChange(of: scenePhase) { _, phase in if phase != .active { cancelAR() } }
         .onChange(of: selected) { cancelAR(); arFailed = false }
         .onDisappear { cancelAR() }
-        .task(id: "\(project.id)#\(ownMesh ?? "")#\(project.scan ?? "")#\(Int64(project.mediaVersion))#\(String(describing: project.scanFiles))#\(scenePhase)") {
-            // The store fetches them, so leaving the page never stops a download (Nov 10). Coming back to the page or to
-            // the app starts again one that failed meanwhile (a suspended app's transfer drops).
-            guard scenePhase == .active else { return }
-            if let ownMesh { store.models.want(project, ownMesh) }
-            if case .file(let path) = scanModel { store.models.want(project, path) }
-            if gallery.entries.contains(where: { $0.kind == .together }), case .file(let path) = togetherModel { store.models.want(project, path) }
-        }
+        .task(id: wantKey) { if wants.claim(wantKey) { want() } }
+    }
+
+    /// The store fetches them, so leaving the page never stops a download (Nov 10). Coming back to the page or to the app
+    /// starts again one that failed meanwhile (a suspended app's transfer drops).
+    private func want() {
+        guard scenePhase == .active else { return }
+        if let ownMesh { store.models.want(project, ownMesh) }
+        if case .file(let path) = scanModel { store.models.want(project, path) }
+        if gallery.entries.contains(where: { $0.kind == .together }), case .file(let path) = togetherModel { store.models.want(project, path) }
+    }
+
+    /// `gallery.url`, from `body` (#769): this gallery's part model, logged when it changes, with the stage it tags.
+    private func traceURL() {
+        let url = effectiveModelURL
+        guard urlTrace.claim(url?.path ?? "") else { return }
+        MediaTrace.record("gallery.url", ["gallery": instance, "url": String(url != nil), "mesh": ownMesh ?? "model.stl", "entry": entry?.id ?? "none"],
+                          context: MediaTrace.Context(project: project.id, version: String(Int64(project.mediaVersion))))
     }
 
     // MARK: The models the stage draws
@@ -172,13 +194,13 @@ struct ProjectGalleryView: View {
                 ModelStage(url: entry.kind == .part || path == "model.stl" ? effectiveModelURL : scanURL, tint: tint(entry.colour),
                            measured: { drawn(entry, $0) },
                            placeholder: AnyView(still(entry)), undrawable: { undrawable.insert(entry.id) },
-                           drawn: { undrawable.remove(entry.id) })
+                           drawn: { undrawable.remove(entry.id) }, traceOwner: instance)
                     .id(entry.id)
             case .assembly(_, _, let seats):
                 // Both models or neither: a part with no scan at its seats would not be Together.
                 ModelStage(url: togetherScanURL == nil ? nil : effectiveModelURL, tint: tint(entry.colour),
                            object: togetherScanURL, seats: seats.map(\.matrix), measured: { drawn(entry, $0) }, placeholder: AnyView(still(entry)), undrawable: { undrawable.insert(entry.id) },
-                           drawn: { undrawable.remove(entry.id) })
+                           drawn: { undrawable.remove(entry.id) }, traceOwner: instance)
                     .id(entry.id)
             case .picture:
                 // Its own identity: a plate or picture switch starts a new stage, never one still holding the last entry's
