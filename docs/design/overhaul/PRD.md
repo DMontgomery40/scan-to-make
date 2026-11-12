@@ -950,11 +950,12 @@ If a different job is running, the monitor marks ours `replaced` and stops; it n
 
 | Condition | Event | Frame | Words |
 |---|---|---|---|
-| layer ≥ 2 for the first time (or 5% progress when layers aren't reported) | `print.first-layer` | yes | "*Title*: first layer's down" · "*remaining* left on *printer*" |
+| the camera check of the printer MCP's first-layer frame shows printed plastic (#630, Nov 12: never from a layer count or a percentage; no check, no event) | `print.first-layer` | the judged frame | "*Title*: first layer's down" · "*remaining* left on *printer*" |
+| the printer MCP's camera evidence says nothing is coming out of the nozzle (`physical.status` `suspect_no_extrusion`), once per print; never a pause or stop | `print.check` | the judged frame | "Check *title* on *printer*" · "Nothing seems to be coming out of the nozzle on *printer*: the first layer's area is empty in the camera. The printer doesn't detect this itself. Check the print." |
 | progress crosses each chosen milestone; default **50** | `print.milestone` | yes | "*Title* is halfway" · "*remaining* left · layer *l* of *L* · *printer*" |
 | state → paused | `print.paused` | yes | "*Printer* paused *title*" · problem message ("AMS slot 1 ran out of filament") |
 | paused → printing | `print.resumed` | no | updates the Live Activity only |
-| state → finished | `print.done` | yes | "*Title* is done" · "Take it off the plate." |
+| state → finished | `print.done` | yes | "*Title* is done" · "Take it off the plate."; after `print.check`, "*Printer* says *title* is done" · "But the camera showed nothing coming out of the nozzle. Check the plate." |
 | state → failed | `print.failed` | yes | "*Printer* stopped *title*" · problem message |
 | state → cancelled | `print.cancelled` | no | "*Title* was cancelled" |
 | 3 failed calls in a row, or `offline` for ≥ 60 s | `print.unreachable` | no | "Lost contact with *printer*. Still trying." Never shown as a failure. The monitor keeps polling every 30 s and goes back to 10 s on recovery |
@@ -1353,6 +1354,7 @@ Screenshot: `screens/phone-notifications.jpg` (an approximation: the system draw
 | `print.first-layer` | while the print's Live Activity runs: an alert on the activity, no sound; otherwise "*Title*: first layer's down", with the frame | **Open Print**, **Pause** (notification only) | passive | off |
 | `print.milestone` | while the print's Live Activity runs: an alert on the activity; otherwise "*Title* is halfway" · time left, layer, printer, with the frame | **Open Print**, **Pause** (notification only) | active | off |
 | `print.paused` | "*Printer* paused *title*" · reason, with the frame | **Open Print**, **Resume** | time-sensitive | on |
+| `print.check` (#630) | "Check *title* on *printer*" · "Nothing seems to be coming out of the nozzle on *printer*: … Check the print.", with the judged camera frame | **Open Print**, **Pause** (the person's choice; Counterpart never pauses by itself) | time-sensitive | on |
 | `print.done` | "*Title* is done. Take it off the plate.", with the frame | **It Works** (background), **Needs Changes…** (text input, background), **Open Project** | active | on |
 | `print.failed` / `print.not-started` / `pass.failed` | what happened and what to do | **Try Again** (a print: opens Print, never prints by itself; a pass: opens the project), **Open Project** | time-sensitive (print) / active (pass) | on |
 | `print.unreachable` | "Lost contact with *printer*. Still trying." | — | passive | off |
@@ -1378,7 +1380,7 @@ Once activity delivery is chosen, the full event and each recipient's pending/re
 | `ev-confirm` | `print.confirm` | `CONFIRM` |
 | `ev-progress` | `print.first-layer`, `print.milestone` | `PROGRESS` |
 | `ev-done` | `print.done` | `DONE` |
-| `ev-problem` | `print.paused`, `print.failed`, `print.not-started`, `pass.failed`, `print.unreachable` | `PROBLEM` |
+| `ev-problem` | `print.paused`, `print.failed`, `print.not-started`, `pass.failed`, `print.unreachable`, `print.check` | `PROBLEM` |
 | `proj-silent` | updates to `CounterpartProject` | content-available only; refreshes Home and the Live Activity |
 
 **Each visible subscription's `NotificationInfo`:**
