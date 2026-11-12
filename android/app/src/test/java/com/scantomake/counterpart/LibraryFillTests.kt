@@ -84,7 +84,8 @@ class LibraryFillTests {
         var calls = 0
         fill.meteredNow = { synchronized(this) { calls++ > 0 } }
         fill.fill(listOf(project()), fromComputer = true)
-        assertTrue(waitFor { fill.pending.isEmpty() })
+        // The fill runs on IO: wait for its picture to be asked for and the queue to empty (not just an empty start).
+        assertTrue("the picture is asked for: ${transport.paths}", waitFor { transport.paths.any { it.contains("/pictures/") } && fill.pending.isEmpty() })
         assertFalse("no model on a metered link: ${transport.paths}", transport.paths.any { it.endsWith("/model.stl") })
         assertTrue("pictures come on any link: ${transport.paths}", transport.paths.any { it.contains("/pictures/") })
     }
