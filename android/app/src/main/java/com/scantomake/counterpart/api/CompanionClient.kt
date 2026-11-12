@@ -412,11 +412,20 @@ class CompanionClient(
             return target
         }
         val path = "/v1/objects/${project.id}/${encodePath(resource)}"
-        // The kept copy's validator: an unchanged file is answered 304 and never sent twice (#720).
-        val validator = kept?.validator(project.id, name, filename)
+        // The validator of the copy the phone has: the library's for a kept kind, else an older version's cached copy
+        // and its `<file>.etag` (as the iPhone's CompanionClient). An unchanged file is answered 304 and never sent
+        // twice (#720), kept or not: with Keep set to pictures only, a model is still not fetched again after every pass.
+        val older = if (kept == null) olderCopy(filename, folder) else null
+        val validator = kept?.validator(project.id, name, filename) ?: older?.let(::cachedValidator)
         var reply = send("GET", path, limit = SCAN_LIMIT, ifNoneMatch = validator)
         if (reply.status == 304) {
             kept?.revalidated(project.id, name, project.mediaVersion, filename)?.let { return it }
+            if (kept == null && older != null && (folder.mkdirs() || folder.isDirectory) && (older.renameTo(target) || target.exists())) {
+                validator?.let { setCachedValidator(it, target) }
+                pruneOlder(filename, folder)
+                return target
+            }
+            // The copy went meanwhile (Clear, eviction): the file itself.
             reply = send("GET", path, limit = SCAN_LIMIT)
         }
         if (reply.status == 413 && active != null && reply.body.decodeToString().contains("file-too-large")) {
@@ -433,13 +442,39 @@ class CompanionClient(
                 throw CompanionException("download-failed", "That file couldn't be saved on this phone.")
             }
         }
-        // Older versions of this project are no longer shown.
-        folder.parentFile?.listFiles()?.filter { it.name != version }?.forEach { it.deleteRecursively() }
+        // Older versions of this one file are no longer shown; the project's other files stay in their folders until
+        // their own next fetch (each can still be answered 304 from its copy).
+        pruneOlder(filename, folder)
         folder.mkdirs()
         val temp = File(folder, "$filename.part")
         try { temp.writeBytes(reply.body); temp.renameTo(target) } catch (_: Exception) {
             throw CompanionException("download-failed", "That file couldn't be saved on this phone.")
         }
+        reply.header("ETag")?.let { setCachedValidator(it, target) }
         return target
+    }
+
+    // Validators beside cached files (files the library doesn't keep), as CounterpartKit's CompanionClient.
+
+    /** The computer's `ETag` for a cached file, kept beside it (`<file>.etag`). */
+    private fun cachedValidator(file: File): String? = runCatching { File(file.path + ".etag").readText() }.getOrNull()?.takeIf { it.isNotEmpty() }
+    private fun setCachedValidator(etag: String, file: File) { runCatching { File(file.path + ".etag").writeText(etag) } }
+
+    /** The newest older version's copy of [filename] beside [folder], if it has a validator to ask the computer with. */
+    private fun olderCopy(filename: String, folder: File): File? {
+        val mine = folder.name.toLongOrNull() ?: Long.MAX_VALUE
+        return folder.parentFile?.listFiles().orEmpty().mapNotNull { dir -> dir.name.toLongOrNull()?.let { dir to it } }
+            .filter { it.second < mine }.sortedByDescending { it.second }
+            .map { File(it.first, filename) }.firstOrNull { it.exists() && cachedValidator(it) != null }
+    }
+
+    /** Removes [filename] (and its validator) from the project's version folders older than [folder], and any folder left empty. */
+    private fun pruneOlder(filename: String, folder: File) {
+        val mine = folder.name.toLongOrNull() ?: 0
+        for (other in folder.parentFile?.listFiles().orEmpty()) {
+            if ((other.name.toLongOrNull() ?: Long.MIN_VALUE) >= mine) continue
+            File(other, filename).delete(); File(other, "$filename.etag").delete()
+            if (other.listFiles().isNullOrEmpty()) other.delete()
+        }
     }
 }
