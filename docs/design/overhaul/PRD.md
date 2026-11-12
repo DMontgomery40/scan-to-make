@@ -288,6 +288,7 @@ Screenshots:
 - **State card**, depending on the state:
   - **working:** "Your Mac is working on it · about *N* min", a progress bar, and "You can put your phone down. We'll let you know when it's ready."
   - **needs-you:** the Ask card, with its question, its picture with the region highlighted, and Camera, Photos and Best guess.
+  - **A recorded print closes the question** (#638, Nov 12: "Wall holder for three" was printed and still had an open question, a state nobody designed). Marking it Printed or Works, or a print finishing or going to a printer Counterpart can't follow, closes any open question; it stays on the project as asked, then superseded (`answered` with no choices, as a pass that takes its place leaves it), and the companion reads projects stored in that state as closed. No layout shows an Ask card on a printed project: every one shows the card only while the question is open.
   - **failed:** what happened and what to do, with a retry when one applies.
 - **Sections** (segmented):
   - **Result:** the *what changed* list (added, changed, published sizes used, estimates with their tolerance), and tiles for print time, filament and printer.
@@ -444,7 +445,7 @@ Screenshots: `screens/phone-settings.jpg`, `screens/phone-settings-notifications
 - **AI:**
   - the provider and whether it's connected, plus **Test**;
   - switching provider, so long as switching doesn't need a sign-in window on the Mac. When it does, the phone says "Finish signing in on Mac mini" and the Mac shows the sign-in window by itself.
-- **Code design engine** (§8.9): the printer MCP's own `cad_status` in Counterpart's words, and **Set Up**, which the computer runs (`cad_setup`) while the row shows its progress and then the MCP's own result.
+- **Code design engine** (§8.9): the printer MCP's own `cad_status` in Counterpart's words, and **Set Up**, which the computer runs (`cad_setup`) while the row shows its progress and then the MCP's own result. A check that runs out of time (#639, Nov 12: at load ~600 it said "Counterpart couldn't check your printer MCP. Check it in Settings → Printers.") says "This computer is busy, so <MCP> is slow to answer. Counterpart is checking again." and checks again by itself (10, 20, 40, 60 s; then on the next read), keeping an earlier answer if it had one. Only an MCP that answered with an error or couldn't start sends the person to Settings → Printers. The companion tells them apart by the transport outcome, never the MCP's words.
 - **Design with Fusion** (§8.9): status and **Set up**. Being retired with Blender (§8.9).
 - **Phones and iPads:** every paired device, including the Older pairings section, with **Remove** and **Remove All**.
 - **General:** open at login, show in Dock, and keep the Mac awake while working. Each one changes the Mac.
