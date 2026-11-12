@@ -138,7 +138,12 @@ export function still(p: Project, entry: GalleryEntry): Still {
 
 /** A companion path as a file in the project's folder: renders by name, the model at its own path. */
 export function filePath(p: Project, path: string): string {
-  if (path === "model.stl") return p.current?.model.toLowerCase().endsWith(".stl") ? p.current.model : "current/model.stl";
+  // A 3MF's merged mesh sits beside it: `current/model.stl`, or a sealed design's `versions/<id>/model.stl` (#616).
+  if (path === "model.stl") {
+    const model = p.current?.model;
+    if (model?.toLowerCase().endsWith(".stl")) return model;
+    return model?.includes("/") ? `${model.slice(0, model.lastIndexOf("/"))}/model.stl` : "current/model.stl";
+  }
   if (path.startsWith("renders/")) return p.current?.renders.find((render) => render.split("/").pop() === path.slice(8)) ?? path;
   return path;
 }
@@ -167,4 +172,50 @@ export function drawnColour(colour: Colour): Colour {
     [1.0, 1.01, 1.04].forEach((m, i) => { rgb[i] = rgb[i]! + lift * floor * m; });
   }
   return "#" + rgb.map((c) => Math.round(Math.min(1, Math.max(0, c)) * 255).toString(16).padStart(2, "0").toUpperCase()).join("");
+}
+
+/**
+ * How long the stage says a picture is coming while nothing is running before it settles (#626). The computer draws a
+ * picture in seconds after a pass; a companion that can't draw one (Linux) never says so, so "coming" must end.
+ */
+export const PICTURE_PATIENCE_MS = 20_000;
+export const NOT_DRAWN_LINE = "Your computer hasn't drawn a picture of this.";
+/**
+ * The stage's one still, settled (#626; CounterpartKit `StagePicture`): the picture; "waiting" with one line while
+ * something is running or the computer says it is drawing it, or for a short while after; then a plain reason with
+ * Try Again, never an endless "coming from your computer". `waitedMs` is how long this page has waited for it.
+ */
+export type StageStillState =
+  | { state: "picture"; picture: string }
+  | { state: "waiting"; line: string }
+  | { state: "not available"; line: string; retry: boolean };
+export function stageStill(p: Project, shown: Still, label: string, unavailableLine: string, waitedMs: number, role?: GalleryKind): StageStillState {
+  if (typeof shown === "object") return { state: "picture", picture: shown.picture };
+  if (shown === "not available") return { state: "not available", line: unavailableLine, retry: false };
+  const key = role === "together" ? "together" : role === "scan" ? "scan" : role === "part" ? "part" : undefined;
+  const busy = p.state === "touching-up" || (key !== undefined && p.pictureStates?.[key] === "drawing");
+  if (busy || waitedMs < PICTURE_PATIENCE_MS) return { state: "waiting", line: `${label}: coming from your computer` };
+  // Nothing is running and no picture came: say so, and Try Again waits once more (a picture that arrives shows at once).
+  return { state: "not available", line: role ? NOT_DRAWN_LINE : unavailableLine, retry: !!role };
+}
+/**
+ * The stage's clock for one thing it waits for (#626), as `StagePicture` runs it: `watch` starts a new clock whenever
+ * what is awaited changes (another picture, another entry, Try again) and, while it waits, wakes `settle` once the
+ * patience is up; `waited` is how long that same thing has been awaited (0 for anything else).
+ */
+export function pictureClock(settle: () => void, patience = PICTURE_PATIENCE_MS) {
+  let key: string | undefined, since = 0, timer: ReturnType<typeof setTimeout> | undefined;
+  return {
+    watch(next: string, waiting: boolean) {
+      if (next === key) return;
+      clearTimeout(timer);
+      timer = undefined;
+      key = next;
+      since = Date.now();
+      if (waiting) timer = setTimeout(() => { timer = undefined; settle(); }, patience + 50);
+    },
+    waited(of: string) { return of === key ? Date.now() - since : 0; },
+    /** Unmounting forgets what it watched, so a remount (React StrictMode's included) starts the clock again. */
+    stop() { clearTimeout(timer); timer = undefined; key = undefined; },
+  };
 }

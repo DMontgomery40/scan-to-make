@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { artifact } from "./bridge";
 import type { Project } from "./types";
-import { canLocate, filePath, gallery, drawnColour, photoPicture, still, sizeText, type Still } from "./gallery";
+import { canLocate, filePath, gallery, drawnColour, photoPicture, still, sizeText, stageStill, pictureClock, type GalleryKind, type Still } from "./gallery";
 export function Picture({
   id,
   path,
@@ -259,27 +259,43 @@ export function ModelStage({ bytes, tint }: { bytes: Uint8Array; tint?: string }
 }
 /**
  * The one still picture on a project's stage (review B1/S7 on #539, CounterpartKit `Project.still(for:)`): every still
- * goes through it, and it is never a bare mark. Shown: the picture. Waiting: what is coming, in one line. Not available:
- * a symbol and one line saying so, with Try again where it can help (a fetch that failed). Never a picture of something else.
+ * goes through it, and it is never a bare mark. Shown: the picture. Waiting: what is coming, in one line, and only while
+ * something is running or for a short while (#626, `stageStill`). Not available: a symbol and one line saying so, with
+ * Try again where it can help. Never a picture of something else.
  */
-export function StagePicture({ project, still: shown, label, unavailableLine }: { project: Project; still: Still; label: string; unavailableLine: string }) {
+export function StagePicture({ project, still: shown, label, unavailableLine, role, also }: {
+  project: Project; still: Still; label: string; unavailableLine: string;
+  /** The gallery entry's kind, so a picture the computer never drew settles into its reason (#626). */
+  role?: GalleryKind;
+  /** A second sentence for the settled reason: where else to see it ("Explore in 3D shows the model itself."). */
+  also?: string;
+}) {
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const path = typeof shown === "object" ? shown.picture : undefined;
-  useEffect(() => setFailed(false), [project.id, path]);
+  const waitingKey = `${project.id}#${role ?? ""}#${label}#${shown === "waiting" ? "waiting" : path ?? "none"}#${attempt}`;
+  // Every new thing to wait for starts its own clock; Try again starts it again (`pictureClock`).
+  const [, setTick] = useState(0);
+  const clock = useRef<ReturnType<typeof pictureClock>>(undefined);
+  clock.current ??= pictureClock(() => setTick((n) => n + 1));
+  useEffect(() => clock.current!.watch(waitingKey, shown === "waiting"), [waitingKey]);
+  useEffect(() => () => clock.current?.stop(), []);
+  const settled = stageStill(project, shown, label, unavailableLine, clock.current.waited(waitingKey), role);
   const coming = `${label}: coming from your computer`;
   if (path && !failed)
     return (
       <Picture key={`${path}#${attempt}`} id={project.id} path={path} alt={`${label}, as your computer drew it`} className="hero-picture"
         loadingText={coming} onFailed={() => setFailed(true)} />
     );
-  const line = path ? "The picture didn't come from your computer." : shown === "waiting" ? coming : unavailableLine;
-  const state = shown === "waiting" ? "loading" : "not available";
+  const settledLine = settled.state === "picture" ? "" : settled.state === "not available" && settled.retry && also ? `${settled.line} ${also}` : settled.line;
+  const line = path ? "The picture didn't come from your computer." : settledLine;
+  const retry = !!path || (settled.state === "not available" && settled.retry);
+  const state = !path && settled.state === "waiting" ? "loading" : "not available";
   return (
     <div className="picture-placeholder hero-picture stage-still" role="img" aria-label={`${label}. ${line}`} data-state={state}>
-      <span aria-hidden="true">{shown === "waiting" ? "…" : "◇"}</span>
+      <span aria-hidden="true">{state === "loading" ? "…" : "◇"}</span>
       <p>{line}</p>
-      {path && (
+      {retry && (
         <button onClick={() => { setFailed(false); setAttempt((n) => n + 1); }}>Try again</button>
       )}
     </div>
@@ -346,6 +362,7 @@ export function Stage({ project, locate }: { project: Project; locate?: () => vo
         )
       ) : (
         <StagePicture project={project} still={shown} label={entry?.label ?? (first ? "Your photo" : project.title ?? "Your project")}
+          role={entry?.kind} also={turnable && filePath(project, "model.stl").toLowerCase().endsWith(".stl") ? "Explore in 3D shows the model itself." : undefined}
           unavailableLine={!entry ? "Nothing to show yet." : entry.kind === "plate" ? "No picture of this plate came with the file." : "Your computer couldn't draw a picture of this."} />
       )}
       {entries.length > 1 && (
