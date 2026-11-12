@@ -640,6 +640,39 @@ final class LayoutParityUITests: XCTestCase {
         XCTAssertFalse(other.descendants(matching: .any).matching(identifier: "design-history").firstMatch.exists, "one design: the page is today's page")
     }
 
+    /// #616 follow-up: the page's cards and Status act on the newest design, so with an earlier design on the stage they
+    /// wait for Show the newest, as the Mac's and Android's do. Did it fit? here would answer for the newest print.
+    func testAnEarlierDesignOnTheStageLeavesTheNewestsCardsAndStatusAloneWithProjectsPresent() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-CounterpartFixtures", NSTemporaryDirectory() + "no-assets", "-CounterpartFixtureSet", "design-history",
+                               "-CounterpartOpen", "counterpart://project/6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a04"]
+        app.launch()
+        let works = app.buttons["it-works"], changes = app.buttons["needs-changes"]
+        XCTAssertTrue(works.waitForExistence(timeout: 20), "the newest design's print asks Did it fit?")
+        XCTAssertTrue(works.isEnabled)
+        let earlier = app.buttons["design-30000000-0000-4000-8000-000000000001"]
+        scrollProjectPage(app, until: earlier)
+        earlier.tap()
+        let bar = app.descendants(matching: .any).matching(identifier: "viewing-earlier-design").firstMatch
+        XCTAssertTrue(bar.waitForExistence(timeout: 5))
+        XCTAssertFalse(works.exists && works.isEnabled, "It works would answer for the newest design, not the one shown")
+        XCTAssertFalse(changes.exists && changes.isEnabled, "Needs changes would answer for the newest design, not the one shown")
+        app.buttons["More"].tap()
+        let status = app.buttons["Status"]
+        XCTAssertTrue(status.waitForExistence(timeout: 5))
+        XCTAssertFalse(status.isEnabled, "the project's status waits until the newest design is shown again")
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Earlier design — the newest's status waits"; shot.lifetime = .keepAlways; add(shot)
+        // Close the menu without choosing anything.
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)).tap()
+        XCTAssertTrue(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: status)], timeout: 5) == .completed)
+        let newest = app.buttons["Show the newest"]
+        scrollProjectPage(app, until: newest)
+        newest.tap()
+        XCTAssertTrue(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: bar)], timeout: 5) == .completed)
+        XCTAssertTrue(works.waitForExistence(timeout: 5))
+        XCTAssertTrue(works.isEnabled, "the newest design on the stage: its card answers again")
+    }
+
     func testACopysScanMakesAFitFromItsPageWithoutScanningAgainWithProjectsPresent() {
         let source = "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01"
         let app = XCUIApplication()

@@ -24,6 +24,8 @@ struct ProjectView: View {
     /// Another project, from a line that names it (where this scan came from, what else was made from it).
     var openProject: (String) -> Void = { _ in }
     @State private var viewingDesign: String?
+    /// An earlier design is on the stage: what acts on the project (its cards, Status, the bar) waits for the newest (#616).
+    private var earlierShown: Bool { viewingDesign != nil }
     @State private var section = ProjectSection.result
     @State private var note = ""
     @State private var attempts = NoteAttempts()
@@ -307,7 +309,7 @@ struct ProjectView: View {
                                 store.corrections.sent(pending, for: object.id)
                                 return next
                             } }
-                        }.disabled(working || away)
+                        }.disabled(working || away || earlierShown)
                     }.padding(.horizontal, 20)
                 }
                 if let previous = object.completionUndoStatus {
@@ -315,13 +317,15 @@ struct ProjectView: View {
                         Label("Marked Done", systemImage: "checkmark.circle.fill")
                         Spacer()
                         Button("Undo") { act { try await store.mac.client.setStatus(object.id, previous) } }
-                            .disabled(working || away)
+                            .disabled(working || away || earlierShown)
                     }.font(.subheadline).padding(.horizontal, 20)
                 }
                 // Every card's actions need the Mac (Try Again, Did it fit?, an answer, Send, Scan): they wait while it
                 // isn't answering. A print's card handles its own, so Watch the Print still opens (X100).
+                // They act on the newest design: with an earlier one on the stage they wait for Show the newest, as the
+                // Mac's and Android's do (#616).
                 stateCard(object, words).padding(.horizontal, 16)
-                    .disabled(away && !(words.phase == .preparing || words.phase == .printing || object.printConfirmation != nil))
+                    .disabled(earlierShown || (away && !(words.phase == .preparing || words.phase == .printing || object.printConfirmation != nil)))
                     .id(Self.answerCard)
                     .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(Self.pageSpace)).maxY.rounded() } action: { bottom in
                         // Where the card ends below the stage, in the order the card sits now under the title. Measured once
@@ -412,7 +416,7 @@ struct ProjectView: View {
                         Button("Rename Project", systemImage: "pencil") { projectName = words.title; renaming = true }.disabled(away)
                     }
                     if store.projectSettings {
-                        statusChoices(object, words).disabled(away)
+                        statusChoices(object, words).disabled(away || earlierShown)
                         Divider()
                     }
                     if object.canMakeFromScan {
@@ -430,7 +434,7 @@ struct ProjectView: View {
         }
             // A failed pass that left an earlier model still offers changes and Print; with no model, the failed card's Try Again is the way on.
             if object.canAskForChanges || (words.phase != .needsYou && !(words.phase == .failed && object.current == nil)) {
-                bottomBar(object, words).disabled(viewingDesign != nil).padding(.top, 8)
+                bottomBar(object, words).disabled(earlierShown).padding(.top, 8)
             }
         }
         .background(Color.black)
