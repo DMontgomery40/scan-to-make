@@ -291,7 +291,7 @@ struct ProjectView: View {
                         HStack {
                             Button("Try Again") { store.retryQueuedChange(object) }.disabled(object.changesWait)
                             Button("Discard Saved Change") { store.discardQueuedChange(object) }
-                        }.disabled(working || away)
+                        }.disabled(working || away || earlierShown)
                     }.padding(.horizontal, 20)
                 }
                 if let pending = object.pendingFollowup {
