@@ -207,6 +207,18 @@ fn referenced(o: &Value, path: &str) -> bool {
     {
         return true;
     }
+    // A sealed design's own files (#616): its model, renders and pictures, exactly as its `versions[]` entry lists them.
+    if let Some(versions) = o["versions"].as_array() {
+        for version in versions {
+            let listed = [&version["result"]["model"], &version["picture"]]
+                .into_iter()
+                .chain(version["result"]["renders"].as_array().into_iter().flatten())
+                .chain(version["pictures"].as_object().into_iter().flat_map(|m| m.values()));
+            if listed.into_iter().any(|v| v.as_str() == Some(path)) {
+                return true;
+            }
+        }
+    }
     for list in ["plates", "passes", "messages"] {
         if let Some(items) = o[list].as_array() {
             for item in items {
@@ -749,6 +761,18 @@ mod tests {
             "photos/other.jpg",
         ] {
             assert!(!referenced(&o, p));
+        }
+    }
+    #[test]
+    fn a_sealed_designs_listed_files_are_readable_and_nothing_else_under_versions() {
+        let id = "10000000-0000-4000-8000-000000000001";
+        let o = json!({"versions":[{"id":id,"result":{"model":format!("versions/{id}/model.stl"),"renders":[format!("versions/{id}/renders/front.png")]},
+            "picture":format!("versions/{id}/pictures/part.png"),"pictures":{"part":format!("versions/{id}/pictures/part.png"),"scan":format!("versions/{id}/pictures/scan.png")}}]});
+        for p in ["model.stl", "renders/front.png", "pictures/part.png", "pictures/scan.png"] {
+            assert!(referenced(&o, &format!("versions/{id}/{p}")), "{p}");
+        }
+        for p in [format!("versions/{id}/design.json"), format!("versions/{id}/../../object.json"), "versions/other/model.stl".to_string()] {
+            assert!(!referenced(&o, &p), "{p}");
         }
     }
     #[test]
