@@ -222,7 +222,12 @@ if(handoffConfig&&printHandoff){
 }
 if(handoffConfig&&printHandoff&&captureDirectory){
   const objectStore=new ObjectStore(join(captureDirectory,'objects'));
-  await objectStore.migrateVersions({eventsPath: join(dataRoot,'events.ndjson'), stlInfo: path=>printerStlSize(runningHandoff()!,path)});
+  // Earlier designs and prints (#616). Never gates serving projects: a project it can't migrate is logged and stays as it was.
+  const versionsReport=await objectStore.migrateVersions({eventsPath: join(dataRoot,'events.ndjson'), stlInfo: path=>printerStlSize(runningHandoff()!,path)})
+    .catch((error:unknown)=>({migrated:[],skipped:[],failed:[{id:'*',reason:String(error)}]}));
+  for(const row of versionsReport.skipped)console.warn(`designs: project ${row.id} not migrated yet: ${row.reason}`);
+  for(const row of versionsReport.failed)console.warn(`designs: project ${row.id} not migrated (tried again next start): ${row.reason}`);
+  if(versionsReport.migrated.length)console.log(`designs: restored history for ${versionsReport.migrated.length} project(s)`);
   objectStoreForEvents=objectStore;
   // Dispatched prints keep printing: ObjectService.resume() picks their monitors back up.
   await objectStore.recoverInterrupted({keepPrinting:true});

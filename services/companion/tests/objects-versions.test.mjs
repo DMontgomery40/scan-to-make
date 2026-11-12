@@ -149,3 +149,73 @@ test('a new design of a printed thing is announced as new, and the printed one a
   assert.equal(words.body, 'The printed one is unchanged · 89 × 105 × 80 mm');
   assert.equal(eventWords('pass.ready', undefined, {title: 'Hook'}).title, 'Hook is ready to print');
 });
+
+// ---- #602 review (Muse, 2026-11-12): first-start migration on real data ----
+
+/** A designed project on disk as an older build left it: `designs` finished passes, each with its own model and render. */
+async function legacyProject(store, id, designs, extra = {}) {
+  const dir = store.dir(id); await mkdir(dir, {recursive: true});
+  const passes = [];
+  for (let i = 0; i < designs; i++) {
+    const out = join(dir, 'passes', `pass-${i}`, 'out'); await mkdir(out, {recursive: true});
+    await writeFile(join(out, 'touched.stl'), STL(i + 1)); await writeFile(join(out, 'front.png'), `render ${id} ${i}`);
+    passes.push({startedAtMs: 1000 + i * 1000, endedAtMs: 1100 + i * 1000, status: 'done', dir: `passes/pass-${i}`, summary: `Design ${i + 1}`});
+  }
+  await mkdir(join(dir, 'current'), {recursive: true}); await writeFile(join(dir, 'current', 'model.stl'), STL(designs));
+  const object = {id, state: 'ready', kind: 'fit', photos: [], passes, messages: [], createdAtMs: 1, updatedAtMs: 9000, current: {model: 'current/model.stl', renders: []}, ...extra};
+  await writeFile(join(dir, 'object.json'), JSON.stringify(object));
+  return object;
+}
+const listVersions = async dir => (await import('node:fs/promises')).readdir(join(dir, 'versions')).catch(() => []);
+
+test('review 1: a project that fails part-way is left exactly as it was, and the others still migrate', async () => {
+  const root = await tempDir('versions-isolated-'); const store = new ObjectStore(join(root, 'objects'));
+  const broken = '00000000-0000-4000-8000-0000000000b1', fine = '00000000-0000-4000-8000-0000000000b2';
+  await legacyProject(store, broken, 2); await legacyProject(store, fine, 2);
+  // Its second design can't be read (fails as a full disk would: after the first design was already copied).
+  const {chmod} = await import('node:fs/promises');
+  const unreadable = join(store.dir(broken), 'passes', 'pass-1', 'out', 'touched.stl');
+  await chmod(unreadable, 0o000);
+  const before = await readFile(join(store.dir(broken), 'object.json'), 'utf8');
+  const report = await store.migrateVersions({stlInfo: async () => [1, 2, 3], freeBytes: async () => 1e12});
+  assert.deepEqual(report.failed.map(f => f.id), [broken]);
+  assert.deepEqual(report.migrated, [fine]);
+  assert.equal(await readFile(join(store.dir(broken), 'object.json'), 'utf8'), before, 'the record is untouched');
+  assert.deepEqual(await listVersions(store.dir(broken)), [], 'no copy of its first design is left behind');
+  const other = await store.get(fine);
+  assert.equal(other.versionsV1, true); assert.equal(other.versions.length, 2);
+  // Readable again, the next start migrates it.
+  await chmod(unreadable, 0o644);
+  assert.deepEqual((await store.migrateVersions({freeBytes: async () => 1e12})).migrated, [broken]);
+});
+
+test('review 1: a project is skipped, not migrated, when its copies would leave the disk short', async () => {
+  const root = await tempDir('versions-space-'); const store = new ObjectStore(join(root, 'objects'));
+  const id = '00000000-0000-4000-8000-0000000000c1'; await legacyProject(store, id, 3);
+  const before = await readFile(join(store.dir(id), 'object.json'), 'utf8');
+  const report = await store.migrateVersions({freeBytes: async () => 2 * 1024 ** 3 + 10, reserveBytes: 2 * 1024 ** 3});
+  assert.deepEqual(report.skipped.map(s => s.id), [id]);
+  assert.match(report.skipped[0].reason, /MB free/);
+  assert.equal(await readFile(join(store.dir(id), 'object.json'), 'utf8'), before);
+  assert.deepEqual(await listVersions(store.dir(id)), []);
+  // With room, the next start migrates it.
+  const later = await store.migrateVersions({freeBytes: async () => 1e12});
+  assert.deepEqual(later.migrated, [id]);
+});
+
+test('review 2: a migration killed twice before its record was written leaves one set of copies and the right result', async () => {
+  const root = await tempDir('versions-killed-'); const store = new ObjectStore(join(root, 'objects'));
+  const id = '00000000-0000-4000-8000-0000000000d1'; const object = await legacyProject(store, id, 2);
+  // Two starts that copied and died before object.json: their copies are on disk, the record never named them.
+  const first = await migrateProjectVersions(object, store.dir(id), {stlInfo: async () => [1, 2, 3]});
+  const second = await migrateProjectVersions(object, store.dir(id), {stlInfo: async () => [1, 2, 3]});
+  // And a third died mid-copy, leaving a temp folder.
+  await mkdir(join(store.dir(id), 'versions', `${first.versions[0].id.slice(0, -1)}0.sealing`), {recursive: true});
+  assert.deepEqual(second.versions.map(v => v.id), first.versions.map(v => v.id), 'the same design gets the same id every time');
+  const report = await store.migrateVersions({freeBytes: async () => 1e12});
+  assert.deepEqual(report.migrated, [id]);
+  const migrated = await store.get(id);
+  assert.deepEqual(migrated.versions.map(v => v.id), first.versions.map(v => v.id));
+  assert.deepEqual((await listVersions(store.dir(id))).sort(), migrated.versions.map(v => v.id).sort(), 'one folder per design, nothing else');
+  for (const version of migrated.versions) assert.ok((await readFile(join(store.dir(id), version.result.model))).length > 0);
+});

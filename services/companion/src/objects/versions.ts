@@ -1,5 +1,5 @@
-import {createHash, randomUUID} from 'node:crypto';
-import {cp, mkdir, readFile, readdir, rename, rm, stat} from 'node:fs/promises';
+import {createHash} from 'node:crypto';
+import {cp, mkdir, readFile, readdir, rename, rm, stat, statfs} from 'node:fs/promises';
 import {basename, dirname, join, relative, resolve} from 'node:path';
 import type {StmObject} from './store.js';
 
@@ -22,19 +22,36 @@ const hash = async (file: string) => createHash('sha256').update(await readFile(
 const exists = async (file: string) => stat(file).then(s => s.isFile(), () => false);
 const inside = (root: string, file: string) => { const path = relative(resolve(root), resolve(file)); return path !== '..' && !path.startsWith('../') && !path.startsWith('/'); };
 
-/** Copy a finished result into a sealed folder before publishing its record. No links to mutable current/. */
-export async function sealVersion(object: StmObject, dir: string, result: NonNullable<StmObject['current']>, pass: {startedAtMs?: number; endedAtMs: number; note?: string}): Promise<DesignVersion> {
+/**
+ * A design's id from what it is, not from when it was copied (#602 review, finding 2): the project, the pass that made it
+ * (or `current` for a design with no pass) and its model bytes. A migration interrupted after some copies and run again
+ * finds the same ids, reuses those folders and copies nothing twice. UUID-shaped, as clients and routes expect.
+ */
+export function designId(projectId: string, source: string | number, modelSha256: string): string {
+  const h = createHash('sha256').update(`${projectId}\n${source}\n${modelSha256}`).digest('hex');
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-8${h.slice(13, 16)}-${(8 | (parseInt(h[16]!, 16) & 3)).toString(16)}${h.slice(17, 20)}-${h.slice(20, 32)}`;
+}
+const isFolder = (path: string) => stat(path).then(s => s.isDirectory(), () => false);
+
+/**
+ * Copy a finished result into a sealed folder before publishing its record. No links to mutable current/. The copy is
+ * made in `versions/<id>.sealing` and renamed into place whole; a folder already sealed under the same id is reused.
+ * `created` collects the ids this call sealed anew, so a caller that fails later can remove exactly those.
+ */
+export async function sealVersion(object: StmObject, dir: string, result: NonNullable<StmObject['current']>, pass: {startedAtMs?: number; endedAtMs: number; note?: string; created?: Set<string>}): Promise<DesignVersion> {
   const modelSha256 = await hash(join(dir, result.model));
   const previous = object.versions?.at(-1);
   if (previous?.modelSha256 === modelSha256) return previous;
-  const id = randomUUID(), prefix = join('versions', id), temp = join(dir, `${prefix}.sealing`);
-  await mkdir(temp, {recursive: true});
+  const id = designId(object.id, pass.startedAtMs ?? 'current', modelSha256), prefix = join('versions', id), temp = join(dir, `${prefix}.sealing`);
+  const reused = await isFolder(join(dir, prefix));
+  // A temp folder left by an interrupted copy is never trusted: start it again.
+  await rm(temp, {recursive: true, force: true});
+  if (!reused) await mkdir(temp, {recursive: true});
   const paths = new Map<string, string>();
   const copy = async (path: string, name: string) => {
     if (!inside(dir, join(dir, path))) throw new Error('A design file must belong to its project.');
     if (!await exists(join(dir, path))) return undefined;
-    await mkdir(dirname(join(temp, name)), {recursive: true});
-    await cp(join(dir, path), join(temp, name));
+    if (!reused) { await mkdir(dirname(join(temp, name)), {recursive: true}); await cp(join(dir, path), join(temp, name)); }
     const target = join(prefix, name); paths.set(path, target); return target;
   };
   try {
@@ -51,12 +68,15 @@ export async function sealVersion(object: StmObject, dir: string, result: NonNul
         const file = await copy(path, join('design', basename(path))); if (file) saved[key] = file;
         else if (key === 'inputs') {
           // Code input snapshots are directories; copy the full tree, independently.
-          if (inside(dir, join(dir, path))) { await cp(join(dir, path), join(temp, 'design', 'inputs'), {recursive: true}); saved[key] = join(prefix, 'design', 'inputs'); }
+          if (inside(dir, join(dir, path)) && await isFolder(join(dir, path))) {
+            if (!reused) await cp(join(dir, path), join(temp, 'design', 'inputs'), {recursive: true});
+            saved[key] = join(prefix, 'design', 'inputs');
+          }
         }
       }
       design = saved as typeof design;
     }
-    await rename(temp, join(dir, prefix));
+    if (!reused) { await rename(temp, join(dir, prefix)); pass.created?.add(id); }
     return {id, sealedAtMs: pass.endedAtMs, ...(pass.startedAtMs !== undefined ? {passStartedAtMs: pass.startedAtMs} : {}), ...(pass.note ? {note: pass.note} : {}), modelSha256,
       result: {...result, model: paths.get(result.model)!, renders, ...(design ? {design} : {})}};
   } catch (error) { await rm(temp, {recursive: true, force: true}); throw error; }
@@ -93,6 +113,53 @@ const time = (event: HistoryEvent) => event.atMs ?? Date.parse(event.at ?? '');
 /** One non-destructive migration, called before startup recovery. All source folders remain intact. */
 export async function migrateProjectVersions(object: StmObject, dir: string, options: {events?: HistoryEvent[]; stlInfo?: (path: string) => Promise<[number, number, number] | undefined>} = {}): Promise<StmObject> {
   if (object.versionsV1) return object;
+  // Copies sealed by this run. If anything fails before the record is written, exactly these go again, so the project is
+  // left as it was (finding 1); folders from an earlier interrupted run are reused by id, never copied twice (finding 2).
+  const created = new Set<string>();
+  try {
+    const migrated = await migrateOnce(object, dir, options, created);
+    // Nothing under versions/ that the record doesn't name survives: an interrupted run's copies, or temp folders.
+    const keep = new Set(migrated.versions?.map(v => v.id));
+    for (const name of await readdir(join(dir, 'versions')).catch(() => [] as string[]))
+      if (!keep.has(name) && /^[0-9a-f-]{36}(\.sealing)?$/.test(name)) await rm(join(dir, 'versions', name), {recursive: true, force: true});
+    return migrated;
+  } catch (error) {
+    for (const id of created) await rm(join(dir, 'versions', id), {recursive: true, force: true}).catch(() => undefined);
+    for (const name of await readdir(join(dir, 'versions')).catch(() => [] as string[]))
+      if (name.endsWith('.sealing')) await rm(join(dir, 'versions', name), {recursive: true, force: true}).catch(() => undefined);
+    throw error;
+  }
+}
+
+/** An upper bound on what migrating a project copies: every finished pass's output and code runs, and its kept model. */
+export async function migrationBytes(object: StmObject, dir: string): Promise<number> {
+  const size = async (path: string): Promise<number> => {
+    const info = await stat(path).catch(() => undefined);
+    if (!info) return 0;
+    if (!info.isDirectory()) return info.size;
+    let total = 0;
+    for (const name of await readdir(path).catch(() => [] as string[])) total += await size(join(path, name));
+    return total;
+  };
+  if (object.versionsV1 || object.kind === 'published') return 0;
+  let total = 0;
+  for (const pass of object.passes) {
+    if (!['done', 'unchanged'].includes(pass.status ?? '') || !pass.dir) continue;
+    const folder = resolve(dir, pass.dir);
+    if (!inside(dir, folder)) continue;
+    total += await size(join(folder, 'out')) + await size(join(folder, 'cad'));
+  }
+  if (object.current) total += await size(join(dir, 'current'));
+  return total;
+}
+
+/** Free bytes on the volume holding `dir`. */
+export async function freeBytes(dir: string): Promise<number> {
+  const info = await statfs(dir);
+  return Number(info.bavail) * Number(info.bsize);
+}
+
+async function migrateOnce(object: StmObject, dir: string, options: {events?: HistoryEvent[]; stlInfo?: (path: string) => Promise<[number, number, number] | undefined>}, created: Set<string>): Promise<StmObject> {
   const versions: DesignVersion[] = [...(object.versions ?? [])];
   if (object.kind !== 'published') for (const pass of [...object.passes].sort((a,b) => a.startedAtMs - b.startedAtMs)) {
     if (!['done', 'unchanged'].includes(pass.status ?? '') || pass.endedAtMs === undefined || !pass.dir) continue;
@@ -122,7 +189,7 @@ export async function migrateProjectVersions(object: StmObject, dir: string, opt
       }
     }
     const result = {model: relative(dir, model), renders, ...(pass.summary ? {summary: pass.summary} : {}), ...(sizeMm ? {sizeMm} : {}), ...(pass.engine ? {engine: pass.engine} : {}), ...(design ? {design} : {})};
-    const sealed = await sealVersion({...object, versions}, dir, result, {startedAtMs: pass.startedAtMs, endedAtMs: pass.endedAtMs, ...(pass.note ? {note: pass.note} : {})});
+    const sealed = await sealVersion({...object, versions}, dir, result, {startedAtMs: pass.startedAtMs, endedAtMs: pass.endedAtMs, ...(pass.note ? {note: pass.note} : {}), created});
     if (!versions.some(v => v.id === sealed.id)) {
       // Keep the merged STL and part files as well, unchanged, for later version actions.
       for (const name of await readdir(out)) if (name === 'touched.stl' || /^part_.*\.stl$/.test(name))
@@ -132,7 +199,7 @@ export async function migrateProjectVersions(object: StmObject, dir: string, opt
   }
   // Imported models and projects whose pass folders are gone still keep the one design that survives.
   if (!versions.length && object.kind !== 'published' && object.current && await exists(join(dir, object.current.model))) {
-    versions.push(await sealVersion(object, dir, object.current, {endedAtMs: object.updatedAtMs}));
+    versions.push(await sealVersion(object, dir, object.current, {endedAtMs: object.updatedAtMs, created}));
   }
   const versionAt = (at: number) => versions.filter(v => v.sealedAtMs <= at).at(-1)?.id;
   let migrated: StmObject = {...object, versions, prints: [...(object.prints ?? [])]};
