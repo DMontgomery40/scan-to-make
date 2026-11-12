@@ -1069,3 +1069,14 @@ test("a wait or a start that never hears back says so, and any other word stops 
   await new Promise((resolve) => setTimeout(resolve, 100));
   assert.deepEqual(expired, [reply.update.mcpId, "stuck"], "stopping clears every clock");
 });
+
+// #630: the companion's "nothing is coming out of the nozzle" line, from the fixture every client decodes. The Print tab
+// lists `print.live.problems` and every row and header shows `words()`: both are the line, with no Linux-only copy.
+test("a print whose camera shows nothing coming out says so on its card and in its Print tab", () => {
+  const doc = JSON.parse(readFileSync(new URL("../../../packages/contracts/fixtures/print-check.json", import.meta.url), "utf8"));
+  const project = doc.project as Project;
+  assert.equal(words(project), doc.line);
+  assert.equal(project.print?.live?.problems[0]?.message, doc.line);
+  assert.equal(doc.event.type, "print.check");
+  assert.equal(doc.event.body, doc.line);
+});

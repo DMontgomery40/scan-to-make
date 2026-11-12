@@ -25,6 +25,7 @@ public enum SettingsSchema {
         .init(id: "print.paused", label: "Print paused", phone: true, mac: true),
         .init(id: "print.done", label: "Print done", phone: true, mac: true),
         .init(id: "print.failed", label: "Print failed", phone: true, mac: true),
+        .init(id: "print.check", label: "Nothing coming out of the nozzle", phone: true, mac: true),
         .init(id: "print.not-started", label: "Print didn't start", phone: true, mac: true),
         .init(id: "print.cancelled", label: "Print stopped", phone: true, mac: false),
         .init(id: "print.unreachable", label: "Lost contact with the printer", phone: true, mac: false),
@@ -211,7 +212,7 @@ public enum PhoneNotificationMigration {
         let groups: [String: [String]] = [
             "ready": ["pass.ready"], "ask": ["pass.ask"], "confirm": ["print.confirm"],
             "live": ["live-activity"], "first": ["print.first-layer"], "paused": ["print.paused"],
-            "done": ["print.done"], "problem": ["pass.failed", "print.failed", "print.not-started"],
+            "done": ["print.done"], "problem": ["pass.failed", "print.failed", "print.not-started", "print.check"],
             "lost": ["print.unreachable"],
         ]
         let saved = notifications.devices[deviceId] ?? [:]

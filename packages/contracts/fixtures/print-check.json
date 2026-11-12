@@ -1,0 +1,84 @@
+{
+  "about": "#630: the camera shows nothing coming out of the nozzle. Written by the companion (services/companion/tests/camera-check.test.mjs checks it still says this); every client decodes it.",
+  "event": {
+    "v": 1,
+    "seq": 412,
+    "id": "5468cf4d-81d5-46ab-b8db-2e3342938a53",
+    "at": "2026-11-11T19:21:52.000Z",
+    "type": "print.check",
+    "projectId": "53a48b5e-d3f1-4b77-9e8e-aa2cad0a6157",
+    "printId": "faf29c4d-f755-48ae-955b-e9ab323faab9",
+    "destinationId": "current",
+    "printerName": "Bambu Lab P1S",
+    "title": "Check Forester on Bambu Lab P1S",
+    "body": "Nothing seems to be coming out of the nozzle on Bambu Lab P1S: the first layer's area is empty in the camera. The printer doesn't detect this itself. Check the print.",
+    "notify": "timeSensitive",
+    "data": {
+      "state": "printing",
+      "progress": 7.5,
+      "remainingSec": 5000,
+      "layer": 20,
+      "totalLayers": 265,
+      "problems": [
+        {
+          "code": "physical-no-extrusion",
+          "message": "Nothing seems to be coming out of the nozzle on Bambu Lab P1S: the first layer's area is empty in the camera. The printer doesn't detect this itself. Check the print."
+        }
+      ]
+    },
+    "frame": "prints/faf29c4d-f755-48ae-955b-e9ab323faab9/frames/5468cf4d-81d5-46ab-b8db-2e3342938a53.jpg"
+  },
+  "project": {
+    "id": "53a48b5e-d3f1-4b77-9e8e-aa2cad0a6157",
+    "title": "Forester",
+    "state": "printing",
+    "status": {
+      "phase": "printing",
+      "text": "Nothing seems to be coming out of the nozzle on Bambu Lab P1S: the first layer's area is empty in the camera. The printer doesn't detect this itself. Check the print.",
+      "detail": "Nothing seems to be coming out of the nozzle on Bambu Lab P1S: the first…",
+      "symbol": "exclamationmark.triangle",
+      "tint": "orange"
+    },
+    "print": {
+      "printId": "faf29c4d-f755-48ae-955b-e9ab323faab9",
+      "destination": {
+        "id": "current",
+        "name": "Bambu Lab P1S"
+      },
+      "dispatchedAt": "2026-11-11T19:01:00.000Z",
+      "monitor": {
+        "phase": "watching",
+        "startedAt": "2026-11-11T19:01:00.000Z",
+        "milestonesSent": [],
+        "firstLayerSent": false,
+        "checkSent": true
+      },
+      "live": {
+        "source": "counterpart",
+        "observedAt": "2026-11-11T19:22:00.000Z",
+        "state": "printing",
+        "job": {
+          "name": "Forester",
+          "progress": 7.5,
+          "remainingSec": 5000,
+          "layer": 20,
+          "totalLayers": 265
+        },
+        "problems": [
+          {
+            "code": "physical-no-extrusion",
+            "severity": "error",
+            "message": "Nothing seems to be coming out of the nozzle on Bambu Lab P1S: the first layer's area is empty in the camera. The printer doesn't detect this itself. Check the print."
+          }
+        ]
+      },
+      "events": [
+        {
+          "atMs": 1794424912000,
+          "message": "The camera showed nothing coming out of the nozzle. Check the print."
+        }
+      ]
+    }
+  },
+  "line": "Nothing seems to be coming out of the nozzle on Bambu Lab P1S: the first layer's area is empty in the camera. The printer doesn't detect this itself. Check the print."
+}

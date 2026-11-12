@@ -290,3 +290,19 @@ test("an MCP's verdict from another client's observation still raises the check 
   assert.match(check.frame, /^prints\/.+\.jpg$/, 'a fresh camera frame instead');
   assert.match(check.data.problems[0].message, /the print's area is empty in the camera/);
 });
+
+test('the shared print.check fixture every client decodes is exactly what the companion says (packages/contracts/fixtures/print-check.json)', async () => {
+  const {CounterpartEventSchema, PrintLiveSchema, PrintMonitorSchema, ObjectStatusSchema} = await import('@scan-to-make/contracts/counterpart');
+  const shared = JSON.parse(readFileSync(new URL('../../../packages/contracts/fixtures/print-check.json', import.meta.url), 'utf8'));
+  const event = CounterpartEventSchema.parse(shared.event);
+  assert.equal(event.type, 'print.check');
+  assert.deepEqual(eventWords('print.check', event.data, {title: 'Forester', printer: event.printerName}), {title: event.title, body: event.body, notify: event.notify});
+  assert.equal(event.body, shared.line);
+  PrintMonitorSchema.parse(shared.project.print.monitor);
+  const live = PrintLiveSchema.parse(shared.project.print.live);
+  assert.equal(live.problems[0].message, shared.line);
+  // The status line is the one field every layout's print card shows (iPhone/iPad and Mac: status.text; Android: Words.kt; Linux: words()).
+  assert.deepEqual(ObjectStatusSchema.parse(shared.project.status), objectStatus(shared.project));
+  assert.equal(shared.project.status.text, shared.line);
+  assert.equal(shared.project.print.events[0].message, printLogLine('print.check'));
+});
