@@ -226,10 +226,10 @@ struct ProjectGalleryView: View {
     /// What the stage's AR chip can do for an entry (Nov 11: one AR control, not a chip and a second button). A part is
     /// prepared on tap; the scan is Object Capture's own USDZ. Together, a plate and a multi-colour 3MF's picture have no
     /// AR file the phone can make, so they offer none. While the model comes the chip is there and says so; when it didn't
-    /// come, the chip asks for it again (#606, David: "ar is gone").
+    /// come, the chip waits, dimmed, for the stage's Try Again (#606, David: "ar is gone").
     enum ARChip: Equatable { case show(URL), prepare(URL), preparing, failed(URL), failedScan(URL), needsMac, coming, didntCome(String) }
 
-    /// The chip while the model a chip needs isn't on this phone yet: coming, or didn't come (asks for it again).
+    /// The chip while the model a chip needs isn't on this phone yet: coming, or didn't come (the stage's Try Again asks again).
     private func waiting(for path: String) -> ARChip? {
         switch store.models.fetch(project, path) {
         case .failed?, .refused?: return .didntCome(path)
@@ -285,10 +285,11 @@ struct ProjectGalleryView: View {
             Button {} label: { HStack(spacing: 6) { ProgressView().controlSize(.small); Text("AR") } }
                 .stageButton().disabled(true).accessibilityLabel("AR").accessibilityValue("loading")
                 .accessibilityHint("The model is coming from your Mac").accessibilityIdentifier("gallery-ar")
-        case .didntCome(let path):
-            Button { store.models.retry(project, path) } label: { Label("Try AR Again", systemImage: "arkit") }
-                .stageButton().accessibilityValue("failed")
-                .accessibilityHint("The model didn’t come from your Mac; this asks for it again").accessibilityIdentifier("gallery-ar")
+        case .didntCome:
+            // One Try Again (board X100): the stage's line already asks for the model again, so the chip only says why AR waits.
+            Button {} label: { Label("AR", systemImage: "arkit") }
+                .stageButton().disabled(true).accessibilityValue("failed")
+                .accessibilityHint("The model didn’t come from your Mac; Try Again on the stage asks for it again").accessibilityIdentifier("gallery-ar")
         case .needsMac:
             Button {} label: { Label("AR needs your Mac", systemImage: "arkit") }
                 .stageButton().disabled(true).accessibilityValue("needs-mac")
