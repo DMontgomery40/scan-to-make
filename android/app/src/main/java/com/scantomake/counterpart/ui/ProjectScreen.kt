@@ -86,6 +86,8 @@ import com.scantomake.counterpart.api.ProjectAction
 import com.scantomake.counterpart.api.ProjectPhase
 import com.scantomake.counterpart.api.ProjectStatus
 import com.scantomake.counterpart.api.ProjectWords
+import com.scantomake.counterpart.api.ProjectConversation
+import com.scantomake.counterpart.api.showingDesign
 import com.scantomake.counterpart.app.AppState
 import com.scantomake.counterpart.app.Counterpart
 import com.scantomake.counterpart.app.Media
@@ -133,6 +135,8 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
     var askProblem by remember { mutableStateOf<String?>(null) }
     val messagePhotos = remember { mutableStateOf(listOf<File>()) }
     var noteAttempt by remember { mutableStateOf<NoteAttempt?>(null) }
+    // An earlier design on the stage (#616): its own pictures and state; the project's actions wait for the newest.
+    var viewingDesign by remember(id) { mutableStateOf<String?>(null) }
 
     LaunchedEffect(id) { state.library.opened(id); if (state.reload(id)?.code == "not-found") back() }
     // The link came back (the event stream's recovery): the page reads the project again by itself.
@@ -188,7 +192,8 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
                                 if (p != null) state.show(p) else state.reload(id)
                             }
                         })
-                        ProjectStatus.choices.forEach { s ->
+                        // The project's status waits until the newest design is shown again (#616).
+                        if (viewingDesign == null) ProjectStatus.choices.forEach { s ->
                             DropdownMenuItem({ Text("Status: ${s.label}" + if (project.projectStatus == s) "  ✓" else "") }, enabled = !away, onClick = {
                                 menu = false; run("status") { app.companion.setStatus(id, s)?.let(state::show) ?: state.reload(id) }
                             })
@@ -202,25 +207,32 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
         }
         if (project == null) { Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("Loading…", color = Palette.secondary) }; return@Column }
         val words = state.words(project)
+        val version = project.versions?.firstOrNull { it.id == viewingDesign }
+        // The design asked for went (a new pass, another client): the page shows the newest again.
+        LaunchedEffect(version == null) { if (version == null) viewingDesign = null }
+        val shown = remember(project, version?.id) { project.showingDesign(version?.id) }
+        val shownWords = if (version == null) words else ProjectWords(shown)
+        /** Free for the project's own actions: idle, and the newest design on the stage. */
+        val acts = idle && version == null
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             // The project's pictures (PRD §5.4): what will print in its spool, the two together, what was scanned. The
             // computer draws each once; a row of labels under the stage chooses one (none for one, a scrolling row for many).
-            val gallery = remember(project) { ProjectGallery.of(project) }
-            var chosen by remember(id) { mutableStateOf<String?>(null) }
+            val gallery = remember(shown) { ProjectGallery.of(shown) }
+            var chosen by remember(id, version?.id) { mutableStateOf<String?>(null) }
             val entry = gallery.entries.firstOrNull { it.id == chosen } ?: gallery.first
             Box(Modifier.fillMaxWidth().aspectRatio(1.1f).clip(RoundedCornerShape(28.dp))) {
                 // With nothing in the gallery yet (photos sent, no model): the subject the computer cut out, as on its card.
                 // The one stage picture (review B1/S7 on #539): this entry's own picture, or that it is coming, or that it can't be had.
-                val photo = project.photoPicture()
-                StagePicture(project,
-                    still = entry?.let(project::still) ?: photo?.let { Still.Picture(it) } ?: if (words.busy) Still.Waiting else Still.NotAvailable,
+                val photo = shown.photoPicture()
+                StagePicture(shown,
+                    still = entry?.let(shown::still) ?: photo?.let { Still.Picture(it) } ?: if (shownWords.busy) Still.Waiting else Still.NotAvailable,
                     label = entry?.label ?: if (photo != null) "Your photo" else words.title,
                     unavailableLine = when { entry == null -> "Nothing to show yet."; entry.kind == ProjectGallery.Kind.Plate -> "No picture of this plate came with the file."; else -> "Your computer couldn't draw a picture of this." },
                     modifier = Modifier.fillMaxSize())
-                StatusCapsule(words.phase, modifier = Modifier.padding(12.dp))
+                StatusCapsule(shownWords.phase, modifier = Modifier.padding(12.dp))
                 entry?.sizeText()?.let { Text(it, Modifier.align(Alignment.BottomStart).padding(12.dp).clip(RoundedCornerShape(50)).background(Color.Black.copy(alpha = 0.55f)).padding(8.dp, 4.dp), fontSize = 12.sp) }
                 // On the picture, with the same dark backing as the size and status chips, so it reads on either stage.
-                if (entry?.kind == ProjectGallery.Kind.Part && project.canLocate) Text("See It Together",
+                if (version == null && entry?.kind == ProjectGallery.Kind.Part && project.canLocate) Text("See It Together",
                     Modifier.align(Alignment.BottomEnd).padding(12.dp).clip(RoundedCornerShape(50)).background(Color.Black.copy(alpha = 0.62f))
                         .clickable(enabled = idle, role = Role.Button) { run("locate") { state.show(app.companion.locate(id)) } }
                         .padding(14.dp, 8.dp), color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
@@ -234,6 +246,7 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
                         color = if (selected) Color.Black else Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, maxLines = 1)
                 }
             }
+            if (version != null) ViewingEarlierDesignBar(project, version) { viewingDesign = null }
             // Under What you scanned (design §3.3): make something else from this scan, on any project the computer has a
             // scan for, whatever its kind; where this one's scan came from; what else was made from it.
             val lineage = ScanLineage(project, projects)
@@ -262,7 +275,7 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
                 Text(KnownProjects.awayLine(heard[id]), Modifier.weight(1f), color = Palette.secondary, fontSize = 14.sp)
                 TextButton({ scope.launch { state.reload(id) } }, Modifier.testTag("project-away-retry")) { Text("Try Again") }
             }
-            ProjectPlates(project, working != null || away,
+            ProjectPlates(project, working != null || away || version != null,
                 select = { plate -> run("plate") { state.show(app.companion.selectPlate(id, plate.fileIndex, plate.plateIndex)) } },
                 print = { plate -> run("plate") {
                     if (!plate.selected) state.show(app.companion.selectPlate(id, plate.fileIndex, plate.plateIndex))
@@ -360,18 +373,18 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
             }
 
             // Did it fit?
-            if (ProjectAction.ItWorks in words.actions) DidItFitCard(project, enabled = idle,
+            if (ProjectAction.ItWorks in words.actions) DidItFitCard(project, enabled = acts,
                 itWorks = { run("fit") { app.companion.setStatus(id, ProjectStatus.Works)?.let(state::show) ?: state.reload(id) } },
                 needsChanges = { run("fit") { app.companion.setStatus(id, ProjectStatus.NeedsChanges)?.let(state::show) ?: state.reload(id) } })
 
             // One filled control on the page, the one `words.page` leads with; everything else is plain.
             val page = words.page
             val retry: () -> Unit = { run("retry") { state.show(app.companion.start(id)) } }
-            if (page.main == MainAction.Retry) PrimaryButton("Try Again", Modifier.fillMaxWidth().testTag("retry"), icon = CIcons.Refresh, enabled = idle, onClick = retry)
+            if (page.main == MainAction.Retry) PrimaryButton("Try Again", Modifier.fillMaxWidth().testTag("retry"), icon = CIcons.Refresh, enabled = acts, onClick = retry)
             // Print once, under what it is here ("Print the last version", "Print Again", "Print Another"), and never while a change is being made.
             page.printWords?.let { printWords ->
-                if (page.printIsMain) PrimaryButton(printWords, Modifier.fillMaxWidth().testTag("print"), icon = CIcons.Printer, enabled = idle, onClick = print)
-                else SecondaryButton(printWords, Modifier.fillMaxWidth().testTag("print"), icon = CIcons.Printer, enabled = idle, onClick = print)
+                if (page.printIsMain) PrimaryButton(printWords, Modifier.fillMaxWidth().testTag("print"), icon = CIcons.Printer, enabled = acts, onClick = print)
+                else SecondaryButton(printWords, Modifier.fillMaxWidth().testTag("print"), icon = CIcons.Printer, enabled = acts, onClick = print)
                 page.printNote?.let { Text(it, color = Palette.secondary, fontSize = 13.sp) }
             }
             if (ProjectAction.FinishSending in words.actions && id !in sending) PrimaryButton("Send to Your Computer", Modifier.fillMaxWidth(), enabled = idle) {
@@ -382,21 +395,21 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
                 if (page.main == MainAction.Scan) PrimaryButton(label, Modifier.fillMaxWidth(), icon = CIcons.Cube, onClick = scan)
                 else SecondaryButton(label, Modifier.fillMaxWidth(), icon = CIcons.Cube, onClick = scan)
             }
-            if (ProjectAction.MakeIt in words.actions) SecondaryButton("Make It", Modifier.fillMaxWidth(), enabled = idle) { run("start") { state.show(Media.sendProject(context, app.uploader, app.companion, id, emptyList())) } }
-            if (ProjectAction.Retry in words.actions && page.main != MainAction.Retry) SecondaryButton("Try Again", Modifier.fillMaxWidth().testTag("retry"), icon = CIcons.Refresh, enabled = idle, onClick = retry)
+            if (ProjectAction.MakeIt in words.actions) SecondaryButton("Make It", Modifier.fillMaxWidth(), enabled = acts) { run("start") { state.show(Media.sendProject(context, app.uploader, app.companion, id, emptyList())) } }
+            if (ProjectAction.Retry in words.actions && page.main != MainAction.Retry) SecondaryButton("Try Again", Modifier.fillMaxWidth().testTag("retry"), icon = CIcons.Refresh, enabled = acts, onClick = retry)
 
             // Ask for changes: a new pass with your words (and photos).
             if (ProjectAction.Correct in words.actions) GlassCard(Modifier.fillMaxWidth()) { Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text("Ask for changes", fontWeight = FontWeight.SemiBold)
                 OutlinedTextField(note, { note = it }, Modifier.fillMaxWidth(), minLines = 2, placeholder = { Text("Make the hole 2 mm wider…") })
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                    SecondaryButton("Add Photo", enabled = idle, icon = CIcons.Camera) {
+                    SecondaryButton("Add Photo", enabled = acts, icon = CIcons.Camera) {
                         forAsk = false; val (f, uri) = Media.newPhotoTarget(context); pendingCamera = f; takePhoto.launch(uri)
                     }
                     if (messagePhotos.value.isNotEmpty()) Text("${messagePhotos.value.size} photo(s)", color = Palette.secondary)
                 }
                 // Sends the typed note; not a page action, so it stays plain beside the page's one filled control.
-                SecondaryButton("Send Changes", Modifier.fillMaxWidth(), enabled = note.isNotBlank() && working == null, icon = CIcons.Send) {
+                SecondaryButton("Send Changes", Modifier.fillMaxWidth().testTag("send-changes"), enabled = note.isNotBlank() && working == null && version == null, icon = CIcons.Send) {
                     run("correct") {
                         val attempt = NoteAttempt.of(noteAttempt, note.trim(), messagePhotos.value.map { it.path }).also { noteAttempt = it }
                         val names = Media.sendPhotos(app.uploader, id, messagePhotos.value, forMessage = true)
@@ -407,6 +420,11 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
             } }
 
             problem?.let { Text(it, color = Palette.failed) }
+
+            // Earlier designs and prints (#616 slice 1): what you have, and what was never printed. Two or more designs only.
+            DesignHistorySection(project, enabled = idle, select = { viewingDesign = it }, answer = { versionId, status ->
+                run("design") { app.companion.setStatus(id, status, versionId = versionId)?.let(state::show) ?: state.reload(id) }
+            })
 
             // What changed.
             project.current?.changes?.takeIf { it.isNotEmpty() }?.let { changes ->
@@ -420,6 +438,8 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
                 val site = credit["site"].str
                 if (designer != null || site != null) Text(listOfNotNull(designer?.let { "by $it" }, site?.let { "on $it" }).joinToString(" "), color = Palette.secondary)
             }
+            // A project made from another: that one's conversation first, read-only, then this one's request (#613).
+            InheritedConversation(remember(project, projects) { ProjectConversation(project, projects) }, open)
             project.instructions?.takeIf { it.isNotBlank() }?.let { SectionTitle("You asked"); Text(it, color = Palette.secondary) }
             // The scan as one strip and its count, never every frame (David, Nov 9).
             ScanStrip(project)

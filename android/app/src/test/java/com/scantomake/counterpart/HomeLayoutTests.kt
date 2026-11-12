@@ -65,6 +65,7 @@ import com.scantomake.counterpart.api.Project
 import com.scantomake.counterpart.app.AppState
 import com.scantomake.counterpart.app.Counterpart
 import com.scantomake.counterpart.core.WireJson
+import com.scantomake.counterpart.core.parseObject
 import com.scantomake.counterpart.pairing.MemoryStore
 import com.scantomake.counterpart.pairing.PairingClient
 import com.scantomake.counterpart.pairing.PairingStore
@@ -228,6 +229,108 @@ class HomeLayoutTests {
         compose.onNode(hasTestTag("scan-use")).assertExists()
         compose.onNodeWithText("Make something that fits this").assertExists()
         compose.onNodeWithText("Just save this scan").assertDoesNotExist()
+    }
+
+    /** The companion answers `GET /v1/objects/<id>` with [data] and `PATCH …/settings` with it too, keeping the bodies. */
+    private fun answerProject(data: JsonObject, patches: MutableList<String> = mutableListOf()): FakeTransport {
+        val id = data["id"]!!.jsonPrimitive.content
+        val body = WireJson.encodeToString(JsonElement.serializer(), JsonObject(mapOf("object" to data))).toByteArray()
+        app.pairingStore.save(v2Record(ADDRESSES[0]), false)
+        val fake = FakeTransport { request, _ -> when {
+            request.method == "PATCH" && request.url.endsWith("/v1/objects/$id/settings") -> { synchronized(patches) { patches += String(request.body!!) }; HttpReply(200, body) }
+            request.url.endsWith("/v1/objects/$id") -> HttpReply(200, body)
+            else -> json(404, mapOf("error" to mapOf("code" to "not-found", "message" to "not here")))
+        } }
+        app.pairing = PairingClient(app.pairingStore, fake)
+        app.companion = CompanionClient(app.pairing, fake, null, null, app.cacheDir)
+        return fake
+    }
+
+    /** #616 slice 1 on Android (#743), with projects present (AGENTS.md "Every layout"). David (Nov 11): "my airpods max
+     *  hanger was printed and done and nothing changed that. and then i modified it and now it's no longer a thing that
+     *  was done". The changed-but-printed project's page lists its printed design under What you have, with that design's
+     *  own It works; opening it puts its own render on the stage with a bar back to the newest, while Print, changes and
+     *  the project's status wait. A one-design project's page has no sections at all. */
+    @Test fun aChangedButPrintedProjectStillShowsItsPrintedDesignWithProjectsPresent() {
+        val raw = parseObject(contractFixture("project-versions.json").readText())!!["project"]!!.jsonObject
+        val first = "10000000-0000-4000-8000-000000000001"
+        // The printed design not yet answered, so its own Did it fit? is offered.
+        val data = JsonObject(raw + ("versions" to JsonArray(raw["versions"]!!.jsonArray.map { v ->
+            if (v.jsonObject["id"]!!.jsonPrimitive.content == first) JsonObject(v.jsonObject - "outcome") else v })))
+        val id = data["id"]!!.jsonPrimitive.content
+        val patches = mutableListOf<String>()
+        val fake = answerProject(data, patches)
+        state.projects.value = listOf(project("other", "Existing project", "ready"), requireNotNull(Project.decode(data)))
+        state.loaded.value = true
+        compose.setContent { WithApp { com.scantomake.counterpart.ui.ProjectScreen(id, back = {}, print = {}, printing = {}, scan = {}) } }
+        compose.onNodeWithTag("design-history").performScrollTo().assertExists()
+        compose.onNodeWithText("What you have").assertExists()
+        compose.onNodeWithText("Earlier designs").assertExists()
+        compose.onNodeWithTag("design-$first").performScrollTo().assertTextContains("Printed Nov", substring = true)
+            .assertTextContains("Workshop printer", substring = true).assertTextContains("Did it fit?", substring = true)
+        compose.onNodeWithTag("design-10000000-0000-4000-8000-000000000002").assertExists()
+        compose.onNodeWithTag("design-10000000-0000-4000-8000-000000000003").assertDoesNotExist()
+        // That design's own answer names it.
+        compose.onNodeWithTag("design-$first-works").performScrollTo().performClick()
+        compose.waitUntil(5_000) { synchronized(patches) { patches.isNotEmpty() } }
+        assertEquals("""{"status":"works","versionId":"$first"}""", synchronized(patches) { patches.single() })
+        // Opened: its own picture on the stage, the bar, and the project's actions wait for the newest.
+        compose.onNodeWithTag("design-$first").performScrollTo().performClick()
+        compose.onNodeWithTag("viewing-earlier-design").performScrollTo().assertExists()
+            .assertTextContains("Earlier design · Printed Nov", substring = true)
+        compose.onNodeWithTag("print").performScrollTo().assertIsNotEnabled()
+        compose.waitUntil(5_000) { fake.paths.any { it.endsWith("/versions/$first/renders/front.png") } }
+        compose.onNodeWithContentDescription("More").performClick()
+        compose.onAllNodesWithText("Status:", substring = true).assertCountEquals(0)
+        compose.onNodeWithText("Duplicate").assertExists()
+        compose.onNodeWithTag("show-newest").performScrollTo().performClick()
+        compose.onNodeWithTag("viewing-earlier-design").assertDoesNotExist()
+        compose.onNodeWithTag("print").performScrollTo().assertIsEnabled()
+    }
+
+    @Test fun aProjectWithOneDesignHasNoDesignSectionsWithProjectsPresent() {
+        val raw = parseObject(contractFixture("project-versions.json").readText())!!["project"]!!.jsonObject
+        val data = JsonObject(raw + ("versions" to JsonArray(listOf(raw["versions"]!!.jsonArray.last()))) + ("prints" to JsonArray(emptyList())))
+        val id = data["id"]!!.jsonPrimitive.content
+        answerProject(data)
+        state.projects.value = listOf(project("other", "Existing project", "ready"), requireNotNull(Project.decode(data)))
+        state.loaded.value = true
+        compose.setContent { WithApp { com.scantomake.counterpart.ui.ProjectScreen(id, back = {}, print = {}, printing = {}, scan = {}) } }
+        compose.onNodeWithTag("print").performScrollTo().assertIsEnabled()
+        compose.onNodeWithTag("design-history").assertDoesNotExist()
+        compose.onNodeWithText("What you have").assertDoesNotExist()
+    }
+
+    /** #613 (from #600's review, F4), with projects present: a project made from another shows that one's conversation,
+     *  read-only, above its own request; the From line opens the source, and says "since deleted" once it is gone. */
+    @Test fun aProjectMadeFromAnotherShowsThatOnesConversationWithProjectsPresent() {
+        val rows = WireJson.parseToJsonElement(contractFixture("inherited-history.json").readText()).jsonArray.map { it.jsonObject }
+        val source = requireNotNull(Project.decode(rows[0]))
+        val copy = requireNotNull(Project.decode(rows[1]))
+        answerProject(rows[1])
+        state.projects.value = listOf(project("other", "Existing project", "ready"), source, copy)
+        state.loaded.value = true
+        var opened: String? = null
+        compose.setContent { WithApp { com.scantomake.counterpart.ui.ProjectScreen(copy.id, back = {}, print = {}, printing = {}, scan = {}, open = { opened = it }) } }
+        compose.onNodeWithTag("inherited-from").performScrollTo().assertTextEquals("From “Forester phone mount”")
+        compose.onNodeWithText("Which case is on the phone?").assertExists()
+        compose.onNodeWithText("Made a holder for that case.").assertExists()
+        // Its own request comes after the conversation it was made from.
+        val from = compose.onNodeWithTag("inherited-from").fetchSemanticsNode().positionInRoot.y
+        val asked = compose.onNodeWithText("You asked").performScrollTo().fetchSemanticsNode().positionInRoot.y
+        assertTrue("the source's words come first: $from < $asked", from < asked)
+        compose.onNodeWithText("Add a swivel.").assertExists()
+        compose.onNodeWithTag("inherited-from").performScrollTo().performClick()
+        compose.waitForIdle()
+        assertEquals(source.id, opened)
+        // The source deleted: the line says so and opens nothing; the words stay.
+        opened = null
+        state.projects.value = listOf(project("other", "Existing project", "ready"), copy)
+        compose.waitForIdle()
+        compose.onNodeWithTag("inherited-from").performScrollTo().assertTextEquals("From “Forester phone mount”, since deleted").performClick()
+        compose.waitForIdle()
+        assertNull(opened)
+        compose.onNodeWithText("Which case is on the phone?").assertExists()
     }
 
     private val keptScan = "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a0a"
