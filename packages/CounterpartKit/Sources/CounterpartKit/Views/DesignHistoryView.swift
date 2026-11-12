@@ -47,7 +47,13 @@ public struct DesignHistoryView<Thumbnail: View>: View {
                         Button { select(version.id) } label: {
                             HStack {
                                 Text(DesignHistory.date(version.sealedAtMs)).foregroundStyle(.secondary)
-                                Text(version.label).lineLimit(2)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(version.label).lineLimit(2)
+                                    // A design that went to the printer says so, even when how it ended wasn't kept.
+                                    if !history.attempts(version).isEmpty {
+                                        Text(history.printedLine(version)).font(.caption).foregroundStyle(.secondary)
+                                    }
+                                }
                                 Spacer(minLength: 0)
                                 Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
                             }.font(.callout).contentShape(.rect)

@@ -19,8 +19,19 @@ public struct DesignHistory: Equatable, Sendable {
                 .map { $0.timeIntervalSince1970 * 1000 } ?? attempt.startedAtMs
         }.max()
     }
+    /// Attempts on this design whose end was never kept (made before attempts were recorded; their frames survive).
+    public func unknownEnds(_ version: Project.DesignVersion) -> Int {
+        attempts(version).filter { $0.monitor?.endState == nil }.count
+    }
     public func printedLine(_ version: Project.DesignVersion) -> String {
-        guard let at = printedAt(version) else { return version.outcome == "works" ? "Printed" : "Not printed yet" }
+        guard let at = printedAt(version) else {
+            if version.outcome == "works" { return "Printed" }
+            // Never "not printed" for a design that went to the printer: say what is known (#616, the hanger's Nov 4 design).
+            let tries = attempts(version).count, unknown = unknownEnds(version)
+            if unknown > 0 { return "Sent to the printer \(tries == 1 ? "once" : "\(tries) times") · how \(tries == 1 ? "it" : "they") ended wasn’t kept" }
+            if tries > 0 { return "Not printed · \(tries == 1 ? "1 try" : "\(tries) tries") didn’t finish" }
+            return "Not printed yet"
+        }
         let printer = attempts(version).last(where: { $0.monitor?.endState == "done" })?.destination?.name
         return ["Printed \(Self.date(at))", printer].compactMap { $0 }.joined(separator: " · ")
     }
@@ -63,7 +74,8 @@ extension Project {
             view.print = Print(bundleId: attempt.bundleId, destination: attempt.destination)
             view.print?.monitor = attempt.monitor; view.print?.spools = attempt.spools
         }
-        view.state = history.printedAt(version) == nil ? .ready : version.outcome == "works" ? .confirmed : .printed
+        view.state = history.printedAt(version) != nil ? (version.outcome == "works" ? .confirmed : .printed)
+            : version.outcome == "works" ? .confirmed : history.unknownEnds(version) > 0 ? .sent : .ready
         view.updatedAtMs = version.sealedAtMs
         return view
     }

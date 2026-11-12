@@ -48,6 +48,23 @@ final class DesignHistoryTests: XCTestCase {
         XCTAssertEqual(ProjectWords.phase(project), .confirmed)
     }
 
+    /// The hanger's Nov 4 design on David's Mac: three attempts kept only as frame folders, ends unknown. It went to the
+    /// printer, so it never reads "Not printed yet", and on the stage it is "Sent to your printer", not "Ready to print".
+    func testADesignWhosePrintsEndedUnknownIsNeverCalledUnprinted() throws {
+        var project = try versions()
+        let middle = project.versions![1]
+        project.prints = (1...3).map { .init(id: "frames-\($0)", versionId: middle.id, startedAtMs: 1793791652751 + Double($0), bundleId: "frames-\($0)") }
+        let history = DesignHistory(project)
+        XCTAssertNil(history.printedAt(middle))
+        XCTAssertEqual(history.printedLine(middle), "Sent to the printer 3 times · how they ended wasn’t kept")
+        XCTAssertEqual(project.showingDesign(middle.id).state, .sent)
+        XCTAssertEqual(ProjectWords.phase(project.showingDesign(middle.id)), .sent)
+        // Attempts that all ended without printing: said plainly, and the design is ready to try again.
+        project.prints = [.init(id: "failed", versionId: middle.id, startedAtMs: 1, bundleId: "b", monitor: .init(phase: "ended", endState: "failed"))]
+        XCTAssertEqual(DesignHistory(project).printedLine(middle), "Not printed · 1 try didn’t finish")
+        XCTAssertEqual(project.showingDesign(middle.id).state, .ready)
+    }
+
     func testTheMacsWordsWinAndActivityNamesTheSealingPass() throws {
         var project = try versions()
         project.status = .init(phase: "ready", text: "New one ready · printed Nov 4", symbol: "checkmark.seal", tint: "accent")
