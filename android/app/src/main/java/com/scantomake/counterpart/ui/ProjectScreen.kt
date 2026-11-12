@@ -184,7 +184,7 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
                 IconButton(onClick = { menu = true }) { Icon(CIcons.Gear, "More") }
                 DropdownMenu(menu, { menu = false }) {
                     if (project != null) {
-                        DropdownMenuItem({ Text(if (project.isArchived) "Show on Home" else "Hide from Home") }, enabled = !away, onClick = {
+                        DropdownMenuItem({ Text(if (project.isArchived) "Show on Home" else "Hide from Home") }, enabled = !away && viewingDesign == null, onClick = {
                             menu = false
                             run("archive") {
                                 val p = if (project.settings?.archived != null) app.companion.setArchived(id, !project.isArchived)
@@ -198,9 +198,9 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
                                 menu = false; run("status") { app.companion.setStatus(id, s)?.let(state::show) ?: state.reload(id) }
                             })
                         }
-                        if (project.canMakeFromScan) DropdownMenuItem({ Text(ScanLineage.ACTION) }, enabled = !away, onClick = { menu = false; makeFromScan() })
-                        if (project.current != null) DropdownMenuItem({ Text("Duplicate") }, enabled = !away, onClick = { menu = false; run("dup") { state.show(app.companion.duplicate(id)) } })
-                        DropdownMenuItem({ Text("Delete Project", color = Palette.failed) }, enabled = !away, onClick = { menu = false; confirmDelete = true })
+                        if (project.canMakeFromScan) DropdownMenuItem({ Text(ScanLineage.ACTION) }, enabled = !away && viewingDesign == null, onClick = { menu = false; makeFromScan() })
+                        if (project.current != null) DropdownMenuItem({ Text("Duplicate") }, enabled = !away && viewingDesign == null, onClick = { menu = false; run("dup") { state.show(app.companion.duplicate(id)) } })
+                        DropdownMenuItem({ Text("Delete Project", color = Palette.failed) }, enabled = !away && viewingDesign == null, onClick = { menu = false; confirmDelete = true })
                     }
                 }
             }
@@ -212,7 +212,8 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
         LaunchedEffect(version == null) { if (version == null) viewingDesign = null }
         val shown = remember(project, version?.id) { project.showingDesign(version?.id) }
         val shownWords = if (version == null) words else ProjectWords(shown)
-        /** Free for the project's own actions: idle, and the newest design on the stage. */
+        /** Free for the project's own actions: idle, and the newest design on the stage. Every send or answer on this
+         *  page goes to the newest design, so all of them wait while an earlier one is shown (the Mac's `blocked`). */
         val acts = idle && version == null
         val scroll = rememberScrollState()
         Column(Modifier.weight(1f).verticalScroll(scroll).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -251,7 +252,7 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
             // Under What you scanned (design §3.3): make something else from this scan, on any project the computer has a
             // scan for, whatever its kind; where this one's scan came from; what else was made from it.
             val lineage = ScanLineage(project, projects)
-            if (project.canMakeFromScan) SecondaryButton(ScanLineage.ACTION, Modifier.fillMaxWidth().testTag("make-from-scan"), enabled = idle, color = Palette.filament) { makeFromScan() }
+            if (project.canMakeFromScan) SecondaryButton(ScanLineage.ACTION, Modifier.fillMaxWidth().testTag("make-from-scan"), enabled = acts, color = Palette.filament) { makeFromScan() }
             lineage.fromLine?.let { line ->
                 Text(line, Modifier.fillMaxWidth().testTag("scan-from").clickable(enabled = lineage.from?.exists == true, role = Role.Button) { lineage.from?.let { open(it.id) } },
                     color = if (lineage.from?.exists == true) Palette.filament else Palette.secondary, fontSize = 14.sp)
@@ -282,7 +283,7 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
                     if (!plate.selected) state.show(app.companion.selectPlate(id, plate.fileIndex, plate.plateIndex))
                     print()
                 } })
-            if (project.kind == "published" && project.canSelectPlate) SecondaryButton("Import More Model Files", Modifier.fillMaxWidth(), enabled = idle) {
+            if (project.kind == "published" && project.canSelectPlate) SecondaryButton("Import More Model Files", Modifier.fillMaxWidth(), enabled = acts) {
                 pickModel.launch(arrayOf("*/*"))
             }
             if (words.phase == ProjectPhase.Working) {
@@ -296,17 +297,17 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
             failures[id]?.let { f ->
                 GlassCard(Modifier.fillMaxWidth()) { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(f, color = Palette.failed)
-                    SecondaryButton("Send to Your Computer", Modifier.fillMaxWidth()) { state.sendInBackground(id) { state.show(Media.sendProject(context, app.uploader, app.companion, id, emptyList())) } }
+                    SecondaryButton("Send to Your Computer", Modifier.fillMaxWidth().testTag("send-again"), enabled = acts) { state.sendInBackground(id) { state.show(Media.sendProject(context, app.uploader, app.companion, id, emptyList())) } }
                 } }
             }
             if (ProjectWords.watchable(project, words.phase)) PrimaryButton("Watch the Print", Modifier.fillMaxWidth(), icon = CIcons.Printer, onClick = printing)
 
-            project.printConfirmation?.let { PrintConfirmationCard(project, it) { body -> run("confirm") { state.show(app.companion.answerPrintConfirmation(id, body)) } } }
+            project.printConfirmation?.let { PrintConfirmationCard(project, it, enabled = acts) { body -> run("confirm") { state.show(app.companion.answerPrintConfirmation(id, body)) } } }
 
             // A reconstruction review replaces the generic Ask controls: Best Guess, words and photos
             // cannot approve it (the companion refuses them), only the explicit preview answer counts.
             val review = project.reconstructionReview
-            if (review != null) ReconstructionReviewCard(project, review, busy = working != null,
+            if (review != null) ReconstructionReviewCard(project, review, busy = working != null || version != null,
                 loadPreview = { app.companion.reconstructionPreview(id, review.id) },
                 answer = { body -> run("review") {
                     try { state.show(app.companion.answerReconstruction(id, review.id, body)) }
@@ -322,7 +323,7 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
                     // A size question: its numbers, prefilled, with Confirm as the one obvious action. Words and a
                     // caliper photo stay below for whatever the numbers don't say.
                     val sizes = AskSizesForm.of(ask)?.let { asked -> askSizes?.takeIf { it.first == ask.id }?.second ?: asked }
-                    if (sizes != null) AskSizesCard(sizes, enabled = idle, changed = { askSizes = ask.id to it; askProblem = null }) { answer ->
+                    if (sizes != null) AskSizesCard(sizes, enabled = acts, changed = { askSizes = ask.id to it; askProblem = null }) { answer ->
                         run("ask") { state.show(app.companion.answerAsk(id, text = askText.trim().ifBlank { null }, sizes = answer)); askText = "" }
                     }
                     // One answer carries everything the card holds: the numbers as they stand go with words or a photo.
@@ -339,33 +340,33 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
                         Text("Update Counterpart on this phone to answer this kind of question here.", color = Palette.secondary, fontSize = 13.sp, modifier = Modifier.testTag("ask-update"))
                     else when (ask.type) {
                         "choice" -> ask.options?.forEach { o ->
-                            SecondaryButton(o.label + (o.detail?.let { " · $it" } ?: ""), Modifier.fillMaxWidth(), enabled = idle) {
+                            SecondaryButton(o.label + (o.detail?.let { " · $it" } ?: ""), Modifier.fillMaxWidth(), enabled = acts) {
                                 run("ask") { state.show(app.companion.choosePublishedPlate(id, ask.id, o.id)) }
                             }
                         }
                         "file" -> {
                             ask.url?.let { url -> SecondaryButton("Open the Model Page", Modifier.fillMaxWidth()) { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) } }
-                            PrimaryButton("Choose the Model File", Modifier.fillMaxWidth(), enabled = idle) { pickModel.launch(arrayOf("*/*")) }
+                            PrimaryButton("Choose the Model File", Modifier.fillMaxWidth(), enabled = acts) { pickModel.launch(arrayOf("*/*")) }
                         }
                         else -> {
                             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                SecondaryButton(if (sizes != null) "Caliper Photo" else "Take a Photo", Modifier.weight(1f), enabled = idle, icon = CIcons.Camera) {
+                                SecondaryButton(if (sizes != null) "Caliper Photo" else "Take a Photo", Modifier.weight(1f), enabled = acts, icon = CIcons.Camera) {
                                     photoSizes = carried() ?: return@SecondaryButton
                                     forAsk = true; val (f, uri) = Media.newPhotoTarget(context); pendingCamera = f; takePhoto.launch(uri)
                                 }
-                                if (sizes == null) SecondaryButton("Choose", Modifier.weight(1f), enabled = idle, icon = CIcons.Photo) {
+                                if (sizes == null) SecondaryButton("Choose", Modifier.weight(1f), enabled = acts, icon = CIcons.Photo) {
                                     photoSizes = emptyList(); forAsk = true; pick.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
                                 }
                             }
                             if ("text" in ask.answers || ask.answers.isEmpty()) {
                                 OutlinedTextField(askText, { askText = it }, Modifier.fillMaxWidth().testTag("ask-text"), placeholder = { Text(if (sizes != null) "Anything the numbers don't say" else "Or tell it in words") })
-                                if (askText.isNotBlank()) SecondaryButton("Send Answer", Modifier.fillMaxWidth(), enabled = idle) {
+                                if (askText.isNotBlank()) SecondaryButton("Send Answer", Modifier.fillMaxWidth(), enabled = acts) {
                                     val numbers = carried() ?: return@SecondaryButton
                                     run("ask") { state.show(app.companion.answerAsk(id, text = askText.trim(), sizes = numbers)); askText = "" }
                                 }
                             }
                             // A size is confirmed or measured, never guessed.
-                            if (sizes == null) SecondaryButton("Make Your Best Guess", Modifier.fillMaxWidth(), enabled = idle, icon = CIcons.Wand) {
+                            if (sizes == null) SecondaryButton("Make Your Best Guess", Modifier.fillMaxWidth(), enabled = acts, icon = CIcons.Wand) {
                                 run("ask") { state.show(app.companion.answerAsk(id, bestGuess = true)) }
                             }
                         }
@@ -388,7 +389,7 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
                 else SecondaryButton(printWords, Modifier.fillMaxWidth().testTag("print"), icon = CIcons.Printer, enabled = acts, onClick = print)
                 page.printNote?.let { Text(it, color = Palette.secondary, fontSize = 13.sp) }
             }
-            if (ProjectAction.FinishSending in words.actions && id !in sending) PrimaryButton("Send to Your Computer", Modifier.fillMaxWidth(), enabled = idle) {
+            if (ProjectAction.FinishSending in words.actions && id !in sending) PrimaryButton("Send to Your Computer", Modifier.fillMaxWidth().testTag("finish-sending"), enabled = acts) {
                 state.sendInBackground(id) { state.show(Media.sendProject(context, app.uploader, app.companion, id, emptyList())) }
             }
             if (ProjectAction.Scan in words.actions) {
@@ -459,7 +460,7 @@ private fun Modifier.fillMaxHeight() = this.then(Modifier.fillMaxSize())
 
 /** The printer MCP's own question, answered here (PR 5 field types) or on the Mac. */
 @Composable
-fun PrintConfirmationCard(project: Project, confirmation: PrintConfirmation, answer: (kotlinx.serialization.json.JsonObject) -> Unit) {
+fun PrintConfirmationCard(project: Project, confirmation: PrintConfirmation, enabled: Boolean = true, answer: (kotlinx.serialization.json.JsonObject) -> Unit) {
     val content = remember(confirmation.id) { mutableStateMapOf<String, JsonElement?>() }
     val now = System.currentTimeMillis()
     GlassCard(Modifier.fillMaxWidth()) { Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -486,10 +487,10 @@ fun PrintConfirmationCard(project: Project, confirmation: PrintConfirmation, ans
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            if (confirmation.isRenderable) PrimaryButton("Print", Modifier.weight(1f), enabled = confirmation.canAccept(content, now)) {
+            if (confirmation.isRenderable) PrimaryButton("Print", Modifier.weight(1f).testTag("print-confirmation-accept"), enabled = enabled && confirmation.canAccept(content, now)) {
                 confirmation.response("accept", content, System.currentTimeMillis())?.let(answer)
             }
-            SecondaryButton("Don't Print", Modifier.weight(1f)) { confirmation.response("cancel", emptyMap(), System.currentTimeMillis())?.let(answer) }
+            SecondaryButton("Don't Print", Modifier.weight(1f).testTag("print-confirmation-cancel"), enabled = enabled) { confirmation.response("cancel", emptyMap(), System.currentTimeMillis())?.let(answer) }
         }
     } }
 }
