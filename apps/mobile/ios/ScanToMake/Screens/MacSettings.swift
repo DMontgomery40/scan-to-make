@@ -402,7 +402,7 @@ struct MCPCopiesView: View {
                 progressWords(progress)
             } else if let status = row.status {
                 switch status {
-                case .upToDate: Label(status.words, systemImage: "checkmark.circle.fill").labelStyle(.titleAndIcon).font(.subheadline).foregroundStyle(.secondary)
+                case .upToDate: Text("\(Image(systemName: "checkmark.circle.fill")) \(status.words)").font(.subheadline).foregroundStyle(.secondary).accessibilityLabel(status.words)
                 case .available: Text(status.words).font(.subheadline.weight(.semibold)).foregroundStyle(Color.accentColor)
                 }
             }
