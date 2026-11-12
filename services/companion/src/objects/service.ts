@@ -2132,7 +2132,7 @@ export class ObjectService {
       // #630: the MCP asks for a look at a saved frame; the person's own Claude login judges it. No worker: no check.
       check: async (assessment, signal) => {
         const worker = this.#deps.modelAccess?.claudeWorker();
-        return worker ? checkPrintFrame(session, assessment, claudeVisionJudge(worker), signal) : undefined;
+        return worker ? checkPrintFrame(session, assessment, claudeVisionJudge(worker), signal) : 'no-worker';
       },
       milestones: () => milestonesFor(this.#deps.settings?.current().milestones ?? '50'),
       adopted: async jobName => { this.#changed(await this.#deps.store.update(id, o => ours(o) ? {...o, print: {...o.print!, jobName}} : o)); },

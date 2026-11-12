@@ -99,13 +99,17 @@ const sha256 = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex
  * for an unobserved first-layer frame before any later one, so silence would also stop the later checks.
  */
 export async function checkPrintFrame(session: PrinterSession, assessment: PhysicalAssessment, judge: VisionJudge, signal: AbortSignal): Promise<PhysicalCheck | undefined> {
+  // An MCP that can't record the observation gets none: a judgement nobody saved is never acted on.
+  await session.connect({signal, failFast: true});
+  if (!session.hasTool('counterpart_print_assess')) return undefined;
   const references = [...assessment.referenceFrameIds].reverse();
   const record = await readPrintRecordFrames(session, [assessment.frameId, ...references].slice(0, 4), {signal});
   const frame = record?.frames.find(item => item.id === assessment.frameId);
   // Bound to the bytes the record says it saved: a frame that changed, or a preparation frame, is not judged.
-  if (!record || !frame?.jpeg || !frame.sha256 || frame.status !== 'captured' || frame.role === 'baseline' || sha256(frame.jpeg) !== frame.sha256) return undefined;
+  if (!record || !frame?.jpeg || !frame.sha256 || frame.status !== 'captured' || frame.role === 'baseline' || sha256(frame.jpeg) !== frame.sha256.toLowerCase()) return undefined;
+  // Only a preparation frame is a reference (the MCPs refuse any other); a reference that doesn't qualify is left out.
   const reference = references.map(id => record.frames.find(item => item.id === id))
-    .find(item => item?.jpeg && item.status === 'captured' && item.sha256 === sha256(item.jpeg));
+    .find(item => item?.jpeg && item.role === 'baseline' && item.status === 'captured' && item.sha256?.toLowerCase() === sha256(item.jpeg));
   const dir = await mkdtemp(join(tmpdir(), 'stm-camera-check-'));
   let answer: VisionAnswer | undefined;
   try {
