@@ -173,6 +173,8 @@ export const PrintMonitorSchema = z.strictObject({
   firstLayerSent: z.boolean(),
   /** `print.check` was sent for this print: once, even across a restart. */
   checkSent: z.boolean().optional(),
+  /** The printer MCP's own words for that verdict when it was sent: the card and the done keep them (#630). */
+  checkMessage: text(500).optional(),
   /** Set while the printer can't be reached (3 failed reads, or offline for 60 s). Never a failure by itself. */
   unreachableSince: iso.optional(),
   endState: MonitorEndSchema.optional(),

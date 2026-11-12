@@ -87,6 +87,13 @@ export interface PhysicalCheck {
 
 interface RunningCheck {frameId: string; controller: AbortController; outcome?: PhysicalCheck; settled: boolean; done: Promise<void>}
 
+/**
+ * What a camera check came to: an observation submitted (`PhysicalCheck`), `no-worker` (no Claude Code login chosen:
+ * nothing was tried, so the frame stays eligible on every read, for the moment one is chosen), or undefined (nothing
+ * could be judged or submitted: no record or assess tool, a stale or changed frame; a bounded number of tries).
+ */
+export type CheckResult = PhysicalCheck | 'no-worker' | undefined;
+
 export interface MonitorDeps {
   clock?: MonitorClock;
   /** One report through the destination's held session. */
@@ -104,7 +111,7 @@ export interface MonitorDeps {
    * #630: judge the saved frame the MCP asked about (`progress.physical.assessment`) with the vision worker and submit
    * the observation. Undefined when it couldn't (no worker, no frame, nothing certain enough to submit).
    */
-  check?(assessment: PhysicalAssessment, signal: AbortSignal): Promise<PhysicalCheck | undefined>;
+  check?(assessment: PhysicalAssessment, signal: AbortSignal): Promise<CheckResult>;
   /** Saves a judged camera frame as event `eventId`'s frame; resolves to its relative path. */
   keepFrame?(eventId: string, jpeg: Buffer): Promise<string | undefined>;
   /** Tests only: the frame wait cap (PRD: 10 s). */
@@ -267,7 +274,7 @@ export class PrintMonitorRunner {
     const event = events[end];
     // #630: firmware "finished" after the MCP's camera evidence said nothing was coming out: the done event says so,
     // in the MCP's own words (its first problem; the MCP keeps that verdict and its problem after FINISH).
-    const check = end === 'done' && this.#state.checkSent ? report?.problems[0]?.message : undefined;
+    const check = end === 'done' && this.#state.checkSent ? this.#state.checkMessage : undefined;
     if (event) await this.#emit(event[0], report, {frame: event[1], signal, ...(check ? {detail: {reason: check}} : {})});
   }
 
@@ -433,31 +440,42 @@ export class PrintMonitorRunner {
         await this.#emit('print.first-layer', report, {jpeg: outcome.jpeg, frame: true, signal});
       }
     }
-    // The MCP's verdict, in this report or in its answer to the observation just submitted (a read can cross it).
-    if (report.physical?.status !== 'suspect_no_extrusion' && check?.outcome?.physical?.status === 'suspect_no_extrusion')
-      report = {...report, physical: check.outcome.physical};
-    if (report.physical?.status === 'suspect_no_extrusion' && !this.#state.checkSent) {
-      this.#state = {...this.#state, checkSent: true};
+    // Sent once, from a report that itself carries the MCP's verdict and its words (a read that crossed the submit
+    // waits for the next one). The words are kept, so the card and the done keep them if a later report drops them.
+    const words = report.problems[0]?.message;
+    if (report.physical?.status === 'suspect_no_extrusion' && words && !this.#state.checkSent) {
+      this.#state = {...this.#state, checkSent: true, checkMessage: words.slice(0, 500)};
       await this.#save();
       const named = report.physical.evidence;
       const evidence = this.#evidence && (named.includes(this.#evidence.frameId) || !named.length) ? this.#evidence.jpeg : undefined;
       await this.#emit('print.check', report, {jpeg: evidence, frame: true, signal});
     }
     const asked = report.physical?.assessment;
-    if (!asked?.required || !this.#deps.check || this.#check || this.#checked.has(asked.frameId) || !activeStates.has(report.state)) return report;
+    // After the check was sent nothing more is judged: a later observation can't take the MCP's verdict back.
+    if (!asked?.required || !this.#deps.check || this.#check || this.#state.checkSent || this.#checked.has(asked.frameId) || !activeStates.has(report.state)) return report;
     this.#checked.add(asked.frameId);
     const controller = new AbortController();
     const abort = () => controller.abort();
     signal.addEventListener('abort', abort, {once: true});
     const timer = setTimeout(abort, MONITOR.checkCapMs);
     const running: RunningCheck = {frameId: asked.frameId, controller, settled: false, done: Promise.resolve()};
-    // A check that failed on the way (not stopped) is tried again on a later read, up to three times: the MCP asks for
-    // an unobserved first-layer frame before any later one, so a frame left unobserved would stop every later check.
-    running.done = this.#deps.check(structuredClone(asked), controller.signal).then(outcome => { if (!controller.signal.aborted) running.outcome = outcome; }, () => {
-      const tries = (this.#tries.get(asked.frameId) ?? 0) + 1;
-      this.#tries.set(asked.frameId, tries);
-      if (!signal.aborted && tries < MONITOR.checkTries) this.#checked.delete(asked.frameId);
-    })
+    // Only a submitted observation uses the frame up. The MCP asks for an unobserved first-layer frame before any later
+    // one, so a frame left unobserved would stop every later check: one that wasn't tried (no worker) stays eligible,
+    // and one that failed or couldn't be judged is tried again on a later read, up to three times.
+    const release = (counts: boolean) => {
+      if (signal.aborted) return;
+      if (counts) {
+        const tries = (this.#tries.get(asked.frameId) ?? 0) + 1;
+        this.#tries.set(asked.frameId, tries);
+        if (tries >= MONITOR.checkTries) return;
+      }
+      this.#checked.delete(asked.frameId);
+    };
+    running.done = this.#deps.check(structuredClone(asked), controller.signal).then(outcome => {
+      if (outcome === 'no-worker') return release(false);
+      if (!outcome) return release(true);
+      if (!controller.signal.aborted) running.outcome = outcome;
+    }, () => release(true))
       .finally(() => { running.settled = true; clearTimeout(timer); signal.removeEventListener('abort', abort); });
     this.#check = running;
     return report;

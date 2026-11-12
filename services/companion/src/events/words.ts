@@ -214,7 +214,7 @@ export interface StatusSource extends TitleSource {
   passes?: {stages?: {words: string; endedAtMs?: number}[]; estimate?: {remainingSec: number}; endedAtMs?: number}[];
   print?: {destination?: {name: string}; dispatchedAt?: string; sentVia?: string;
     live?: {state: string; job?: {progress?: number; remainingSec?: number; layer?: number; stage?: string}; problems?: readonly {code: string; message: string}[]};
-    monitor?: {phase: string; endedAt?: string; checkSent?: boolean}};
+    monitor?: {phase: string; endedAt?: string; checkSent?: boolean; checkMessage?: string}};
 }
 
 const formatDate = (iso: string) => new Intl.DateTimeFormat('en-US', {month: 'short', day: 'numeric'}).format(new Date(iso));
@@ -262,8 +262,8 @@ export function objectStatus(object: StatusSource, updatedAtMs?: number): Object
       if (!object.print?.dispatchedAt || !watching || !live) return {phase: 'preparing', text: 'Getting the print ready', symbol: 'gearshape', tint: 'accent'};
       // The printer has the job but is still heating, cleaning or levelling: "Printing · 3%" would be a lie.
       if (printPreparing(live.state, live.job)) return {phase: 'preparing', text: joined('Getting ready', live.job?.stage).slice(0, 300), symbol: 'gearshape', tint: 'accent'};
-      // #630: after a print.check every layout's line is the printer MCP's own problem, first.
-      const check = object.print?.monitor?.checkSent ? live.problems?.[0]?.message : undefined;
+      // #630: after a print.check every layout's line is the printer MCP's own words for it, kept when it was sent.
+      const check = object.print?.monitor?.checkSent ? object.print.monitor.checkMessage : undefined;
       if (check) return {phase: 'printing', text: check.slice(0, 300), ...(rowDetail(check) ? {detail: rowDetail(check)} : {}), symbol: 'exclamationmark.triangle', tint: 'orange'};
       const progress = live.job?.progress !== undefined ? `${Math.round(live.job.progress)}%` : undefined;
       const left = live.job?.remainingSec !== undefined ? `${duration(live.job.remainingSec)} left` : undefined;
@@ -272,7 +272,7 @@ export function objectStatus(object: StatusSource, updatedAtMs?: number): Object
     }
     case 'printed': {
       // #630: the printer said it finished after a print.check: the card keeps the MCP's own words.
-      const check = object.print?.monitor?.checkSent ? object.print.live?.problems?.[0]?.message : undefined;
+      const check = object.print?.monitor?.checkSent ? object.print.monitor.checkMessage : undefined;
       if (check) { const text = `The printer says it's done. ${check}`.slice(0, 300); return {phase: 'printed', text, ...(rowDetail(text) ? {detail: rowDetail(text)} : {}), symbol: 'exclamationmark.triangle', tint: 'orange'}; }
       const at = object.print?.monitor?.endedAt ?? object.print?.dispatchedAt ?? (updatedAtMs ? new Date(updatedAtMs).toISOString() : undefined);
       return {phase: 'printed', text: at ? `Printed ${formatDate(at)}` : 'Printed', symbol: 'shippingbox', tint: 'secondary'};

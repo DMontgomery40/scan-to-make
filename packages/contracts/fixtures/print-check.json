@@ -52,7 +52,8 @@
         "startedAt": "2026-11-11T19:01:00.000Z",
         "milestonesSent": [],
         "firstLayerSent": false,
-        "checkSent": true
+        "checkSent": true,
+        "checkMessage": "Possible extrusion failure: the expected print area appeared empty. Check the print."
       },
       "live": {
         "source": "counterpart",
@@ -107,7 +108,8 @@
         "firstLayerSent": false,
         "checkSent": true,
         "endState": "done",
-        "endedAt": "2026-11-11T20:35:00.000Z"
+        "endedAt": "2026-11-11T20:35:00.000Z",
+        "checkMessage": "Possible extrusion failure: the expected print area appeared empty. Check the print."
       },
       "live": {
         "source": "counterpart",
