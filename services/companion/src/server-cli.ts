@@ -379,6 +379,7 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const)
   process.once(signal, () => {
     modelAccess?.close();
     mcpAutoUpdates?.close();
+    cadSettings?.close();
     printerSetup?.closeObtaining();
     // Wake every waiting events.wait and /v1/events first, so shutdown never waits out a long poll.
     eventLog?.close();

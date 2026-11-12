@@ -103,6 +103,52 @@ test("a copy of a designer's 3MF works on that 3MF every pass, never its merged 
   assert.equal(f.inputs[1].currentModel, false, 'it is not told it has a millimetre STL to import');
 });
 
+// #641: a designer's 3MF sent with no words ran a cleanup pass with the scan-cleanup request ("Clean up this scan…").
+test("a designer's 3MF sent with no words is ready to print as the designer made it: no pass; words later still edit it", async t => {
+  const {zipSync, strToU8} = (await import('node:module')).createRequire(new URL('../../printer-handoff/package.json', import.meta.url))('fflate');
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
+  const designer = Buffer.from(zipSync({'[Content_Types].xml': strToU8('<Types/>'), 'Metadata/plate_1.png': new Uint8Array(png),
+    '3D/3dmodel.model': strToU8('<model><metadata name="Title">Caliper card</metadata><resources><object id="1"><mesh/></object></resources><build><item objectid="1"/></build></model>')}));
+  const f = await setup(t, [{parts: true, result: {summary: 'Logo added.'}}]);
+  const kept = async (object, why) => {
+    const ready = await f.service.settled(object.id);
+    assert.equal(ready.state, 'ready', why);
+    assert.equal(ready.kind, 'copy', 'still a copy: words later edit the designer\'s file');
+    assert.match(ready.current.model, /^original\/[0-9a-f]{64}-scan\.3mf$/, 'the designer\'s 3MF is what prints, kept as a published file is');
+    assert.equal(ready.files.current, ready.current.model);
+    assert.ok((await readFile(join(f.store.dir(object.id), ready.current.model))).equals(designer), 'byte for byte');
+    assert.deepEqual(ready.publishedSelection, {fileIndex: 0, plateIndex: 0, sliced: false}, 'its plate is recorded');
+    assert.equal(ready.current.summary, 'The designer’s file as they made it, with its plates and print settings. It’s ready to print. To change something, say what.');
+    assert.doesNotMatch(JSON.stringify(ready), /Clean up this scan/, 'never the scan-cleanup sentence');
+    assert.equal(ready.passes.length, 0, 'no pass ran');
+    return ready;
+  };
+  // On its own, with no photos.
+  const bare = await f.service.create(undefined, 'copy');
+  await f.service.addScan(bare.id, 'scan.3mf', designer);
+  await f.service.start(bare.id);
+  const first = await kept(bare, 'no photos needed: there is nothing to clean up');
+  assert.equal(first.title, 'Caliper card', 'named by the file');
+  // With photos, still no words.
+  const pictured = await f.service.create(undefined, 'copy');
+  await f.service.addScan(pictured.id, 'scan.3mf', designer);
+  await f.service.addPhoto(pictured.id, 'photo-01.jpg', JPEG);
+  await f.service.start(pictured.id);
+  await kept(pictured, 'photos alone ask for no change');
+  // Made from that project's file with no words.
+  const again = await f.service.makeFromScan(bare.id, {kind: 'copy'});
+  await until(async () => (await f.store.get(again.id)).state === 'ready');
+  await kept(again, 'brought over, then kept as it came');
+  assert.equal(f.inputs.length, 0, 'no worker ran for any of them');
+  // Words later: the designer-copy pass edits that 3MF, as before.
+  await f.service.correct(bare.id, 'Add the counterpart logo');
+  await f.service.settled(bare.id);
+  const dir = f.store.dir(bare.id);
+  assert.deepEqual(f.inputs[0].scan, [join(dir, 'scan', 'scan.3mf')], 'the designer\'s own file, once');
+  assert.equal(f.inputs[0].designerCopy, true);
+  assert.equal(f.inputs[0].instructions, undefined, 'no invented request: the change is the person\'s words');
+});
+
 test('a copy started with nothing scanned designs its request, and stays a design after the first pass', async t => {
   const f = await setup(t, [{}, {}]);
   const object = await f.service.create('A guitar pick that says Vivi', 'copy');
@@ -329,6 +375,57 @@ test('a correction that changes nothing keeps a Done project Done', async t => {
   assert.equal(projectStatus(kept), 'works');
 });
 
+// #638: "Wall holder for three" was marked printed and still carried an open close-up question.
+test('a recorded print closes the open question; it stays on the project as asked, then superseded', async t => {
+  const f = await setup(t, [{result: {summary: 'Made it.'}}, {status: 'needs_closeup', result: {closeup: 'the clip', ask: {question: 'Can you take a close-up of the clip?'}}}]);
+  const object = await f.service.create('A wall holder for three');
+  await f.service.start(object.id);
+  await f.service.settled(object.id);
+  await f.service.correct(object.id, 'Make the clip tighter');
+  const asked = await f.service.settled(object.id);
+  assert.equal(asked.state, 'needs-closeup');
+  assert.equal(asked.ask.status, 'open');
+  const printed = await f.service.setStatus(object.id, 'printed');
+  assert.equal(printed.state, 'printed');
+  assert.equal(printed.ask.status, 'answered', 'nobody can answer it once the part is printed');
+  assert.equal(printed.ask.id, asked.ask.id, 'the question is kept, not deleted');
+  assert.equal(printed.ask.question, 'Can you take a close-up of the clip?');
+  assert.equal(printed.ask.choices, undefined, 'superseded, as a pass that takes its place leaves it: no answer recorded');
+  assert.equal(printed.question, undefined);
+  assert.equal(printed.passes.at(-1).question, 'Can you take a close-up of the clip?', 'the pass still says what it asked');
+  // Marked Works from a question works the same way.
+  const f2 = await setup(t, [{result: {summary: 'Made it.'}}, {status: 'needs_closeup', result: {closeup: 'the clip'}}]);
+  const other = await f2.service.create('A wall holder for two');
+  await f2.service.start(other.id); await f2.service.settled(other.id);
+  await f2.service.correct(other.id, 'Tighter'); await f2.service.settled(other.id);
+  const works = await f2.service.setStatus(other.id, 'works');
+  assert.deepEqual([works.state, works.ask.status], ['confirmed', 'answered']);
+});
+
+test('a stored printed project with an old-style open question reads as closed on every client', async t => {
+  const f = await setup(t, []);
+  const object = await f.service.create('Wall holder for three');
+  // As stored before this rule: printed, an open question saved before kinds were written, and the old closeup field.
+  const stored = await f.store.update(object.id, o => ({...o, state: 'printed', current: {model: 'current/model.stl', renders: []},
+    ask: {id: '00000000-0000-4000-8000-000000000638', question: 'Can you take a close-up of the hooks?', answers: ['camera', 'photos', 'best-guess'], status: 'open', askedAtMs: 1},
+    question: {closeup: 'the hooks'}}));
+  const shown = publicObject(stored);
+  assert.equal(shown.ask.status, 'answered');
+  assert.equal(shown.ask.kind, 'closeup', 'it still says its kind');
+  assert.equal(shown.ask.question, 'Can you take a close-up of the hooks?');
+  assert.equal(shown.question, undefined, 'no layout finds it through the old field either');
+  // The service reads it closed too, so it never refuses what no client can show (a plate choice before Print).
+  const askId = '00000000-0000-4000-8000-000000000639';
+  await f.store.update(object.id, o => ({...o, kind: 'published', ask: {id: askId, type: 'choice', kind: 'choice', question: 'Which file and plate would you like to print?',
+    options: [{id: '0:0', label: 'a · Plate 1'}, {id: '0:1', label: 'a · Plate 2'}], answers: ['choice'], status: 'open', askedAtMs: 1}}));
+  assert.equal((await f.service.get(object.id)).ask.status, 'answered');
+  await assert.rejects(f.service.answerAsk(object.id, askId, ['0:0']), /answered or replaced/);
+  await assert.rejects(f.service.print(object.id, {}), error => !/Choose the model’s file and plate/.test(error.message), 'Print is not held by a question nobody can see');
+  // An open question on a project that hasn't printed is still open.
+  const waiting = publicObject({...stored, state: 'needs-closeup'});
+  assert.equal(waiting.ask.status, 'open');
+  assert.deepEqual(waiting.question, {closeup: 'the hooks'});
+});
 
 test('a person renaming during a pass wins over the worker title', async t => {
   const f = await setup(t, [{wait: true, result: {title: 'Generated holder'}}]);
