@@ -287,7 +287,6 @@ function locatePrompt(pass: TouchupPass, instructions?: string, summary?: string
       `- Output folder: ${pass.outDir}`].join('\n')}`].join('\n\n');
 }
 
-/** The lean, isolated `claude -p` call for one touch-up pass. Writes the pass's MCP config file. */
 /**
  * The tools a pass on each engine doesn't get: the other engines'. Nov 11 (#609): a Blender pass ran cad_setup twice and
  * about twenty cad_run calls hunting for a folder the code engine would write to; a Blender pass with Fusion's tools
@@ -372,6 +371,7 @@ function passRules(input: {pass: TouchupPass; kind?: 'copy' | 'fit'; engine?: De
     ...(input.locate ? {locate: true} : {})};
 }
 
+/** The lean, isolated `claude -p` call for one touch-up pass. Writes the pass's MCP config file. */
 export function buildTouchupInvocation(input: {resumeSessionId?: string; pass: TouchupPass; printer: PrinterMcpProcess; claudePath: string; instructions?: string; note?: string; summary?: string; currentModel?: boolean; designerCopy?: boolean; sourceEnv?: NodeJS.ProcessEnv;
   engine?: DesignEngine; documentId?: string; handoff?: PrinterHandoffConfig; design?: DesignSource; guidance?: DesignGuidance;
   /** A code pass's converted capture: its unit and up axis, from the conversion report. */
