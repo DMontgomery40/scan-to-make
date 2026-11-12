@@ -197,9 +197,14 @@ async function migrateOnce(object: StmObject, dir: string, options: {events?: Hi
       versions.push(sealed);
     }
   }
-  // Imported models and projects whose pass folders are gone still keep the one design that survives.
+  // Imported models and projects whose pass folders are gone (or whose passes all failed: the unicorn) still keep the one
+  // design that survives. Every print the project has on record printed that design, so each restored attempt names it
+  // (#602 review, finding 3): it is dated by its model file, never after the prints that used it.
+  let fallback: string | undefined;
   if (!versions.length && object.kind !== 'published' && object.current && await exists(join(dir, object.current.model))) {
-    versions.push(await sealVersion(object, dir, object.current, {endedAtMs: object.updatedAtMs, created}));
+    const written = await stat(join(dir, object.current.model)).then(s => s.mtimeMs, () => object.updatedAtMs);
+    const sealed = await sealVersion(object, dir, object.current, {endedAtMs: Math.min(written, object.updatedAtMs), created});
+    versions.push(sealed); fallback = sealed.id;
   }
   const versionAt = (at: number) => versions.filter(v => v.sealedAtMs <= at).at(-1)?.id;
   let migrated: StmObject = {...object, versions, prints: [...(object.prints ?? [])]};
@@ -226,6 +231,7 @@ async function migrateOnce(object: StmObject, dir: string, options: {events?: Hi
     const times = (await Promise.all((await readdir(frames).catch(() => [] as string[])).map(n => stat(join(frames, n)).then(s => s.mtimeMs, () => NaN)))).filter(Number.isFinite).sort((a,b) => a-b);
     if (times.length) attempts.push({id: name, printId: name, bundleId: name, startedAtMs: times[0]!, versionId: versionAt(times[0]!)});
   }
+  if (fallback) for (const attempt of attempts) attempt.versionId ??= fallback;
   attempts.sort((a,b) => a.startedAtMs - b.startedAtMs);
   // The person's answer stays exactly where it is today: on the newest design. Earlier answers are not guessed back from
   // when a status changed: events record that it changed, not to what, and on the hanger (Nov 11) a status set four

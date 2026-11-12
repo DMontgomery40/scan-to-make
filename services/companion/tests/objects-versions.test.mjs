@@ -219,3 +219,28 @@ test('review 2: a migration killed twice before its record was written leaves on
   assert.deepEqual((await listVersions(store.dir(id))).sort(), migrated.versions.map(v => v.id).sort(), 'one folder per design, nothing else');
   for (const version of migrated.versions) assert.ok((await readFile(join(store.dir(id), version.result.model))).length > 0);
 });
+
+test('review 3: the unicorn shape (all passes failed, a kept model) gives every restored print its design', async () => {
+  const {utimes} = await import('node:fs/promises');
+  const root = await tempDir('versions-unicorn-'); const dir = join(root, 'unicorn');
+  await mkdir(join(dir, 'current'), {recursive: true}); await writeFile(join(dir, 'current', 'model.stl'), STL(7));
+  const t0 = 1794300000000;
+  await utimes(join(dir, 'current', 'model.stl'), t0 / 1000, t0 / 1000);
+  await mkdir(join(dir, 'prints', 'frames-only', 'frames'), {recursive: true});
+  const frame = join(dir, 'prints', 'frames-only', 'frames', '0.jpg'); await writeFile(frame, 'jpg'); await utimes(frame, (t0 + 10_000) / 1000, (t0 + 10_000) / 1000);
+  const object = {id: 'unicorn', kind: 'fit', state: 'printed', photos: [], createdAtMs: t0 - 5000, updatedAtMs: t0 + 100_000,
+    passes: [{startedAtMs: t0 - 4000, endedAtMs: t0 - 3900, status: 'failed', dir: null}, {startedAtMs: t0 - 3000, endedAtMs: t0 - 2900, status: 'failed', dir: null},
+      {startedAtMs: t0 - 2000, endedAtMs: t0 - 1900, status: 'failed', dir: null}],
+    current: {model: 'current/model.stl', renders: []},
+    print: {printId: 'kept', bundleId: 'kept', dispatchedAt: new Date(t0 + 20_000).toISOString(), monitor: {phase: 'ended', endState: 'failed', endedAt: new Date(t0 + 30_000).toISOString()}}};
+  const events = [{type: 'print.started', printId: 'event', at: new Date(t0 + 1000).toISOString()}, {type: 'print.done', printId: 'event', at: new Date(t0 + 5000).toISOString()}];
+  const migrated = await migrateProjectVersions(object, dir, {events});
+  assert.equal(migrated.versions.length, 1);
+  const design = migrated.versions[0].id;
+  assert.deepEqual(migrated.prints.map(p => [p.id, p.versionId]), [['event', design], ['frames-only', design], ['kept', design]]);
+  const {printedAt} = await import('../dist/objects/versions.js');
+  assert.equal(printedAt(migrated.versions[0], migrated.prints), t0 + 5000, 'its finished print shows');
+  // Failed passes and no kept model: nothing to seal, nothing lost, nothing guessed.
+  const empty = await migrateProjectVersions({...object, id: 'none', current: undefined, print: undefined}, join(root, 'none'), {events: []});
+  assert.deepEqual([empty.versionsV1, empty.versions.length, empty.prints.length], [true, 0, 0]);
+});
