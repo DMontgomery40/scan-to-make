@@ -143,7 +143,12 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
         public var pictureStates: [String: String]?
         public var outcome: String?
         public var printedAtMs: Double?
-        public var label: String { result.summary?.isEmpty == false ? result.summary!.components(separatedBy: "\n")[0] : DesignHistory.date(sealedAtMs) }
+        /// How a person points at it (DESIGN.md §2 "The words"): what changed, in the pass's own first sentence, else its date.
+        public var label: String {
+            guard let line = result.summary?.components(separatedBy: "\n").first?.trimmingCharacters(in: .whitespaces), !line.isEmpty else { return DesignHistory.date(sealedAtMs) }
+            guard let end = line.range(of: ". ") else { return line }
+            return String(line[..<end.lowerBound]) + "."
+        }
     }
     public struct PrintAttempt: Codable, Equatable, Identifiable, Sendable {
         public var id: String

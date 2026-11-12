@@ -240,7 +240,7 @@ export function objectStatus(object: StatusSource, updatedAtMs?: number): Object
     const earlier = printed(latest) === undefined ? object.versions!.slice(0,-1).map(printed).filter((n): n is number => n !== undefined).sort((a,b) => b-a)[0] : undefined;
     if (earlier !== undefined) {
       const when = formatDate(new Date(earlier).toISOString());
-      return {phase: 'ready', text: `New one ready · printed ${when}`, detail: `Printed ${when} · that design is unchanged`, symbol: 'checkmark.seal', tint: 'accent'};
+      return {phase: 'ready', text: `New one ready · printed ${when}`, detail: `New design · the one printed ${when} is unchanged`, symbol: 'checkmark.seal', tint: 'accent'};
     }
   }
   const printer = object.print?.destination?.name ?? 'your printer';

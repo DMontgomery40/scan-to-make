@@ -216,7 +216,10 @@ struct ProjectView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
                         // The status is one tap away: the capsule opens the same choices as ••• → Status.
-                        if store.projectSettings {
+                        // An earlier design on the stage shows its own state; the project's status menu waits for the newest (#616).
+                        if viewingDesign != nil {
+                            StatusCapsule(phase: ProjectWords(object.showingDesign(viewingDesign)).phase)
+                        } else if store.projectSettings {
                             Menu { statusChoices(object, words, inline: true) } label: {
                                 HStack(spacing: 4) { StatusCapsule(phase: words.phase); Image(systemName: "chevron.down").font(.caption2.weight(.bold)).foregroundStyle(.secondary) }
                             }

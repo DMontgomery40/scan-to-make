@@ -321,6 +321,25 @@ final class CompanionClientTests: XCTestCase {
         XCTAssertFalse(text.contains(token)); XCTAssertFalse(text.contains(keyPin)); XCTAssertFalse(text.contains("192.168"))
     }
 
+    /// #616: an earlier design's thumbnail and model come from `versions/<id>/…`. The phone refused both before it knew
+    /// the path (its allowlist and its scope table), so What you have showed a placeholder on iPhone and iPad.
+    func testASealedDesignsFilesDownloadAndNothingElseUnderVersions() async throws {
+        let fake = FakeTransport { _, _ in HTTPReply(status: 200, body: Data("png".utf8)) }
+        let c = try client(fake)
+        defer { try? FileManager.default.removeItem(at: c.cache) }
+        let version = "2d67e062-42b7-4d91-ab77-212a490a5a65"
+        for path in ["versions/\(version)/renders/0-1_overview.png", "versions/\(version)/touched.stl", "versions/\(version)/pictures/part-9080508a.png"] {
+            let file = try await c.download(project([:]), path)
+            XCTAssertEqual(try Data(contentsOf: file), Data("png".utf8), path)
+        }
+        XCTAssertTrue(fake.calls.contains { $0.request.url?.path.hasSuffix("/versions/\(version)/renders/0-1_overview.png") == true },
+                      fake.calls.map { $0.request.url?.path ?? "" }.joined(separator: ", "))
+        XCTAssertEqual(CompanionClient.scope("GET", "/v1/objects/\(project([:]).id)/versions/\(version)/touched.stl"), "projects:read")
+        for refused in ["versions/\(version)/../object.json", "versions/\(version)/design/inputs/scan.obj", "versions/not-a-design/touched.stl"] {
+            do { _ = try await c.download(project([:]), refused); XCTFail(refused) } catch {}
+        }
+    }
+
     func testHTTPDownloadRefusalKeepsStatus() async throws {
         let fake = FakeTransport { _, _ in HTTPReply(status: 503, body: Data()) }
         let c = try client(fake)

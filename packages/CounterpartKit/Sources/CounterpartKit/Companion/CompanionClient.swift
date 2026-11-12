@@ -83,7 +83,7 @@ public final class CompanionClient: @unchecked Sendable {
             if is_("/v1/objects(?:/printers)?") || is_(one) || is_(one + "/passes/(0|[1-9][0-9]{0,15})/activity") { return "projects:read" }
             if is_("/healthz") { return "generation:health" }
             if is_("/v1/events") || is_("/v1/settings") || is_("/v1/settings/cad") || is_("/v1/devices") { return "projects:read" }
-            if is_(one + "/(model\\.stl|renders/[^/]+|photos/[^/]+|capture/[^/]+|scan/[^/]+|pictures/[^/]+|original/[0-9]+|asks/[^/]+|prints/[^/]+/frames/[^/]+)") { return "projects:read" }
+            if is_(one + "/(model\\.stl|renders/[^/]+|photos/[^/]+|capture/[^/]+|scan/[^/]+|pictures/[^/]+|original/[0-9]+|asks/[^/]+|prints/[^/]+/frames/[^/]+|versions/[^/]+/(?:(?:renders|pictures)/)?[^/]+)") { return "projects:read" }
             if is_(one + "/(filaments|colour-mapping|camera\\.jpg)") || is_("/v1/objects/printers/[^/]+/camera\\.jpg") { return "printer-handoff:use" }
             if is_("/v1/objects/printers/[A-Za-z0-9_-]{1,256}/route") { return "printer-handoff:use" }
         case "PATCH":
