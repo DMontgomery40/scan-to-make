@@ -253,6 +253,11 @@ main > .model-view {
   font-size: 14px;
   color: #5f6b5f;
 }
+/* Try again reads as a control, not the placeholder's pale mark. */
+.stage-still > button {
+  color: #25352e;
+  font-size: 13px;
+}
 .stage-switch {
   position: absolute;
   top: 18px;
