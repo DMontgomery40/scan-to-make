@@ -202,11 +202,12 @@ test('a fit settles a scan disagreement with the person before any fit-critical 
     const step = text => { const at = fit.indexOf(text); assert.ok(at >= 0, `${engine}: ${text}`); return at; };
     // In this order: measurements define the interface; compare with the scan; ask on a disagreement; size; check.
     const measured = step('come from measurements');
-    const compare = step('When there is a scan, compare each measured or confirmed size with it');
+    const compare = step('When there is a scan, compare each measured or published size with it');
     const ask = step('stop with needs_closeup before modelling any fit-critical geometry');
-    const size = step('Size each place the part meets a real object from the measured or confirmed sizes');
+    const size = step('Size each place the part meets a real object from the measured or published sizes');
     assert.ok(measured < compare && compare < ask && ask < size, `${engine}: the steps are in order`);
     assert.match(fit, /2 mm or 2%/);
+    assert.match(fit, /only accepted without changing it \(an estimate or a scan reading\) is not a measurement/, `${engine}: an accepted estimate is not a measurement (#622)`);
     assert.match(fit, /however little you judge the difference to matter/, `${engine}: the worker's own judgement is no reason to skip the ask`);
     assert.match(fit, /names both sets of numbers/, `${engine}: the question gives the measurement and the scan reading`);
     assert.match(fit, /already answered/, `${engine}: an answered question isn't asked again`);
