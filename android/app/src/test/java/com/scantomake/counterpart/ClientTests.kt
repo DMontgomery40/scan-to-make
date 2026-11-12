@@ -171,7 +171,7 @@ class CompanionClientTests {
         }
         val companion = client(fake)
         val pid = "0b6f0f43-7c35-4b8a-9a3c-8f0b4c4b2a11"
-        fun version(endedAt: Int) = Project.decode(parseObject("""{"id":"$pid","createdAtMs":1,"updatedAtMs":2,"photos":[],"passes":[{"startedAtMs":${endedAt - 1},"endedAtMs":$endedAt,"status":"done"}]}""")!!)!!
+        fun version(endedAt: Int) = Project.decode(parseObject("""{"id":"$pid","createdAtMs":1,"updatedAtMs":2,"state":"ready","photos":[],"passes":[{"startedAtMs":${endedAt - 1},"endedAtMs":$endedAt,"status":"done"}]}""")!!)!!
         val first = companion.download(version(10), "model.stl")
         val second = companion.download(version(20), "model.stl")
         val asks = fake.calls.map { it.request }.filter { it.url.endsWith("/model.stl") }
