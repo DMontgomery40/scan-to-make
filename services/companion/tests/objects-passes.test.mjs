@@ -431,7 +431,9 @@ for (const status of ['capped', 'failed']) test(`the next project request resume
   assert.deepEqual(pass.checkpoints, []);
   await f.service.correct(object.id, 'Please continue and add a mane');
   await f.service.settled(object.id);
-  assert.deepEqual(f.inputs[1].resume, {sessionId:'recover-me', passDir:pass.dir});
+  // The engine the stopped attempt ran on travels with it: only a pass on that engine continues the session (#609).
+  assert.deepEqual(f.inputs[1].resume, {sessionId:'recover-me', passDir:pass.dir, engine: pass.engine});
+  assert.equal(pass.engine, 'blender');
   const wire = publicObject(stopped).passes.at(-1);
   assert.equal(wire.sessionId, undefined);
   assert.equal(wire.checkpoints, undefined);
