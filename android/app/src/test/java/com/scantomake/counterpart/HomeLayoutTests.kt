@@ -95,6 +95,10 @@ import org.robolectric.annotation.Config
 import org.robolectric.util.ReflectionHelpers
 import org.robolectric.util.ReflectionHelpers.ClassParameter
 import java.io.File
+import androidx.compose.ui.test.hasAnySibling
+import androidx.compose.ui.test.isNotEnabled
+import com.scantomake.counterpart.api.ScanLineage
+import androidx.compose.ui.test.SemanticsNodeInteraction
 
 /**
  * Every layout reaches the same things (PRD §6.1, "Every layout"). David, Nov 5: "where did the 'start with these
@@ -299,6 +303,91 @@ class HomeLayoutTests {
         compose.onNodeWithTag("print").performScrollTo().assertIsEnabled()
         compose.onNodeWithTag("design-history").assertDoesNotExist()
         compose.onNodeWithText("What you have").assertDoesNotExist()
+    }
+
+    private val firstDesign = "10000000-0000-4000-8000-000000000001"
+
+    /** The shared `project-versions.json` project with [extra] wire fields, on its page with another project present. */
+    private fun versionsPage(extra: String, before: (String) -> Unit = {}): String {
+        val raw = parseObject(contractFixture("project-versions.json").readText())!!["project"]!!.jsonObject
+        val data = JsonObject(raw + parseObject("{$extra}")!!)
+        val id = data["id"]!!.jsonPrimitive.content
+        answerProject(data)
+        state.projects.value = listOf(project("other", "Existing project", "ready"), requireNotNull(Project.decode(data)))
+        state.loaded.value = true
+        before(id)
+        compose.setContent { WithApp { com.scantomake.counterpart.ui.ProjectScreen(id, back = {}, print = {}, printing = {}, scan = {}) } }
+        compose.waitForIdle()
+        return id
+    }
+
+    /** #755 review (the Mac's `blocked = viewingDesign != nil`): every send or answer on the page goes to the newest
+     *  design, so each of [controls] acts with the newest on the stage, waits while the earlier printed design is shown,
+     *  and acts again after Show the Newest. */
+    private fun waitsWhileAnEarlierDesignIsShown(vararg controls: () -> SemanticsNodeInteraction) {
+        controls.forEach { it().performScrollTo().assertIsEnabled() }
+        compose.onNodeWithTag("design-$firstDesign").performScrollTo().performClick()
+        compose.onNodeWithTag("viewing-earlier-design").assertExists()
+        controls.forEach { it().performScrollTo().assertIsNotEnabled() }
+        compose.onNodeWithTag("show-newest").performScrollTo().performClick()
+        compose.onNodeWithTag("viewing-earlier-design").assertDoesNotExist()
+        controls.forEach { it().performScrollTo().assertIsEnabled() }
+    }
+
+    @Test fun theComputersQuestionWaitsWhileAnEarlierDesignIsShownWithProjectsPresent() {
+        versionsPage(""""state":"needs-closeup","ask":{"id":"1af638c1-ec63-46fc-aa2f-e74cd29df231","question":"Which side is the back?",
+            "answers":["camera","photos","best-guess","text"],"status":"open"}""")
+        compose.onNodeWithTag("ask-text").performScrollTo().performTextInput("The flat side.")
+        waitsWhileAnEarlierDesignIsShown({ compose.onNodeWithText("Make Your Best Guess") }, { compose.onNodeWithText("Take a Photo") },
+            { compose.onNodeWithText("Choose") }, { compose.onNodeWithText("Send Answer") })
+    }
+
+    @Test fun aSizeQuestionWaitsWhileAnEarlierDesignIsShownWithProjectsPresent() {
+        versionsPage(""""state":"needs-closeup","ask":{"id":"1af638c1-ec63-46fc-aa2f-e74cd29df231","question":"Can you confirm the size?",
+            "kind":"sizes","answers":["sizes","text","camera"],"status":"open","sizes":[{"id":"size-1","label":"width","mm":64,"from":"scan"}]}""")
+        waitsWhileAnEarlierDesignIsShown({ compose.onNodeWithTag("ask-sizes-confirm") }, { compose.onNodeWithText("Caliper Photo") })
+    }
+
+    @Test fun aPlateOrFileQuestionWaitsWhileAnEarlierDesignIsShownWithProjectsPresent() {
+        versionsPage(""""state":"needs-closeup","ask":{"id":"1af638c1-ec63-46fc-aa2f-e74cd29df231","question":"Which plate?","type":"choice","kind":"choice",
+            "options":[{"id":"plate-1","label":"Plate 1"}],"status":"open"}""")
+        waitsWhileAnEarlierDesignIsShown({ compose.onNodeWithText("Plate 1") })
+    }
+
+    @Test fun aModelFileQuestionWaitsWhileAnEarlierDesignIsShownWithProjectsPresent() {
+        versionsPage(""""state":"needs-closeup","ask":{"id":"1af638c1-ec63-46fc-aa2f-e74cd29df231","question":"Choose the model file.","type":"file","kind":"file","status":"open"}""")
+        waitsWhileAnEarlierDesignIsShown({ compose.onNodeWithText("Choose the Model File") })
+    }
+
+    @Test fun aRebuiltModelReviewWaitsWhileAnEarlierDesignIsShownWithProjectsPresent() {
+        versionsPage(""""state":"needs-closeup","reconstructionReview":{"id":"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee","kind":"region",
+            "preview":"reconstruction-preview.stl?reviewId=aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee","boundsMin":[0,0,0],"boundsMax":[2,3,4],
+            "extents":{"x":2,"y":3,"z":4},"scaleKnown":false}""")
+        waitsWhileAnEarlierDesignIsShown({ compose.onNodeWithText("Crop box") })
+    }
+
+    @Test fun thePrintersQuestionASavedSendAndTheMenuWaitWhileAnEarlierDesignIsShownWithProjectsPresent() {
+        versionsPage(""""scan":"scan.usdz","printConfirmation":{"id":"c1","message":"Is the plate clear?","expiresAtMs":9999999999999,"supported":true,
+            "fields":[{"name":"speed","title":"Speed","type":"string","enum":["a","b"],"enumNames":["Slow","Fast"],"default":"a"}]}""") { id ->
+            state.sendFailures.value = mapOf(id to "Your computer didn't answer.")
+        }
+        waitsWhileAnEarlierDesignIsShown({ compose.onNodeWithText("Don't Print") }, { compose.onAllNodes(hasText("Print") and hasAnySibling(hasText("Don't Print")))[0] },
+            { compose.onNodeWithText("Send to Your Computer") }, { compose.onNodeWithTag("make-from-scan") })
+        // The ⋮ menu: nothing in it acts on the project while the earlier design is shown.
+        compose.onNodeWithTag("design-$firstDesign").performScrollTo().performClick()
+        compose.onNodeWithContentDescription("More").performClick()
+        listOf("Hide from Home", "Duplicate", "Delete Project", ScanLineage.ACTION).forEach { compose.onAllNodesWithText(it).assertAll(isNotEnabled()) }
+    }
+
+    @Test fun importingMoreModelFilesWaitsWhileAnEarlierDesignIsShownWithProjectsPresent() {
+        versionsPage(""""kind":"published","plates":[{"id":"0:1","fileIndex":0,"plateIndex":1,"name":"Plate 1","fileName":"hanger.3mf",
+            "selected":true,"sliced":true,"status":"ready"}]""")
+        waitsWhileAnEarlierDesignIsShown({ compose.onNodeWithText("Import More Model Files") })
+    }
+
+    @Test fun finishingADraftsSendWaitsWhileAnEarlierDesignIsShownWithProjectsPresent() {
+        versionsPage(""""state":"new","scan":"scan.usdz"""")
+        waitsWhileAnEarlierDesignIsShown({ compose.onNodeWithText("Send to Your Computer") })
     }
 
     /** #613 (from #600's review, F4), with projects present: a project made from another shows that one's conversation,
