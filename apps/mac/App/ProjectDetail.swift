@@ -225,7 +225,10 @@ struct ProjectDetail: View {
         if let entry {
             switch entry.drawing {
             case .model(let path):
-                if let url = path == "model.stl" ? (stageObject.modelURL.flatMap { $0.pathExtension.lowercased() == "stl" ? $0 : nil } ?? stageObject.blenderModelURL) : stageObject.projectFile(path) {
+                // A design's own mesh (an earlier design's touched.stl, a multi-part design's merged model.stl, #769) only when
+                // it is on this Mac: a designed 3MF a pass made before merged meshes were kept keeps its picture.
+                if let url = path == "model.stl" ? (stageObject.modelURL.flatMap { $0.pathExtension.lowercased() == "stl" ? $0 : nil } ?? stageObject.blenderModelURL)
+                    : stageObject.projectFile(path).flatMap({ FileManager.default.fileExists(atPath: $0.path) ? $0 : nil }) {
                     ModelStage(url: url, version: FileVersion.of(url, else: stageObject.updatedAtMs), fit: 0.15,
                                accessibilityText: "\(entry.label). Drag to turn it, scroll to zoom.",
                                poster: entry.kind == .part ? (stageObject.pictures?["part"].flatMap(stageObject.projectFile) ?? Self.poster(stageObject)) : stageObject.pictures?["scan"].flatMap(stageObject.projectFile), tint: Self.colour(entry.colour),

@@ -58,7 +58,9 @@ public final class OnDeviceLibrary: @unchecked Sendable {
         case scan
 
         public static func of(_ name: String) -> Kind {
-            if name == "model.stl" || name.hasPrefix("original/") { return .model }
+            if name == "model.stl" || name == "current/model.stl" || name.hasPrefix("original/") { return .model }
+            // A sealed design's own mesh (#769): `versions/<id>/touched.stl`, or the `model.stl` sealed beside its 3MF.
+            if name.hasPrefix("versions/"), !name.contains("/renders/"), !name.contains("/pictures/"), name.lowercased().hasSuffix(".stl") || name.lowercased().hasSuffix(".3mf") { return .model }
             if name.hasPrefix("scan/") || name.hasPrefix("capture/") || name.hasPrefix("photos/") { return .scan }
             return .picture
         }

@@ -91,8 +91,9 @@ public struct PrintablePart: Equatable, Sendable {
 
 extension Project {
     /// The things that will print, from today's data: each plate of a designer's file (its own picture), or the result.
-    /// A one-colour model is a model to turn in its spool's colour; a multi-colour 3MF is its pass's picture until the
-    /// app has each part's own mesh (the seam in `ProjectGallery.init`).
+    /// A one-colour model is a model to turn in its spool's colour. A multi-part design (a 3MF a pass made) turns too, from
+    /// the merged mesh beside its 3MF, in the neutral material until the MCPs report each part's colour (#645); the Mac's
+    /// picture is its still (#769). A designer's published 3MF has no merged mesh: its picture stands for it.
     public var printableParts: [PrintablePart] {
         if let plates, plates.count > 1 {
             // Every plate the file has is an entry; one whose picture the MCP didn't send shows the placeholder ("").
@@ -103,14 +104,31 @@ extension Project {
         }
         guard let current else { return [] }
         let label = usesCopyWorkflow ? "Your copy" : kind == "published" ? "Model" : "Your part"
-        if preservesPublishedFilaments {
-            // A 3MF's parts and colours are in the file, which only the printer MCP reads: a picture stands for it, the
-            // Mac's drawing of all its objects first (Nov 10: a 3MF with four objects had none and couldn't be told apart).
-            // Always an entry (review B2 on #539): with no picture yet ("") the stage says it is coming or that it can't be had.
+        guard let mesh = partMesh else {
+            // A designer's 3MF: its parts and colours are in the file, which only the printer MCP reads, and no merged mesh
+            // is written beside it. A picture stands for it, the Mac's drawing of all its objects first (Nov 10: a 3MF with
+            // four objects had none and couldn't be told apart). Always an entry (review B2 on #539): with no picture yet
+            // ("") the stage says it is coming or that it can't be had.
             let render = pictures?["part"] ?? current.renders.first.map(Self.renderPath) ?? plates?.first?.thumbnail ?? ""
             return [PrintablePart(id: "result", label: label, drawing: .picture(render), colour: .own, sizeMm: current.sizeMm)]
         }
-        return [PrintablePart(id: "result", label: label, drawing: .model(current.model.hasPrefix("versions/") ? Self.versionMesh(current.model) : "model.stl"), colour: spoolColour.map { .spool($0) } ?? .neutral, sizeMm: current.sizeMm)]
+        // Several parts are several colours: neutral, never one spool's, until the MCPs report each part's (#645).
+        let colour: ProjectGallery.Colour = preservesPublishedFilaments ? .neutral : spoolColour.map { .spool($0) } ?? .neutral
+        return [PrintablePart(id: "result", label: label, drawing: .model(mesh), colour: colour, sizeMm: current.sizeMm)]
+    }
+
+    /// The mesh the part's stage turns and its AR is written from, as a project path the Mac serves (#769):
+    /// - the page's own model, `model.stl`, for a one-colour design;
+    /// - `current/model.stl` for a multi-part design: the merged mesh a pass writes beside its `current/model.3mf`
+    ///   (the companion's `isMultipart && kind !== 'published'`, the same file the Mac opens in Blender);
+    /// - a sealed design's own file (`versionMesh`): `versions/<id>/touched.stl`, or the `model.stl` sealed beside a 3MF.
+    /// Nil for a designer's published 3MF, which has no merged mesh (sealed or not): the stage shows its picture.
+    /// `model.stl` stays the route for the file that prints (the 3MF itself for a multi-part design): Share and Print use it.
+    public var partMesh: String? {
+        guard let model = current?.model else { return nil }
+        guard preservesPublishedFilaments else { return model.hasPrefix("versions/") ? model : "model.stl" }
+        guard kind != "published", model.hasPrefix("current/") || model.hasPrefix("versions/") else { return nil }
+        return Self.versionMesh(model)
     }
 
     /// The one spool the result prints in (PRD §5.4): the spool its last print was sent with, as the printer MCP reported
@@ -240,6 +258,14 @@ extension Project {
 }
 
 extension ProjectGallery.Entry {
+    /// The STL the part's AR file is written from (#769): the mesh its stage turns, whatever the design's file is called (an
+    /// earlier design's `versions/<id>/touched.stl`, a multi-part design's merged mesh). None for a picture, a plate or
+    /// Together; a scan's AR is its own USDZ, decided by the stage.
+    public var arMesh: String? {
+        guard kind == .part, case .model(let path) = drawing else { return nil }
+        return path
+    }
+
     /// The size chip: what it measures and its size ("Part · 213 × 43 × 82 mm"), when the size is known.
     public func sizeText(_ measured: [Double]? = nil) -> String? {
         guard let size = Format.size(measured ?? sizeMm ?? []) else { return nil }
