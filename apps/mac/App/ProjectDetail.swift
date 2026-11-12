@@ -270,7 +270,7 @@ struct ProjectDetail: View {
 
     /// The companion's overview render of the current model, the stage's still.
     static func poster(_ object: Project) -> URL? {
-        let renders = stageObject.renderURLs
+        let renders = object.renderURLs
         return renders.first { $0.lastPathComponent.contains("overview") } ?? renders.first
     }
 
