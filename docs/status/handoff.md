@@ -6,6 +6,23 @@ Updated in place; git history keeps the rest. This is the only handoff: no dated
 
 **What is running and owed this hour is the pinned issue [#610](https://github.com/DMontgomery40/scan-to-make/issues/610), which the lead updates at every wake. Read it first.**
 
+## Now (2026-11-12, 01:39Z): the lead's state of play
+
+Lead: Claude Opus 5.5 (high), T3 thread "Recover Work and Stabilize Counterpart" on agents-173, since 18:46Z Nov 11. Live list: pinned issue [#610](https://github.com/DMontgomery40/scan-to-make/issues/610). Pipeline explainer for David (every step, the exact worker prompts): https://claude.ai/artifact/GGte9gZZuoYH3spiJo3Snj
+
+**Decided (David):**
+- **One design engine: build123d**, run by the printer MCPs' `cad_run`, with Counterpart's own work on top (prompts, the cookbook served by `cad_examples`, honest checks, touch-up helpers). counterpart-kernel is parked; #612 closed (#734).
+- **A running print never holds an install** (#728).
+- The design worker's words matter more than the engine: the same model and engine made a ball-swivel Forester mount from a request that described a bought one, and a real trigger capo once the prompts were concept-first with worked examples (#734).
+
+**Installed:** Mac and iPhone on build 202611112256 (main `b4702cea`, train 11c: turn/zoom restored #732, history carried into copies #600, #410, #413, #532, #533). iPad still 202611111737; its install script runs when it's reachable. MCPs in the app: bambu-printer-mcp 1.1.89, mcp-3d-printer-server 1.2.71.
+
+**The printer (#605, #630):** David's P1S stopped extruding about 30 mm into the hanger and has printed air since, from the app and from Bambu Studio alike, with no error (the P1S has no clog detection; forum-known). David checks the nozzle and extruder by hand. Our part: the MCP keeps per-job evidence (#628, PRs bambu #144 / mcp-3D #100) and the companion must judge the first-layer frame and stop announcing "first layer's down" over an empty bed (#630, in progress).
+
+**In motion (owners in #610):** train 12a (#556 phone library = #720, #738 touch-up maps); MCP release 1.1.90/1.2.72 (cookbook #147/#103 + the #609 fix: every CAD release silently un-set the code engine, so passes fell back to Blender); #630 client; #144/#100 rebase + #737 (our 3MF had invalid XML); the Sonnet-class capability test; #616 versions (#602).
+
+**Rules learned this session:** don't install or schedule around prints; delegates that end a turn "waiting" must be re-driven or checked, remote completions often don't wake the lead; one review + one focused follow-up; look at renders, never metrics; time stamps come from `date -u` (the Now issue's stamp script does it).
+
 ## Now (2026-11-11, 19:15Z): a new lead, and the tracker is GitHub Issues
 
 The lead is Claude Opus 5.5 (high), T3 thread "Recover Work and Stabilize Counterpart" on agents-173, since 18:46Z (David named it). Live state is the pinned issue [#610](https://github.com/DMontgomery40/scan-to-make/issues/610); this section only records what changed since the section below it.
