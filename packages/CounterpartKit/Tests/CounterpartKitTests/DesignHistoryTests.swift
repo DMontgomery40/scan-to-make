@@ -55,5 +55,8 @@ final class DesignHistoryTests: XCTestCase {
         project.versions![1].passStartedAtMs = 1793836000000
         XCTAssertEqual(DesignHistory(project).sealedLine(passStartedAtMs: 1793836000000), "This became the \(DesignHistory.date(project.versions![1].sealedAtMs)) design")
         XCTAssertNil(DesignHistory(project).sealedLine(passStartedAtMs: 5))
+        // A multi-part design (the pink box's decorated lid) is drawn from the merged STL sealed beside its 3MF.
+        XCTAssertEqual(Project.versionMesh("versions/abc/touched.3mf"), "versions/abc/model.stl")
+        XCTAssertEqual(Project.versionMesh("versions/abc/touched.stl"), "versions/abc/touched.stl")
     }
 }

@@ -32,8 +32,10 @@ struct ProjectGalleryView: View {
     @State private var arFailed = false
     @State private var arTask: Task<Void, Never>?
 
+    /// A sealed design shown on the stage (#616) draws from its own mesh, fetched like any project file.
+    private var versionModel: String? { project.current?.model.hasPrefix("versions/") == true ? Project.versionMesh(project.current!.model) : nil }
     private var effectiveModelURL: URL? {
-        if let path = project.current?.model, path.hasPrefix("versions/") { return store.models.file(project, path) }
+        if let versionModel { return store.models.file(project, versionModel) }
         return modelURL
     }
     private var gallery: ProjectGallery { ProjectGallery(project: project, scanOnThisDevice: localScan != nil) }
@@ -59,7 +61,7 @@ struct ProjectGalleryView: View {
             // The store fetches them, so leaving the page never stops a download (Nov 10). Coming back to the page or to
             // the app starts again one that failed meanwhile (a suspended app's transfer drops).
             guard scenePhase == .active else { return }
-            if let path = project.current?.model, path.hasPrefix("versions/") { store.models.want(project, path) }
+            if let versionModel { store.models.want(project, versionModel) }
             if case .file(let path) = scanModel { store.models.want(project, path) }
             if gallery.entries.contains(where: { $0.kind == .together }), case .file(let path) = togetherModel { store.models.want(project, path) }
         }

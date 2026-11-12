@@ -57,7 +57,10 @@ public struct DesignHistoryView<Thumbnail: View>: View {
                 if let restored = project.historyRestored {
                     Text(restored).font(.footnote).foregroundStyle(.secondary)
                 }
-            }.accessibilityIdentifier("design-history")
+            }
+            // A container, so the identifier names the sections and each design row keeps its own (SwiftUI
+            // AccessibilityChildBehavior.contain: "Any child accessibility elements become children of the new element").
+            .accessibilityElement(children: .contain).accessibilityIdentifier("design-history")
         }
     }
 }

@@ -587,6 +587,38 @@ private func project(_ item: [String: Any]) throws -> Project {
         XCTAssertEqual(conversation.entries.first?.text, "Add a swivel.")
     }
 
+    /// #616 on the Mac, from the shared fixture every client reads: a changed-but-printed project lists its printed design
+    /// under What you have, the sidebar line says both truths, the printed design opens on the stage from its own files,
+    /// and its Did it fit? answer goes to that design only.
+    func testAChangedButPrintedProjectKeepsItsPrintedDesignWithProjectsPresent() async throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let data = try Data(contentsOf: root.appending(path: "packages/contracts/fixtures/project-versions.json"))
+        let fixture = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        var hanger = try XCTUnwrap(fixture["project"] as? [String: Any]); hanger["directory"] = "/tmp/hanger"
+        let expected = try XCTUnwrap(fixture["expected"] as? [String: Any])
+        let companion = FakeObjects()
+        await companion.set([hanger, item("other", "confirmed", ["kind": "fit", "title": "Mic mount", "outcome": "works"])])
+        await companion.setCapabilities(.init(objectsCreate: true, projectSettings: true))
+        let model = ObjectsModel(companion: companion)
+        await model.refresh()
+        let project = try XCTUnwrap(model.objects.first { $0.title == "Desk hanger" })
+        XCTAssertEqual(project.words.status, expected["line"] as? String)
+        XCTAssertEqual(project.words.stage.rawValue, expected["phase"] as? String)
+        XCTAssertFalse(DesignHistory(try XCTUnwrap(model.objects.first { $0.id == "other" })).showsSections, "one design: today's page")
+        model.selection = project.id
+        let history = DesignHistory(try XCTUnwrap(model.selected))
+        XCTAssertEqual(history.have.map(\.id), expected["have"] as? [String])
+        XCTAssertEqual(history.earlier.map(\.id), expected["earlier"] as? [String])
+        let printed = try XCTUnwrap(history.have.first)
+        let shown = project.showingDesign(printed.id)
+        XCTAssertEqual(shown.current?.model, printed.result.model, "the stage draws the printed design's own file")
+        XCTAssertEqual(shown.projectFile(printed.result.model)?.path, "/tmp/hanger/\(printed.result.model)")
+        let answered = await model.setStatus("works", for: project.id, versionId: printed.id)
+        XCTAssertTrue(answered)
+        let patches = await companion.settingsPatches
+        XCTAssertEqual(patches[project.id], ["status": .string("works"), "versionId": .string(printed.id)])
+    }
+
     func testMakeSomethingElseFromACopysScanWithProjectsPresent() async throws {
         let companion = FakeObjects()
         await companion.set([item("source", "ready", ["kind": "copy", "title": "Leatherman Wave+ replica", "scan": "scan.usdz"]),

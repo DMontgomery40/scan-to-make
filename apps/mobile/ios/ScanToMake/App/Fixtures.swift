@@ -140,6 +140,29 @@ enum Fixtures {
         }
       }
     ]
+  },
+  {
+    "id": "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a03",
+    "title": "Mic mount",
+    "kind": "fit",
+    "instructions": "A mic mount.",
+    "state": "confirmed",
+    "outcome": "works",
+    "createdAtMs": 1793750000000,
+    "updatedAtMs": 1793750100000,
+    "photos": [],
+    "passes": [],
+    "current": {"model": "current/model.stl", "renders": [], "summary": "A rounded cup."},
+    "versions": [
+      {
+        "id": "20000000-0000-4000-8000-000000000001",
+        "sealedAtMs": 1793750000000,
+        "modelSha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "result": {"model": "versions/20000000-0000-4000-8000-000000000001/model.stl", "renders": [], "summary": "A rounded cup."},
+        "outcome": "works"
+      }
+    ],
+    "prints": []
   }
 ]
 """#.utf8)

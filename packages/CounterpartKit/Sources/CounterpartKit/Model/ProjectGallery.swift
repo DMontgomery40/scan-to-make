@@ -110,7 +110,7 @@ extension Project {
             let render = pictures?["part"] ?? current.renders.first.map(Self.renderPath) ?? plates?.first?.thumbnail ?? ""
             return [PrintablePart(id: "result", label: label, drawing: .picture(render), colour: .own, sizeMm: current.sizeMm)]
         }
-        return [PrintablePart(id: "result", label: label, drawing: .model(current.model.hasPrefix("versions/") ? current.model : "model.stl"), colour: spoolColour.map { .spool($0) } ?? .neutral, sizeMm: current.sizeMm)]
+        return [PrintablePart(id: "result", label: label, drawing: .model(current.model.hasPrefix("versions/") ? Self.versionMesh(current.model) : "model.stl"), colour: spoolColour.map { .spool($0) } ?? .neutral, sizeMm: current.sizeMm)]
     }
 
     /// The one spool the result prints in (PRD §5.4): the spool its last print was sent with, as the printer MCP reported
@@ -135,6 +135,12 @@ extension Project {
     /// The scan's photos: the ones sent with it, else its capture frames.
     public var scanPhotos: [String] {
         photos.isEmpty ? (capture ?? []).map { "capture/\($0)" } : photos.map { "photos/\($0)" }
+    }
+
+    /// A sealed design's mesh for the stage (#616): its STL, or for a multi-part design the merged STL sealed beside its 3MF.
+    public static func versionMesh(_ model: String) -> String {
+        guard model.lowercased().hasSuffix(".3mf") else { return model }
+        return (model.split(separator: "/").dropLast() + ["model.stl"]).joined(separator: "/")
     }
 
     static func renderPath(_ render: String) -> String { if render.hasPrefix("versions/") { return render }; return "renders/\(render.split(separator: "/").last ?? Substring(render))" }

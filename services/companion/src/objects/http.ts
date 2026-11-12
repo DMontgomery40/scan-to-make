@@ -390,7 +390,8 @@ export function createObjectRoutes(service: ObjectService, options: {printerSetu
           if (method !== 'GET') throw new HttpFailure(405, 'method-not-allowed');
           await authorize(READ);
           const object = await service.get(id);
-          const allowed = object.versions?.flatMap(v => [v.result.model, ...v.result.renders, ...Object.values(v.pictures ?? {})]);
+          // A sealed design's own files: its model (and the merged STL sealed beside a multi-part 3MF), renders and pictures.
+          const allowed = object.versions?.flatMap(v => [v.result.model, `${v.result.model.split('/').slice(0, -1).join('/')}/model.stl`, ...v.result.renders, ...Object.values(v.pictures ?? {})]);
           if (!allowed?.includes(action)) throw new HttpFailure(404, 'not-found');
           await exportFile(response, service.dir(id), action, {'content-type': action.endsWith('.png') ? 'image/png' : action.endsWith('.3mf') ? 'model/3mf' : 'model/stl', 'cache-control': 'private, max-age=86400', 'x-content-type-options': 'nosniff'});
           return;

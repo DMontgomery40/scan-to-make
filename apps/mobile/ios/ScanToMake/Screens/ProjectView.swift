@@ -344,7 +344,7 @@ struct ProjectView: View {
                         }
                         Spacer()
                         Button("Show the newest") { self.viewingDesign = nil }
-                    }.padding(.horizontal, 20).accessibilityIdentifier("viewing-earlier-design")
+                    }.padding(.horizontal, 20).accessibilityElement(children: .contain).accessibilityIdentifier("viewing-earlier-design")
                 }
                 DesignHistoryView(project: object, select: { viewingDesign = $0 }, answer: { versionId, status in
                     act { try await store.mac.client.setStatus(object.id, status == "works" ? .works : .needsChanges, versionId: versionId) }
