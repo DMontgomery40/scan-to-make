@@ -2468,6 +2468,34 @@ final class OnDeviceLibraryUITests: XCTestCase {
         app.terminate()
     }
 
+    /// #769, David's phone trace (Nov 12, build 202611121212): Wall holder, Crochet potato, AirPods hanger, BAG CLIP and
+    /// others, opened from Home, logged one `page.model-published file=false`, their stage appeared and disappeared within
+    /// 4 ms, and `model.published ready=true` 40 ms later never reached the page: no Explore in 3D, no AR. The page's model
+    /// came from `@State` that a one-shot task set. Here the model reaches the phone just after the page is pushed from
+    /// Home's own row (not a launch link), and the stage must still offer Explore in 3D and AR.
+    func testAModelThatArrivesJustAfterThePageOpensIsOnTheStageWithProjectsPresent() throws {
+        let folder = try folder()
+        try cube(40).write(to: folder.appendingPathComponent("mic.stl"))
+        let app = launch(folder, ["-CounterpartSlowModel", "1.5", "-CounterpartStageIdle", "30"])
+        let search = app.textFields["project-search"]
+        if app.collectionViews["Sidebar"].exists, search.waitForExistence(timeout: 20) {
+            pick(app, search, "Mic mount", "sidebar-project-6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01", file: #filePath, line: #line)
+        } else {
+            let row = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@ AND NOT (label BEGINSWITH %@)", "Mic mount", "Mic mount v")).firstMatch
+            XCTAssertTrue(row.waitForExistence(timeout: 20), app.debugDescription)
+            for _ in 0..<6 where !row.isHittable { app.swipeUp() }
+            row.tap()
+        }
+        XCTAssertTrue(app.buttons["project-title"].waitForExistence(timeout: 10), app.debugDescription)
+        let explore = app.buttons["Explore in 3D"]
+        XCTAssertTrue(explore.waitForExistence(timeout: 20), "the model came after the page opened, and the stage has it: \(app.debugDescription)")
+        let ar = app.buttons["gallery-ar"]
+        XCTAssertTrue(ar.waitForExistence(timeout: 10))
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "ready"), object: ar)
+        XCTAssertEqual(XCTWaiter().wait(for: [ready], timeout: 20), .completed, "AR for the model that came: \(String(describing: ar.value))")
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "769-model-after-open"; shot.lifetime = .keepAlways; add(shot)
+    }
+
     /// Back to Home and into Mic mount again (iPhone), or to another project and back by the sidebar (iPad). The iPad finds
     /// each row with the sidebar's own search, which also says how many projects the list holds: a project missing from
     /// the list while the Mac is away is told apart from a row scrolled out of view.

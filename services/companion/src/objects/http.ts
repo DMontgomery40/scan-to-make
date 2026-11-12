@@ -25,7 +25,7 @@ import {PrinterSetupError, type PrinterSetup} from '../printing/setup.js';
 const READ: RemoteScope = 'projects:read', WRITE: RemoteScope = 'captures:import', PRINT: RemoteScope = 'printer-handoff:use';
 const MAX_SCAN = 64 * 1024 * 1024, MAX_PHOTO = 25 * 1024 * 1024, MAX_JSON = 16 * 1024;
 const MAX_DEPTH = 8 * 1024 * 1024;
-const PATH = /^\/v1\/objects(?:\/([0-9a-f-]{36})(?:\/(scan|model|ask|plate-selection|settings|duplicate|make-from-scan|locate|photos|capture|capture-manifest|capture-depth|capture-camera|reconstruction|reconstruction-preview\.stl|start|corrections|closeup|print|print\/pause|print\/resume|print\/cancel|estimate|camera\.jpg|prints\/[0-9a-f-]{36}\/frames\/[0-9a-f-]{36}\.jpg|asks\/[0-9a-f-]{36}\.jpg|filaments|colour-mapping|print-confirmation|printer|model\.stl|original\/[0-9]+|passes\/[^/]+\/activity|(?:renders|photos|capture|scan|pictures)\/[^/]+|versions\/[0-9a-f-]{36}\/(?:[^/]+|(?:renders|pictures)\/[^/]+)))?)?$/;
+const PATH = /^\/v1\/objects(?:\/([0-9a-f-]{36})(?:\/(scan|model|ask|plate-selection|settings|duplicate|make-from-scan|locate|photos|capture|capture-manifest|capture-depth|capture-camera|reconstruction|reconstruction-preview\.stl|start|corrections|closeup|print|print\/pause|print\/resume|print\/cancel|estimate|camera\.jpg|prints\/[0-9a-f-]{36}\/frames\/[0-9a-f-]{36}\.jpg|asks\/[0-9a-f-]{36}\.jpg|filaments|colour-mapping|print-confirmation|printer|model\.stl|current\/[^/]+|original\/[0-9]+|passes\/[^/]+\/activity|(?:renders|photos|capture|scan|pictures)\/[^/]+|versions\/[0-9a-f-]{36}\/(?:[^/]+|(?:renders|pictures)\/[^/]+)))?)?$/;
 const PRINTER_CAMERA = /^\/v1\/objects\/printers\/([A-Za-z0-9_-]{1,256})\/camera\.jpg$/;
 /** Settings -> Printers: the printer MCP's connection (`route`) and which MCP a printer uses (`mcp`). */
 const PRINTER_CHOICE = /^\/v1\/objects\/printers\/([A-Za-z0-9_-]{1,256})\/(route|mcp)$/;
@@ -420,6 +420,19 @@ export function createObjectRoutes(service: ObjectService, options: {printerSetu
           // A scan file is one the project lists (its scan, and the phone's own model kept beside a Mac rebuild).
           if (!type || !(kind === 'scan' ? object.scanFiles?.some(file => file.name === name) : object[kind]?.includes(name))) throw new HttpFailure(404, 'not-found');
           await exportFile(response, service.dir(id), `${kind}/${name}`, {'content-type': type, 'x-content-type-options': 'nosniff', 'cache-control': 'private, no-store'}, header('if-none-match'));
+          return;
+        }
+        if (action.startsWith('current/')) {
+          if (method !== 'GET') throw new HttpFailure(405, 'method-not-allowed');
+          await authorize(READ);
+          const object = await service.get(id);
+          // #769: what a stage turns and AR is written from: the current model, and a multi-part design's merged mesh
+          // beside its 3MF (current/model.stl). A designer's published 3MF has none. Nothing else under current/ is
+          // served here (renders by name under renders/). model.stl stays the file that prints.
+          const model = object.current?.model;
+          const allowed = model?.startsWith('current/') ? [model, ...(model.toLowerCase().endsWith('.3mf') && object.kind !== 'published' ? ['current/model.stl'] : [])] : [];
+          if (!allowed.includes(action)) throw new HttpFailure(404, 'not-found');
+          await exportFile(response, service.dir(id), action, {'content-type': action.toLowerCase().endsWith('.3mf') ? 'model/3mf' : 'model/stl', 'cache-control': 'private, no-store', 'x-content-type-options': 'nosniff'}, header('if-none-match'));
           return;
         }
         if (action.startsWith('versions/')) {
