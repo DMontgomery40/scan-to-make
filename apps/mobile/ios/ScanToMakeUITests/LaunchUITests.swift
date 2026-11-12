@@ -2002,6 +2002,9 @@ final class LayoutParityUITests: XCTestCase {
             XCTAssertEqual(field.value as? String, value, id)
         }
         XCTAssertTrue(app.staticTexts["Width at the waist"].exists, "the Mac's own label for each size")
+        // #622: each number says where it came from, and the Mac's guess is never called a scan reading.
+        XCTAssertEqual(app.staticTexts.matching(NSPredicate(format: "label == %@", "Read from your scan")).count, 3)
+        XCTAssertEqual(app.staticTexts.matching(NSPredicate(format: "label == %@", "The Mac's estimate, not measured")).count, 1)
         XCTAssertFalse(app.buttons["Best guess"].exists, "a size is confirmed or measured, never guessed")
         XCTAssertFalse(app.buttons["Photos"].exists)
         XCTAssertTrue(app.buttons["Caliper photo"].exists)
