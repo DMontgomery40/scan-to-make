@@ -84,6 +84,30 @@ test('migration restores finished designs and the pink box print absent from obj
   }
 });
 
+test('migration keeps the model on the page as the newest design when only an older pass folder survives (train 11-12b review)', async () => {
+  const root = await tempDir('versions-newest-gone-');
+  const dir = join(root, 'p'); const passes = [];
+  for (let i = 0; i < 2; i++) {
+    const path = join(dir, 'passes', `pass-${i}`, 'out');
+    passes.push({startedAtMs: 1000 + i * 1000, endedAtMs: 1100 + i * 1000, status: 'done', dir: join(path, '..'), summary: `Design ${i + 1}`});
+  }
+  // Only the older pass's folder is left; the page's model is the newer design.
+  const older = join(dir, 'passes', 'pass-0', 'out'); await mkdir(older, {recursive: true});
+  await writeFile(join(older, 'touched.stl'), STL(1)); await writeFile(join(older, 'front.png'), 'render0');
+  await mkdir(join(dir, 'current'), {recursive: true}); await writeFile(join(dir, 'current', 'model.stl'), STL(2));
+  const object = {id: 'p', state: 'confirmed', photos: [], passes, createdAtMs: 1, updatedAtMs: 9000, current: {model: 'current/model.stl', renders: []}};
+  const migrated = await migrateProjectVersions(object, dir, {stlInfo: async () => [10, 20, 30]});
+  assert.equal(migrated.versions.length, 2, 'the restored older design and the model on the page');
+  assert.equal(await readFile(join(dir, migrated.versions[1].result.model), 'utf8'), STL(2), 'the newest design is the page\'s geometry');
+  assert.equal(migrated.versions[1].outcome, 'works', 'the answer belongs to the newest design');
+  assert.equal(migrated.versions[0].outcome, undefined);
+  assert.ok(migrated.versions[1].sealedAtMs > migrated.versions[0].sealedAtMs);
+  // When the page's model is the restored design's own bytes, nothing is added.
+  await writeFile(join(dir, 'current', 'model.stl'), STL(1));
+  const same = await migrateProjectVersions({...object, versions: undefined, versionsV1: undefined}, join(root, 'p'), {stlInfo: async () => [10, 20, 30]});
+  assert.equal(same.versions.length, 1);
+});
+
 // #616: the migration over anonymised structural copies of four real projects (packages/contracts/fixtures/
 // versions-migration-real.json): real times, statuses, engines, identical-or-not outputs, code runs, frame folders and
 // events. Expectations are written from DESIGN.md §5 and the stored folders, not from this code's output.

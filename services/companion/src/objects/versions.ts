@@ -163,6 +163,15 @@ export async function freeBytes(dir: string): Promise<number> {
   return Number(info.bavail) * Number(info.bsize);
 }
 
+/** Whether `model` (in the project) is the design `version` already keeps: its model file or, for a multipart design, its merged mesh. */
+async function sameDesign(dir: string, version: DesignVersion, model: string): Promise<boolean> {
+  const page = await hash(join(dir, model)).catch(() => undefined);
+  if (!page) return true;
+  const kept = [join(dir, version.result.model), join(dir, 'versions', version.id, 'model.stl')];
+  for (const file of kept) if (await hash(file).catch(() => undefined) === page) return true;
+  return false;
+}
+
 async function migrateOnce(object: StmObject, dir: string, options: {events?: HistoryEvent[]; stlInfo?: (path: string) => Promise<[number, number, number] | undefined>}, created: Set<string>): Promise<StmObject> {
   const versions: DesignVersion[] = [...(object.versions ?? [])];
   if (object.kind !== 'published') for (const pass of [...object.passes].sort((a,b) => a.startedAtMs - b.startedAtMs)) {
@@ -209,6 +218,15 @@ async function migrateOnce(object: StmObject, dir: string, options: {events?: Hi
     const written = await stat(join(dir, object.current.model)).then(s => s.mtimeMs, () => object.updatedAtMs);
     const sealed = await sealVersion(object, dir, object.current, {endedAtMs: Math.min(written, object.updatedAtMs), created});
     versions.push(sealed); fallback = sealed.id;
+  } else if (versions.length && object.kind !== 'published' && object.current && await exists(join(dir, object.current.model))
+    && !(await sameDesign(dir, versions.at(-1)!, object.current.model))) {
+    // An older pass survived but the newest pass's folder is gone: the model on the page is newer than every restored
+    // design. It is kept as the newest design, so the project's answer and its later prints never land on older geometry
+    // (train 11-12b review, Codex P2).
+    const written = await stat(join(dir, object.current.model)).then(s => s.mtimeMs, () => object.updatedAtMs);
+    const sealed = await sealVersion({...object, versions}, dir, object.current,
+      {endedAtMs: Math.max(versions.at(-1)!.sealedAtMs + 1, Math.min(written, object.updatedAtMs)), created});
+    if (!versions.some(v => v.id === sealed.id)) versions.push(sealed);
   }
   const versionAt = (at: number) => versions.filter(v => v.sealedAtMs <= at).at(-1)?.id;
   let migrated: StmObject = {...object, versions, prints: [...(object.prints ?? [])]};
