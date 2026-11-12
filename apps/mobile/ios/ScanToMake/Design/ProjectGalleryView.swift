@@ -166,7 +166,9 @@ struct ProjectGalleryView: View {
                            drawn: { undrawable.remove(entry.id) })
                     .id(entry.id)
             case .picture:
-                still(entry)
+                // Its own identity: a plate or picture switch starts a new stage, never one still holding the last entry's
+                // picture (review of #741, P1).
+                still(entry).id(entry.id)
             }
         } else if let photo = project.photoPicture {
             // Photos sent, no scan model or result yet: the subject the Mac cut out, as the project's card shows it.

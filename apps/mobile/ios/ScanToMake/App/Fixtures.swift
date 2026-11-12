@@ -12,6 +12,9 @@ enum Fixtures {
         guard let path = UserDefaults.standard.string(forKey: "CounterpartFixtures"), !path.isEmpty else { return nil }
         return URL(fileURLWithPath: path, isDirectory: true)
     }
+    /// `-CounterpartFixtureKeepsLibrary YES`: the phone's library and its saved project list live in the fixture folder, so
+    /// a relaunch with the Mac away finds them (the on-device library's UI tests). Off, both start empty every launch.
+    static var keepsLibrary: Bool { UserDefaults.standard.bool(forKey: "CounterpartFixtureKeepsLibrary") }
     /// `-CounterpartFixtureSet empty` shows a Mac with no projects yet.
     static var set: String { UserDefaults.standard.string(forKey: "CounterpartFixtureSet") ?? "all" }
     /// The mic mount's printer: the print sheet's selection, and what `-CounterpartScreen print-noams` starts on.

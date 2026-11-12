@@ -80,6 +80,9 @@ const errors = {
 } as const;
 type ServerErrorCode = keyof typeof errors;
 
+/** How many project reads one phone connection carries before it is closed (#720). */
+const KEEP_ALIVE_READS = 100;
+
 export class ServerFailure extends Error {
   readonly status: number;
   constructor(readonly code: ServerErrorCode) {
@@ -270,7 +273,10 @@ export async function startCompanionServer(
     response.once('finish', logRequest); response.once('close', logRequest);
     response.setHeader('Content-Type', 'application/json');
     response.setHeader('Cache-Control', 'no-store');
-    response.setHeader('Connection', 'close');
+    // A phone reading a project and its pictures and models keeps its connection open: one TLS handshake, then each file
+    // rides it (#720, audit row 3). Every other reply (uploads, commands, the MCP routes, pairing, events) closes the
+    // connection after it, as before, so an undrained or refused body never meets a next request on that socket.
+    if (!(request.method === 'GET' && route.startsWith('objects'))) response.setHeader('Connection', 'close');
     try {
       if (
         request.headers.origin !== undefined ||
@@ -562,7 +568,9 @@ export async function startCompanionServer(
   // JSON routes; the route body reader enforces its own matching timeout.
   // Scan uploads (tens of MB over Wi-Fi) and printer runs need longer than plain API calls.
   server.requestTimeout = printHandoffRoutes || objectRoutes ? 120000 : 5000;
-  server.maxRequestsPerSocket = 1;
+  // Only a project read keeps a socket open (Connection: close on every other reply, above); this bounds how many reads
+  // one connection carries.
+  server.maxRequestsPerSocket = KEEP_ALIVE_READS;
   try {
     await new Promise<void>((resolve, reject) => {
       server.once('error', reject);
@@ -609,7 +617,7 @@ export async function startCompanionServer(
       const extra = createHttpsServer(options.lanTls!, handler);
       extra.headersTimeout = server.headersTimeout;
       extra.requestTimeout = server.requestTimeout;
-      extra.maxRequestsPerSocket = 1;
+      extra.maxRequestsPerSocket = KEEP_ALIVE_READS;
       const bound = await new Promise<boolean>(resolve => {
         // A failed bind is retried at the next look; a later error must never crash the companion.
         extra.on('error', () => resolve(false));

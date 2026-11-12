@@ -9,6 +9,8 @@ import CounterpartKit
     let projects: ProjectsStore
     let cloud = MobileCloud()
     let activities = MobileActivities()
+    /// What this phone keeps of the Mac's projects, and its background fill (`LibraryFiller`).
+    let library: LibraryFiller
 
     /// Nil until the stored pairing has been read once.
     private(set) var status: PairingStatus?
@@ -41,6 +43,7 @@ import CounterpartKit
         self.companion = companion
         nearby = NearbyPairing(client: pairing, transport: transport)
         projects = ProjectsStore(mac: MacConnection(client: companion), pairing: pairing)
+        library = LibraryFiller(client: companion)
         observer = NotificationCenter.default.addObserver(forName: PairingStore.changed, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.readStatus()
@@ -70,7 +73,16 @@ import CounterpartKit
         }
         #endif
         let pairing = PairingClient(store: PairingStore(store: store), transport: transport)
-        return (pairing, CompanionClient(pairing: pairing, transport: transport, deviceName: pairing.store.userAssignedName()), transport)
+        var library = OnDeviceLibrary(base: OnDeviceLibrary.defaultBase)
+        #if DEBUG
+        // The canned Mac's library is the test's own: kept in its folder across a relaunch only when the test asks
+        // (`-CounterpartFixtureKeepsLibrary YES`), otherwise new for every launch so no test's files reach another.
+        if let folder = Fixtures.folder {
+            library = OnDeviceLibrary(base: Fixtures.keepsLibrary ? folder.appending(path: "library", directoryHint: .isDirectory)
+                                      : FileManager.default.temporaryDirectory.appending(path: "library-\(UUID().uuidString)", directoryHint: .isDirectory))
+        }
+        #endif
+        return (pairing, CompanionClient(pairing: pairing, transport: transport, deviceName: pairing.store.userAssignedName(), library: library), transport)
     }
 
     /// Projects whose page or Printing screen is showing now, counted, so a push then a pop never loses one.
@@ -81,6 +93,7 @@ import CounterpartKit
     /// The project whose page or Printing screen the person is looking at now, for `willPresent`.
     func isShowing(_ id: String) -> Bool { !sheetUp && onScreen[id] != nil }
     func showing(_ id: String, _ visible: Bool) {
+        if visible { library.opened(id) }
         let count = (onScreen[id] ?? 0) + (visible ? 1 : -1)
         onScreen[id] = count > 0 ? count : nil
     }
@@ -89,7 +102,15 @@ import CounterpartKit
     var needsMac: Bool { status.map { $0.state != .paired } ?? false }
 
     func readStatus() {
-        do { status = try pairing.store.status(); statusUnreadable = false }
+        do {
+            status = try pairing.store.status(); statusUnreadable = false
+            #if DEBUG
+            let fixture = Fixtures.folder != nil
+            #else
+            let fixture = false
+            #endif
+            library.paired(status, fixture: fixture)
+        }
         catch { statusUnreadable = true; status = status ?? .disconnected }
     }
 

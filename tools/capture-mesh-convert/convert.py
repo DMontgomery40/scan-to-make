@@ -13,11 +13,11 @@ import zipfile
 import sys
 from pathlib import Path
 
-from textures import UnsupportedTexture, base_colour, uv_coordinates, safe_stem
+from textures import UnsupportedTexture, base_colour, surface_maps, uv_coordinates, safe_stem
 
 Ar = Gf = Sdf = Usd = UsdGeom = UsdUtils = None  # pxr is imported lazily so a missing install exits 2
 
-TOOL_VERSION = "0.4.0"
+TOOL_VERSION = "0.5.0"
 SUBDIVISION_POLICY = ("explicit-none-only: per OpenUSD an unauthored subdivisionScheme means catmullClark "
                       "(a subdivision surface, not a polygon mesh); only an explicitly authored 'none' is polygonal. "
                       "Any other scheme exports the control cage and is not metric-qualified")
@@ -294,6 +294,15 @@ def convert(src, out_obj):
                 artifacts[png_name] = material.pop("png")
                 mtl.append("map_Kd -clamp %s %s" % ("on" if material["clamp"] else "off",png_name))
                 material["textureOutput"] = png_name
+                # The normal and occlusion maps ride on the same UVs. They are files beside the OBJ, listed in the
+                # report; the MTL stays base colour only, so every OBJ reader sees what it saw before.
+                maps, map_warnings = surface_maps(prim, src, _layer_bytes, uv_name)
+                warnings.extend(f"{path}: {warning}" for warning in map_warnings)
+                material["surfaceMaps"] = []
+                for surface_map in maps:
+                    map_name = stem + "_%s_%d.png" % (surface_map["role"], len(materials))
+                    artifacts[map_name] = surface_map.pop("png")
+                    material["surfaceMaps"].append({**surface_map, "textureOutput": map_name})
             materials.append((mtl, material))
         # Composed exactly once: full local-to-world (includes the prim's own ops).
         m = img.ComputeLocalToWorldTransform(t)
@@ -417,7 +426,8 @@ def main(argv=None):
             if report_path in (Path(a.source).resolve(), out.resolve()) or (
                 report_path.parent == out.resolve().parent and
                 (report_path.name == stem+".mtl" or
-                 (report_path.name.startswith(stem+"_basecolor_") and report_path.suffix == ".png"))):
+                 (report_path.suffix == ".png" and any(report_path.name.startswith(stem+"_"+role+"_")
+                                                       for role in ("basecolor", "normal", "occlusion"))))):
                 raise RuntimeError("report must not overwrite source or output artifacts")
         report = convert(a.source, a.out)
     except Exception as e:  # noqa: BLE001

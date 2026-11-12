@@ -31,7 +31,8 @@ class TextureTests(unittest.TestCase):
         self.output.mkdir()
 
     def fixture(self, mode='faceVarying', indexed=True, reflected=False,
-                kind='PNG', bad=None, multiple=False, inherited=False, concave=False, wraps=None, outside=False, wrap_metadata=None):
+                kind='PNG', bad=None, multiple=False, inherited=False, concave=False, wraps=None, outside=False, wrap_metadata=None,
+                surface_maps=None):
         texture = self.source/('colour.png' if kind == 'PNG' else 'colour.jpg')
         image = Image.new('RGB',(2,2))
         image.putdata([(255,0,0),(0,255,0),(0,0,255),(255,255,0)])
@@ -87,6 +88,25 @@ class TextureTests(unittest.TestCase):
         tex.CreateInput('st',Sdf.ValueTypeNames.Float2).ConnectToSource(reader.ConnectableAPI(),'result')
         surface.CreateInput('diffuseColor',Sdf.ValueTypeNames.Color3f).ConnectToSource(tex.ConnectableAPI(),'rgb')
         mat.CreateSurfaceOutput().ConnectToSource(surface.ConnectableAPI(),'surface')
+        # Object Capture's graph: normal (scale 2, bias -1, raw) and occlusion (raw) maps on the same UVs.
+        for role,output,varname in (surface_maps or []):
+            image = Image.new('RGB' if output == 'rgb' else 'L',(4,4),(128,128,255) if output == 'rgb' else 200)
+            image.save(self.source/f'{role}.png')
+            shader = UsdShade.Shader.Define(stage,f'/Material/{role}_texture')
+            shader.CreateIdAttr('UsdUVTexture')
+            shader.CreateInput('file',Sdf.ValueTypeNames.Asset).Set(Sdf.AssetPath(f'./{role}.png'))
+            shader.CreateInput('sourceColorSpace',Sdf.ValueTypeNames.Token).Set('raw')
+            if role == 'normal':
+                shader.CreateInput('scale',Sdf.ValueTypeNames.Float4).Set(Gf.Vec4f(2,2,2,2))
+                shader.CreateInput('bias',Sdf.ValueTypeNames.Float4).Set(Gf.Vec4f(-1,-1,-1,-1))
+            uv = reader
+            if varname != 'uvCapture':
+                uv = UsdShade.Shader.Define(stage,f'/Material/{role}_uv')
+                uv.CreateIdAttr('UsdPrimvarReader_float2')
+                uv.CreateInput('varname',Sdf.ValueTypeNames.String).Set(varname)
+            shader.CreateInput('st',Sdf.ValueTypeNames.Float2).ConnectToSource(uv.ConnectableAPI(),'result')
+            kind_ = Sdf.ValueTypeNames.Normal3f if role == 'normal' else Sdf.ValueTypeNames.Float
+            surface.CreateInput(role,kind_).ConnectToSource(shader.ConnectableAPI(),output)
         UsdShade.MaterialBindingAPI.Apply(mesh.GetPrim()).Bind(mat)
         if bad == 'graph':
             tex.CreateInput('scale',Sdf.ValueTypeNames.Float4).Set(Gf.Vec4f(2,1,1,1))
@@ -216,6 +236,33 @@ class TextureTests(unittest.TestCase):
             self.assertEqual(output.format,'PNG')
             self.assertEqual(original.tobytes(),output.tobytes())
         self.assertEqual(r['materials'][0]['sourceFormat'],'JPEG')
+
+    def test_normal_and_occlusion_maps_are_kept_beside_base_colour(self):
+        package,_,_ = self.fixture(surface_maps=[('normal','rgb','uvCapture'),('occlusion','r','uvCapture')])
+        r = convert(package,self.output/'capture.obj')
+        maps = {m['role']:m for m in r['materials'][0]['surfaceMaps']}
+        self.assertEqual(set(maps),{'normal','occlusion'})
+        self.assertEqual(maps['normal']['textureOutput'],'capture_normal_0.png')
+        self.assertEqual((maps['normal']['scale'],maps['normal']['bias']),([2,2,2,2],[-1,-1,-1,-1]))
+        self.assertEqual((maps['normal']['uvPrimvar'],maps['normal']['sourceColorSpace']),('uvCapture','raw'))
+        self.assertEqual(maps['occlusion']['textureOutput'],'capture_occlusion_0.png')
+        for role in ('normal','occlusion'):
+            data = (self.output/f'capture_{role}_0.png').read_bytes()
+            self.assertEqual(data,(self.source/f'{role}.png').read_bytes())
+            self.assertIn({'path':f'capture_{role}_0.png','sha256':hashlib.sha256(data).hexdigest(),'bytes':len(data)},r['outputs'])
+        # The MTL stays base colour only: every OBJ reader sees what it saw before.
+        mtl = (self.output/'capture.mtl').read_text()
+        self.assertNotIn('normal',mtl)
+        self.assertNotIn('occlusion',mtl)
+        self.assertTrue(r['metricQualified'])
+
+    def test_surface_map_on_other_uvs_is_left_out_with_a_warning(self):
+        package,_,_ = self.fixture(surface_maps=[('normal','rgb','otherUVs')])
+        r = convert(package,self.output/'capture.obj')
+        self.assertEqual(r['materials'][0]['surfaceMaps'],[])
+        self.assertTrue(any('normal map not exported' in w for w in r['warnings']),r['warnings'])
+        self.assertFalse((self.output/'capture_normal_0.png').exists())
+        self.assertTrue(r['metricQualified'])
 
     def test_multiple_mesh_uv_offsets_materials_and_reset(self):
         package,_,_ = self.fixture(multiple=True)

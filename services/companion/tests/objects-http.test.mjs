@@ -38,11 +38,11 @@ async function fixture(t, {denied = [], reconstruct, reportsCompletion, camera, 
   await new Promise(r => server.listen(0, '127.0.0.1', r));
   t.after(() => server.close());
   const base = `http://127.0.0.1:${server.address().port}`;
-  const call = async (method, path, body, type = 'application/json', device = 'source-phone') => {
-    const response = await fetch(base + path, {method, headers: {'content-type': type, 'x-test-device': device, 'x-scan-device': device}, ...(body !== undefined ? {body: typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body)} : {})});
+  const call = async (method, path, body, type = 'application/json', device = 'source-phone', extra = {}) => {
+    const response = await fetch(base + path, {method, headers: {'content-type': type, 'x-test-device': device, 'x-scan-device': device, ...extra}, ...(body !== undefined ? {body: typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body)} : {})});
     const bytes = Buffer.from(await response.arrayBuffer());
     let json; try { json = JSON.parse(bytes.toString()); } catch {}
-    return {status: response.status, json, bytes, type: response.headers.get('content-type')};
+    return {status: response.status, json, bytes, type: response.headers.get('content-type'), etag: response.headers.get('etag')};
   };
   return {call, scopes, devices, service, store, events, inputs};
 }
@@ -251,6 +251,38 @@ test('scan, photos, start, then the ready model and renders download', async t =
   assert.equal((await call('GET', `/v1/objects/${id}/model.stl`)).bytes.toString(), STL);
   assert.equal((await call('GET', `/v1/objects/${id}/renders/front.png`)).bytes.toString(), 'png');
   assert.equal(JSON.stringify(ready).includes(tmpdir()), false, 'no Mac file paths reach the phone');
+});
+
+test('a file the phone already has is answered 304 with nothing sent, across project versions, until its bytes change (#720)', async t => {
+  const {call, service, store} = await fixture(t);
+  const id = (await call('POST', '/v1/objects', {instructions: 'Copy this.'})).json.object.id;
+  assert.equal((await call('PUT', `/v1/objects/${id}/scan`, Buffer.from('usdz'), 'model/vnd.usdz+zip')).status, 200);
+  await service.addPhoto(id, 'side.png', Buffer.from('photo'));
+  await call('POST', `/v1/objects/${id}/start`);
+  await service.settled(id);
+  const ask = path => call('GET', `/v1/objects/${id}/${path}`, undefined, 'application/json', 'source-phone', {});
+  const again = (path, tag) => call('GET', `/v1/objects/${id}/${path}`, undefined, 'application/json', 'source-phone', {'if-none-match': tag});
+  for (const path of ['model.stl', 'renders/front.png', 'photos/side.png']) {
+    const first = await ask(path);
+    assert.equal(first.status, 200, path);
+    assert.match(first.etag ?? '', /^"[A-Za-z0-9_-]{43}"$/, `${path} carries a content tag`);
+    const second = await again(path, first.etag);
+    assert.equal(second.status, 304, `${path}: unchanged, not sent again`);
+    assert.equal(second.bytes.length, 0);
+    assert.equal(second.etag, first.etag);
+    assert.equal((await again(path, '"something-else"')).status, 200, `${path}: another tag gets the file`);
+  }
+  // A newer project version (another pass) with the same model bytes: still 304.
+  const before = (await ask('model.stl')).etag;
+  await store.update(id, o => ({...o, updatedAtMs: o.updatedAtMs + 1000}));
+  assert.equal((await again('model.stl', before)).status, 304);
+  // The bytes change: the file comes, with its new tag.
+  const model = (await store.get(id)).current.model;
+  await writeFile(join(service.dir(id), model), STL + '\n');
+  const changed = await again('model.stl', before);
+  assert.equal(changed.status, 200);
+  assert.notEqual(changed.etag, before);
+  assert.equal(changed.bytes.toString(), STL + '\n');
 });
 
 test('a corrections note runs another pass', async t => {

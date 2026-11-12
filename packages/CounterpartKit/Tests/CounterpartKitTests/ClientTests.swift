@@ -841,9 +841,13 @@ final class CompanionClientTests: XCTestCase {
         let late = try await c.download(older, "renders/1_overview.png")
         XCTAssertTrue(FileManager.default.fileExists(atPath: kept.path), "the newer version's file is still there")
         XCTAssertTrue(FileManager.default.fileExists(atPath: late.path))
-        // The tidying itself still happens: the next download for the newer version removes the older folder.
-        _ = try await c.download(newer, "pictures/part-0123456789abcdef.png")
-        XCTAssertFalse(FileManager.default.fileExists(atPath: late.path), "an older version's files go when a newer one lands")
+        // Tidying is per file (#720): another file of the newer version leaves this one's older copy, which the Mac may
+        // still answer 304 for; this file's own newer copy landing removes it.
+        _ = try await c.download(newer, "renders/2_side.png")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: late.path), "another file's newer version never takes this one")
+        try FileManager.default.removeItem(at: kept)
+        _ = try await c.download(newer, "renders/1_overview.png")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: late.path), "an older version's copy goes when its newer one lands")
         XCTAssertTrue(FileManager.default.fileExists(atPath: kept.path))
     }
 

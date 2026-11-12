@@ -245,6 +245,16 @@ struct SidebarList: View {
         VStack(spacing: 0) {
             ProjectSearchBar(query: $query, searching: $searching, matched: store.projects.filter { matches($0) }.count, total: store.projects.count)
         List(selection: $selection) {
+            // The away banner is the list's first row, so it scrolls with the projects (#720: pinned above the list, it
+            // took about 390 of an iPad Air's 820 landscape points and left four rows; "Mic mount" was in the list, 2 of
+            // 7 by the sidebar's search, but below them).
+            if let error = store.error ?? (store.away ? CompanionError.unreachable : nil) {
+                ConnectionBanner(error: error, line: store.away && !error.needsPairing ? store.awayLine() : nil, pair: store.onPair) {
+                    Task { await store.load(); await store.loadPrinters() }
+                }
+                .listRowBackground(Color.clear).listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 8, trailing: 0))
+                .listRowSeparator(.hidden).selectionDisabled()
+            }
             section("Now", group([.printing, .preparing, .working, .sending]))
             section("Needs you", group([.needsYou, .failed]))
             section("Ready", group([.ready]))
@@ -304,13 +314,8 @@ struct SidebarList: View {
         // sidebar itself so both the connection and the printer status can wrap.
         .safeAreaInset(edge: .top, spacing: 0) {
             VStack(alignment: .leading, spacing: 8) {
-                // The same banner as iPhone Home, with Try Again and the way to another Mac (F6): at regular width
-                // Home's cards aren't shown, so without it the iPad said only "isn't answering" in the line below.
-                if let error = store.error ?? (store.away ? CompanionError.unreachable : nil) {
-                    ConnectionBanner(error: error, line: store.away && !error.needsPairing ? store.awayLine() : nil, pair: store.onPair) {
-                        Task { await store.load(); await store.loadPrinters() }
-                    }
-                }
+                // The same banner as iPhone Home, with Try Again and the way to another Mac (F6), is the list's first row
+                // (above): at regular width Home's cards aren't shown, so without it the iPad said only "isn't answering".
                 // Readable at arm's length (first look U11): the system's secondary label colour, not a hierarchical
                 // .secondary that went dark grey over the sidebar's glass, at footnote size.
                 Text(store.homeSubtitle).font(.footnote).foregroundStyle(Color(uiColor: .secondaryLabel))

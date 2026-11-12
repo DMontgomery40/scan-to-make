@@ -51,10 +51,15 @@ fun StagePicture(project: Project, still: Still, label: String, unavailableLine:
     LaunchedEffect(key, attempt) {
         if (key == null || path == null || bitmap != null) return@LaunchedEffect
         failed = false
+        // The copy this phone keeps is a picture shown, at once and with no network; a newer one replaces it when it arrives.
+        val companion = Counterpart.instance.companion
+        val kept = companion.library?.latest(project.id, path)
+        if (kept != null) bitmap = withContext(Dispatchers.IO) { ImageCache.decode(kept.first) }
+        if (kept?.second == project.mediaVersion && bitmap != null) { ImageCache.put(key, bitmap!!); return@LaunchedEffect }
         val got = withContext(Dispatchers.IO) {
-            try { ImageCache.decode(Counterpart.instance.companion.download(project, path))?.also { ImageCache.put(key, it) } } catch (_: Exception) { null }
+            try { ImageCache.decode(companion.download(project, path))?.also { ImageCache.put(key, it) } } catch (_: Exception) { null }
         }
-        if (got == null) failed = true else bitmap = got
+        if (got != null) bitmap = got else if (bitmap == null) failed = true
     }
     val coming = "$label: coming from your computer"
     val image = bitmap
