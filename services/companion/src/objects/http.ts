@@ -1,5 +1,5 @@
 import {CadSetupRefused} from '../cad-settings.js';
-import {projectPlates, type ProjectPlate} from './plates.js';
+import {keptFile, projectPlates, type ProjectPlate} from './plates.js';
 import {once} from 'node:events';
 import {createHash} from 'node:crypto';
 import type {IncomingMessage, ServerResponse} from 'node:http';
@@ -145,7 +145,7 @@ export function publicObject(stored: StmObject): PublicObject {
   // The companion's decision (copy, new design or published), so neither app re-derives it.
   // Local bookkeeping, like the passes' recovery fields below.
   const {failedPass: _failedPass, checkedSizes: _checkedSizes, ...shown} = object;
-  return {...shown, ...(object.kind === 'published' ? {plates: projectPlates(object)} : {}), kind: passKind(object), title: projectTitle(object), failure, canRetryCleanup, status: objectStatus({...object, ...(failure !== undefined ? {failure} : {})}, object.updatedAtMs),
+  return {...shown, ...(keptFile(object) ? {plates: projectPlates(object)} : {}), kind: passKind(object), title: projectTitle(object), failure, canRetryCleanup, status: objectStatus({...object, ...(failure !== undefined ? {failure} : {})}, object.updatedAtMs),
     settings: projectSettingsView(object),
     // The sender's own id for a message is how a repeat is recognised here; no client reads it back.
     ...(object.messages ? {messages: object.messages.map(({clientId: _clientId, ...message}) => message)} : {}),

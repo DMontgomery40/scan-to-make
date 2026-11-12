@@ -226,6 +226,44 @@ for (const action of ['estimate','print']) test(`pre-sliced original ${action} k
  assert.deepEqual(await readFile(join(service.dir(object.id),(await service.get(object.id)).current.model)),bytes);
 });
 
+// #641 review (P1): a designer's 3MF kept as it came is kept like a published file: every plate listed, the person picks.
+test('a multi-plate designer 3MF sent as a copy with no words lists its plates and asks which to print; any plate prints',async t=>{
+ const seen=[];
+ const runner={backend:'bambu-printer-mcp',modelPlates:mcpPlates,estimate:async input=>{seen.push(input.selection.plateIndex);return{estimate:{seconds:100},settings:{}};}};
+ const f=await setup(t,undefined,{print:{services:{runner,selection:{model:'p1s'}}}});
+ const object=await f.service.create(undefined,'copy');await f.service.addScan(object.id,'scan.3mf',model('Two sizes',2));
+ const asking=await f.service.start(object.id);
+ assert.equal(asking.kind,'copy','still a copy: words later edit the designer\'s file');
+ assert.equal(asking.state,'needs-closeup');assert.equal(asking.ask.type,'choice');assert.deepEqual(asking.ask.options.map(o=>o.id),['0:0','0:1']);
+ assert.equal(publicObject(asking).plates.length,2,'every layout\'s plate picker');
+ const chosen=await f.service.answerAsk(object.id,asking.ask.id,['0:1']);
+ assert.equal(chosen.state,'ready');assert.equal(chosen.kind,'copy');assert.deepEqual(chosen.publishedSelection,{fileIndex:0,plateIndex:1,sliced:false});
+ await f.service.estimate(object.id);assert.deepEqual(seen,[1],'plate 2 is what slices');
+ const back=await f.service.selectPlate(object.id,0,0);assert.equal(back.publishedSelection.plateIndex,0);
+});
+
+// #641 review (P2): an already-sliced plate kept as it came prints as it is, as the published path does.
+test('a sliced designer 3MF sent as a copy with no words estimates as the sliced file it is',async t=>{
+ const root=await tempDir('copy-sliced-'),store=new ObjectStore(join(root,'objects')),calls=[];
+ const {unzipSync}=createRequire(new URL('../../printer-handoff/package.json',import.meta.url))('fflate');
+ const entries=unzipSync(model());entries['Metadata/plate_1.gcode']=strToU8('; estimated printing time (normal mode) = 1m\nG1 X1');const bytes=Buffer.from(zipSync(entries));
+ const session={hold:()=>()=>{},connect:async()=>({tools:[]}),config:{backend:'bambu-printer-mcp'},hasTool:name=>['inspect_print_file','print_3mf','counterpart_printer_info','list_3mf_plates'].includes(name),getTool:name=>({name,inputSchema:{type:'object',properties:Object.fromEntries(['file_path','bambu_model','plate_index','three_mf_path','include_preview','include_thumbnails'].map(x=>[x,{}]))}}),call:async(name,args)=>{
+  if(name==='list_3mf_plates')return mcpPlatesResult(args.three_mf_path);
+  if(name==='counterpart_printer_info')return{content:[{type:'text',text:JSON.stringify({contract:'counterpart/1',server:{name:'bambu-printer-mcp',version:'1.1.61'},printer:{kind:'bambu',host:'h'},capabilities:{progress:true,layers:true,camera:'none',filaments:'ams',pause:true,resume:true,cancel:true,print3mf:true,gcode:true}})}]};
+  calls.push({name,args});
+  if(name==='inspect_print_file'){const sha256=inspectModelFile(bytes,'3mf').sha256;return{content:[{type:'text',text:JSON.stringify({artifact:{sha256},selection:{plate_index:0,bambu_model:'p1s'}})}]};}
+  throw Error('Unexpected tool '+name);
+ }};
+ const runner=new PrinterHandoffRunner({backend:'bambu-printer-mcp',process:{command:'/unused'},selection:{model:'p1s'}},{session});
+ const service=showing(new ObjectService({store,claudePath:'/unused',stlInfo:async()=>[1,2,3],runTouchup:async()=>{throw Error('no pass');},handoff:{backend:'bambu-printer-mcp',process:{command:'/unused'}},print:{services:{runner,store:new HandoffBundleStore(join(root,'bundles')),relay:new InMemoryElicitationRelay({timeoutMs:1000})}}}));
+ t.after(async()=>{await service.close();await rm(root,{recursive:true,force:true});});
+ const object=await service.create(undefined,'copy');await service.addScan(object.id,'scan.3mf',bytes);
+ const kept=await service.start(object.id);
+ assert.equal(kept.state,'ready');assert.deepEqual(kept.publishedSelection,{fileIndex:0,plateIndex:0,sliced:true});
+ await service.estimate(object.id);
+ assert.deepEqual(calls.map(x=>x.name),['inspect_print_file'],'read as the sliced file it is, never sliced again with filaments loaded');
+});
+
 test('six plates stay selectable in one project after the initial choice, including over the Mac socket', async t => {
  const f=await setup(t), object=await f.service.create('Scan platform','published',LINK);
  const imported=await f.service.addModelFile(object.id,'platform.3mf',model('Scan platform',6));

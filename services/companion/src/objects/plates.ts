@@ -47,8 +47,16 @@ export function retainedPlateProgress(object: StmObject): Record<string, PlatePr
   return saved;
 }
 
+/**
+ * A project that prints a kept file's plates: a published model, or a designer's 3MF a copy kept as it came (#641),
+ * until a pass makes a new model of it.
+ */
+export function keptFile(object: Pick<StmObject, 'kind' | 'files' | 'current'>): boolean {
+  return object.kind === 'published' || (!!object.files?.current && object.current?.model === object.files.current);
+}
+
 export function projectPlates(object: StmObject): ProjectPlate[] {
-  if (object.kind !== 'published') return [];
+  if (!keptFile(object)) return [];
   const progress = retainedPlateProgress(object);
   const rows = (object.files?.receipts ?? []).flatMap((file, fileIndex) =>
     (file.plates.length ? file.plates : [{index: 0, name: 'Model', sliced: false, thumbnail: undefined}]).map(plate => ({

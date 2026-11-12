@@ -114,9 +114,10 @@ test("a designer's 3MF sent with no words is ready to print as the designer made
     const ready = await f.service.settled(object.id);
     assert.equal(ready.state, 'ready', why);
     assert.equal(ready.kind, 'copy', 'still a copy: words later edit the designer\'s file');
-    assert.equal(ready.current.model, 'current/model.3mf', 'the designer\'s 3MF is what prints, with its plates and settings');
-    assert.ok((await readFile(join(f.store.dir(object.id), 'current', 'model.3mf'))).equals(designer), 'byte for byte');
-    assert.deepEqual(ready.current.renders, ['current/renders/plate-1.png'], 'the designer\'s own picture of the plate');
+    assert.match(ready.current.model, /^original\/[0-9a-f]{64}-scan\.3mf$/, 'the designer\'s 3MF is what prints, kept as a published file is');
+    assert.equal(ready.files.current, ready.current.model);
+    assert.ok((await readFile(join(f.store.dir(object.id), ready.current.model))).equals(designer), 'byte for byte');
+    assert.deepEqual(ready.publishedSelection, {fileIndex: 0, plateIndex: 0, sliced: false}, 'its plate is recorded');
     assert.equal(ready.current.summary, 'The designer’s file as they made it, with its plates and print settings. It’s ready to print. To change something, say what.');
     assert.doesNotMatch(JSON.stringify(ready), /Clean up this scan/, 'never the scan-cleanup sentence');
     assert.equal(ready.passes.length, 0, 'no pass ran');
@@ -143,7 +144,7 @@ test("a designer's 3MF sent with no words is ready to print as the designer made
   await f.service.correct(bare.id, 'Add the counterpart logo');
   await f.service.settled(bare.id);
   const dir = f.store.dir(bare.id);
-  assert.deepEqual(f.inputs[0].scan, [join(dir, 'current', 'model.3mf'), join(dir, 'scan', 'scan.3mf')]);
+  assert.deepEqual(f.inputs[0].scan, [join(dir, 'scan', 'scan.3mf')], 'the designer\'s own file, once');
   assert.equal(f.inputs[0].designerCopy, true);
   assert.equal(f.inputs[0].instructions, undefined, 'no invented request: the change is the person\'s words');
 });

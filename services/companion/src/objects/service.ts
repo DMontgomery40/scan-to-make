@@ -1,5 +1,5 @@
 import {starterModelId, starterProject as bundledStarter, type StarterProject} from '../starters/catalog.js';
-import {acknowledgePlate, plateNeedsPrinterCheck, projectPlates, retainedPlateProgress, selectedPlateIdentity, selectingPlate} from './plates.js';
+import {acknowledgePlate, keptFile, plateNeedsPrinterCheck, projectPlates, retainedPlateProgress, selectedPlateIdentity, selectingPlate} from './plates.js';
 import {copyFile, lstat, mkdir, mkdtemp, open, readFile, readdir, rename, rm, stat, writeFile} from 'node:fs/promises';
 import {createHash, randomUUID} from 'node:crypto';
 import {constants as fsConstants} from 'node:fs';
@@ -7,7 +7,7 @@ import {homedir, tmpdir} from 'node:os';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {basename, dirname, extname, isAbsolute, join, relative} from 'node:path';
-import {type PrintAsk, DispatchedPrintError, PrinterMcpError, inspectModelFile, modelPlatePreview, type McpModelPlates, readModelFile, type ModelFileInfo, type ModelFilament, packageLabel, readPrintReport, readPrintRoute, routeArgs, setPrintRoute, timeoutsFor, type PrintRoute,
+import {type PrintAsk, DispatchedPrintError, PrinterMcpError, inspectModelFile, type McpModelPlates, readModelFile, type ModelFileInfo, type ModelFilament, packageLabel, readPrintReport, readPrintRoute, routeArgs, setPrintRoute, timeoutsFor, type PrintRoute,
   type PrintProgress, type PendingElicitation, type PrinterHandoffConfig, type PrinterSelection, type PrinterSlicer, type PrintReport, type PrinterSession, type FilamentProposalInput} from '@scan-to-make/printer-handoff';
 import type {PrintEstimate, PrintSettings, ProjectStatus, ProjectSettingsPatch} from '@scan-to-make/contracts/counterpart';
 import {PrintMonitorRunner, matchJob, milestonesFor, type EventDraft, type MonitorClock, type MonitorEnd, type MonitorTarget} from '../printing/monitor.js';
@@ -689,7 +689,7 @@ export class ObjectService {
         // A copy keeps the scan it copies, or with nothing scanned its request would read as a new design.
         const scan = kind === 'copy' ? source.scan : undefined;
         // Duplicate the chosen original, not every alternate file or an earlier plate.
-        const receipt = source.kind === 'published' ? source.files?.receipts?.find(file => file.path === current.model) : undefined;
+        const receipt = keptFile(source) ? source.files?.receipts?.find(file => file.path === current.model) : undefined;
         const files = receipt ? {original: [receipt.path], current: receipt.path, receipts: [receipt]} : undefined;
         const publishedSelection = source.publishedSelection ? {...source.publishedSelection, fileIndex: 0} : undefined;
         // A designed multi-colour model prints its 3MF but is corrected from the merged mesh beside it: both copy.
@@ -1627,13 +1627,13 @@ export class ObjectService {
     if (!object.scan && !object.capture?.length && !object.captureDepth?.length && !object.instructions?.trim() && !object.credit?.url && object.state === 'new')
       throw new InvalidStateError('Describe what to make, or add a scan.');
     // A designer's 3MF with no words prints as the designer made it: nothing to clean up, so no pass and no photos needed.
-    if (designerAsIs(object) && (object.state === 'new' || object.state === 'failed')) return this.#keepDesignerFile(id);
+    if (designerAsIs(object) && (object.state === 'new' || object.state === 'failed')) return this.#keepDesignerFile(id, object);
     // A touch-up works from photos; a model with neither photos nor a request has nothing to go on. A scan brought over
     // from another project with no words is a copy of it: kept as it is, like a copy's scan sent on its own.
     if (object.scan && !object.scanFrom && !object.photos.length && !object.capture?.length && !object.instructions?.trim() && (object.state === 'new' || object.state === 'failed'))
       throw new InvalidStateError("Add photos of it, or describe what you'd like changed.");
     if (object.state === 'touching-up') return object;
-    if (object.kind === 'published' && object.current && ['ready', 'needs-closeup'].includes(object.state)) return object;
+    if (keptFile(object) && object.current && ['ready', 'needs-closeup'].includes(object.state)) return object;
     const waiting = !object.current && ['new', 'failed', 'needs-closeup'].includes(object.state);
     // A starter downloads its files at most once per computer. Its own cache needs no Downloads access, so it comes first.
     const starter = object.starterId && waiting ? this.#starter(object.starterId) : undefined;
@@ -1660,28 +1660,13 @@ export class ObjectService {
   }
 
   /**
-   * #641: a designer's 3MF sent with no words becomes the model as it came: its parts, plates and print settings, ready
-   * to print. No pass runs (there is no scan to clean up) and no request is made up for one. Its summary says what
-   * happens next; words sent later start the designer-copy pass on this file as before (`designerFile`).
+   * #641: a designer's 3MF sent with no words becomes the model as it came: kept the way a published file is (every
+   * plate listed, sliced or not; the person picks when there are several), so it prints as the designer made it. No
+   * pass runs (there is no scan to clean up) and no request is made up for one. It stays a copy: words sent later
+   * start the designer-copy pass on this file as before (`designerFile`). Its summary says what happens next.
    */
-  async #keepDesignerFile(id: string): Promise<StmObject> {
-    const object = await this.get(id), dir = this.dir(id);
-    const bytes = await readModelFile(join(dir, 'scan', object.scan!));
-    let info: ModelFileInfo;
-    try { info = inspectModelFile(bytes, '3mf'); } catch (error) { throw new InvalidFileError(error instanceof Error ? error.message : 'That model could not be read.'); }
-    const rendersDir = join(dir, 'current', 'renders');
-    await rm(rendersDir, {recursive: true, force: true});
-    await mkdir(rendersDir, {recursive: true});
-    await writeFile(join(dir, 'current', 'model.3mf'), bytes, {mode: 0o600});
-    // The designer's own picture of the first plate, when the file has one (never a substitute for its geometry).
-    const plate = info.plates[0], preview = plate ? modelPlatePreview(bytes, plate.index) : undefined;
-    const renders: string[] = [];
-    if (preview) { await writeFile(join(rendersDir, `plate-${plate!.index + 1}.png`), preview); renders.push(join('current', 'renders', `plate-${plate!.index + 1}.png`)); }
-    const updated = await this.#deps.store.update(id, o => ({...o, kind: 'copy' as const, state: 'ready' as const, progress: undefined, failure: undefined, failedPass: undefined,
-      current: {model: join('current', 'model.3mf'), renders, summary: DESIGNER_AS_IS},
-      ...(!o.title && info.title ? {title: info.title} : {})}));
-    await this.#emit({id: randomUUID(), type: 'pass.ready', projectId: id});
-    return this.#changed(updated);
+  #keepDesignerFile(id: string, object: StmObject): Promise<StmObject> {
+    return this.#keepPublished(id, [join(this.dir(id), 'scan', object.scan!)], {kind: 'copy', summary: DESIGNER_AS_IS});
   }
 
   async #captureFilesPresent(object: StmObject): Promise<void> {
@@ -2843,7 +2828,7 @@ export class ObjectService {
       const currentMesh = object.current && isMultipart(object) && object.kind !== 'published' ? join('current', 'model.stl') : object.current?.model;
       const scan = opts.locate ? [join(dir, 'current', 'model.stl'), join(dir, 'scan', scanName!)]
         : designer
-        ? [...new Set([fromCurrent && isMultipart(object) ? object.current!.model : designer, designer])].map(path => join(dir, path))
+        ? [...new Set([fromCurrent && isMultipart(object) && !keptFile(object) ? object.current!.model : designer, designer])].map(path => join(dir, path))
         : fromCurrent ? [join(dir, currentMesh!)] : scanName ? [join(dir, 'scan', scanName)] : [];
       const previous = lastDesignPass(object.passes);
       const continued = worker?.browser !== false ? passResume(previous) : undefined;
@@ -3144,7 +3129,7 @@ export class ObjectService {
   }
 
   /** The designer's file becomes the project's model, exactly as published: original/<name> and current/model.<ext>. */
-  async #keepPublished(id: string, files: string[], info: {startedAtMs?: number; now?: number; model?: PublishedModel; summary?: string; credit?: StmObject['credit']}): Promise<StmObject> {
+  async #keepPublished(id: string, files: string[], info: {startedAtMs?: number; now?: number; model?: PublishedModel; summary?: string; credit?: StmObject['credit']; kind?: 'copy'}): Promise<StmObject> {
     const store = this.#deps.store, dir = store.dir(id), now = info.now ?? Date.now();
     const object = await store.get(id);
     // Every starter file passes here (a worker's download, a pickup, the cache, the person's file): a starter is its
@@ -3193,7 +3178,7 @@ export class ObjectService {
     // from the plate picker, so it is ready without a question. Any other published model asks which to print.
     const ask = options.length > 1 && !object.starterId ? {id: randomUUID(), type: 'choice' as const, kind: 'choice' as const, question: 'Which file and plate would you like to print?', options,
       multiple: false, answers: ['choice' as const], status: 'open' as const, askedAtMs: now} : undefined;
-    const updated = await store.update(id, o => ({...o, ...(o.print ? {plateProgress: retainedPlateProgress(o)} : {}), print: undefined, printConfirmation: undefined, state: ask ? 'needs-closeup' : 'ready', progress: undefined, failure: undefined, kind: 'published', current, files: published,
+    const updated = await store.update(id, o => ({...o, ...(o.print ? {plateProgress: retainedPlateProgress(o)} : {}), print: undefined, printConfirmation: undefined, state: ask ? 'needs-closeup' : 'ready', progress: undefined, failure: undefined, kind: info.kind ?? 'published', current, files: published,
       publishedSelection: {fileIndex: 0, plateIndex: firstPlate?.index ?? 0, sliced: firstPlate?.sliced ?? false},
       ...(!o.title && (first.title || info.model?.title) ? {title: first.title ?? info.model!.title} : {}), ...(credit.url ? {credit: credit as NonNullable<StmObject['credit']>} : {}),
       ...(ask ? {ask} : o.ask?.status === 'open' ? {ask: {...o.ask, status: 'answered' as const}} : {}),
@@ -3226,7 +3211,7 @@ export class ObjectService {
       if (!ask || ask.id !== askId || ask.status !== 'open' || ask.type !== 'choice') throw new InvalidStateError('That question has been answered or replaced. Look again.');
       const known = new Set((ask.options ?? []).map(option => option.id));
       if (!choices.length || choices.some(choice => !known.has(choice)) || (!ask.multiple && choices.length > 1)) throw new InvalidStateError('Pick one of the choices.');
-      if (object.kind === 'published' && object.files?.receipts) {
+      if (keptFile(object) && object.files?.receipts) {
         const [fileIndex, plateIndex] = choices[0]!.split(':').map(Number);
         const file = object.files.receipts[fileIndex!];
         const plate = file?.plates.find(item => item.index === plateIndex);
@@ -3552,6 +3537,8 @@ export class ObjectService {
     const updated = await store.update(id, o => ({...(changed ? (({outcome: _outcome, ...rest}) => rest)(o) : o),
       state: state === 'ready' && !changed && o.outcome === 'works' ? 'confirmed' : state, progress: undefined,
       ...(current ? {current} : {}),
+      // A copy's new model is no longer the kept designer file: its plate selection (and sliced plate) went with it.
+      ...(current && o.kind !== 'published' && o.publishedSelection ? {publishedSelection: undefined} : {}),
       ...(!o.title && result.title ? {title: result.title} : {}),
       ...(o.kind ? {} : {kind}),
       ...(ask ? {ask} : {}),
