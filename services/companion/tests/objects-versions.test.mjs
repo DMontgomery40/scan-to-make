@@ -255,3 +255,13 @@ test('review 4: Not printed takes back a hand-set Printed, and an answer the pro
   assert.equal(taken.versions.at(-1).outcome, undefined);
   assert.equal(objectStatus(taken).phase, 'ready');
 });
+
+test('review 5: a duplicate is born with its design sealed, from its own files', async t => {
+  const f = await setup(t);
+  const copy = await f.service.duplicate(f.id);
+  assert.equal(copy.versions.length, 1);
+  const source = await f.store.get(f.id);
+  assert.notEqual(copy.versions[0].id, source.versions[0].id);
+  assert.equal(copy.versions[0].modelSha256, source.versions[0].modelSha256);
+  assert.ok((await readFile(join(f.store.dir(copy.id), copy.versions[0].result.model))).length > 0);
+});

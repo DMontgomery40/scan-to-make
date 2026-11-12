@@ -709,8 +709,11 @@ export class ObjectService {
           title: `${projectTitle(source).slice(0, 114)} copy`, printerDestinationId: source.printerDestinationId,
           preferences: {...source.preferences, printDefaults: this.#resolvedPrintDefaults(source)}, ...(credit ? {credit} : {}),
           ...(files ? {files} : {}), ...(publishedSelection ? {publishedSelection} : {}), ...(scan ? {scan} : {})}));
-        await this.#emit({id: randomUUID(), type: 'project.updated', projectId: result.id, data: {keys: ['created']}});
-        return this.#changed(result);
+        // Born with its design sealed (review finding 5), so its first print names a design like any other project's.
+        const sealed = result.kind !== 'published' ? await sealVersion(result, this.dir(result.id), current, {endedAtMs: Date.now()}) : undefined;
+        const born = sealed ? await this.#deps.store.update(result.id, o => ({...o, versions: [sealed]}), {keepUpdatedAt: true}) : result;
+        await this.#emit({id: randomUUID(), type: 'project.updated', projectId: born.id, data: {keys: ['created']}});
+        return this.#changed(born);
       } catch (error) { await this.#deps.store.remove(duplicate.id); throw error; }
     });
   }
@@ -1914,7 +1917,15 @@ export class ObjectService {
     const manifest = await bundles.create({...(object.kind === 'published' || isMultipart(object) ? {model: {bytes: stl, format: isMultipart(object) ? '3mf' as const : 'stl' as const}} : {stl}), prompt: '', backend: runner.backend, ...(selected ? {selection:selected} : {})});
     const printId = randomUUID();
     const plate = selectedPlateIdentity(object);
-    const print = {bundleId: manifest.id, printId, ...(object.versions?.at(-1) ? {versionId: object.versions.at(-1)!.id} : {}), ...(plate ? {plate} : {}), ...(printDestination ? {destination: printDestination, destinationId: printDestination.id} : {}),
+    // Every print names the design it printed (#616). A designed project with a model and no sealed design yet (made
+    // before designs were kept, or by a path that doesn't seal) has its model sealed now, so this print can't be orphaned.
+    let design = object.versions?.at(-1);
+    if (!design && object.kind !== 'published' && object.current) {
+      const sealed = await sealVersion(object, this.dir(id), object.current, {endedAtMs: Date.now()});
+      await this.#deps.store.update(id, o => ({...o, versions: [...(o.versions ?? []), sealed]}), {keepUpdatedAt: true});
+      design = sealed;
+    }
+    const print = {bundleId: manifest.id, printId, ...(design ? {versionId: design.id} : {}), ...(plate ? {plate} : {}), ...(printDestination ? {destination: printDestination, destinationId: printDestination.id} : {}),
       ...(Object.keys(settings).length ? {settings} : {})};
     // PRD §8.10: held from here until the dispatch ends, so the printer's MCP isn't updated under it.
     let release: () => void = () => undefined;
