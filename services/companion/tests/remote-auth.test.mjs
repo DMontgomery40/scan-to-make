@@ -1029,3 +1029,19 @@ test('HTTP paired device management enforces authentication, write scope and val
   assert.equal((await wire(server, '/v1/devices/not-a-uuid', {method:'DELETE',headers:credentials(writer)})).status, 400);
   await store.authorize('bob@example.test',other.deviceId,other.token,'projects:read');
 });
+
+// #751: the Mac app's first calls after an update list devices together; listing is a read and never refused for a
+// write in progress, and two writes at once both land (the second waits for the first's lock).
+test('listing devices takes no lock; writes at the same moment wait for each other instead of refusing', async (t) => {
+  const { store, directory } = await fixture(t);
+  await exchange(store);
+  const listed = await Promise.all(Array.from({ length: 8 }, () => store.listDevices()));
+  assert.ok(listed.every((devices) => devices.length === 1));
+  const before = await readFile(join(directory, 'auth.json'));
+  await mkdir(join(directory, '.lock'));
+  assert.equal((await store.listDevices()).length, 1, 'a write in progress does not refuse a list');
+  await rm(join(directory, '.lock'), { recursive: true });
+  assert.deepEqual(await readFile(join(directory, 'auth.json')), before, 'listing writes nothing');
+  const invitations = await Promise.all(Array.from({ length: 3 }, () => store.createPairing('alice@example.test')));
+  assert.equal(new Set(invitations.map((invitation) => invitation.code)).size, 3);
+});

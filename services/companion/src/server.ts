@@ -9,7 +9,7 @@ import {parameters as controlParameters} from './local-control-protocol.js';
 import type {IcloudEnrolment} from './icloud-enrolment.js';
 import {LiveActivityTokenUploadSchema} from '@scan-to-make/contracts/counterpart';
 import type {ObjectService} from './objects/service.js';
-import {reconstructionReadiness} from './objects/reconstruct.js';
+import {reconstructionReadinessNow} from './objects/reconstruct.js';
 import {createCaptureRoutes,type CaptureServices} from './capture-http.js';
 import {createPrintHandoffRoutes,type PrintHandoffServices} from './print-handoff-http.js';
 import {handleRemoteMcp,isRemoteMcpPath,type RemoteMcpServices} from './remote-mcp-http.js';
@@ -324,8 +324,10 @@ export async function startCompanionServer(
       if (request.url === '/healthz' && request.method === 'GET') {
         // Scope name kept from the first protocol so existing pairings still parse.
         await authorize('generation:health');
-        // Additive: older phones read only status and protocolVersion.
-        response.end(JSON.stringify({ status: 'ok', protocolVersion: '0.1.0', ...(options.name ? { name: options.name } : {}), capabilities: { genericConfirmations: !!options.objects, materialChoice: !!options.objects, colourMapping: !!options.objects, projectSettings: !!options.objects, projectPreferences: !!options.objects, projectRename: !!options.objects, makeFromScan: !!options.objects, messagePhotos: !!options.objects, publishedModels: !!options.objects, fitFields: !!options.objects, mcpUpdates: !!options.mcpUpdates, mcpCopies: !!options.printerSetup, blenderAddon: !!options.blenderAddon, printCopies: !!options.objects?.printCopiesAvailable, printLayerPauses: !!options.objects, printerChoices: !!options.objects && !!options.printerSetup, printerSettings: !!options.objects && !!options.printerSetup, printerAdd: !!options.printerSetup?.discover && !!options.printerSetup?.add, reconstructionReviewV1: !!options.objects && (await reconstructionReadiness()).ok, objectCaptureImages: !!options.objects?.objectCaptureImages } }));
+        // Additive: older phones read only status and protocolVersion. Health never waits on a readiness probe
+        // (#751): a capability still being checked is false and named in `checking`.
+        const reconstruction = options.objects ? reconstructionReadinessNow() : { ok: false };
+        response.end(JSON.stringify({ status: 'ok', protocolVersion: '0.1.0', ...(options.name ? { name: options.name } : {}), capabilities: { genericConfirmations: !!options.objects, materialChoice: !!options.objects, colourMapping: !!options.objects, projectSettings: !!options.objects, projectPreferences: !!options.objects, projectRename: !!options.objects, makeFromScan: !!options.objects, messagePhotos: !!options.objects, publishedModels: !!options.objects, fitFields: !!options.objects, mcpUpdates: !!options.mcpUpdates, mcpCopies: !!options.printerSetup, blenderAddon: !!options.blenderAddon, printCopies: !!options.objects?.printCopiesAvailable, printLayerPauses: !!options.objects, printerChoices: !!options.objects && !!options.printerSetup, printerSettings: !!options.objects && !!options.printerSetup, printerAdd: !!options.printerSetup?.discover && !!options.printerSetup?.add, reconstructionReviewV1: reconstruction !== 'checking' && reconstruction.ok, objectCaptureImages: !!options.objects?.objectCaptureImages }, ...(reconstruction === 'checking' ? { checking: ['reconstructionReviewV1'] } : {}) }));
         return;
       }
       if(captureRoutes&&request.url?.startsWith('/v1/saved-projects/')){
