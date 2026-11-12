@@ -265,3 +265,12 @@ test('review 5: a duplicate is born with its design sealed, from its own files',
   assert.equal(copy.versions[0].modelSha256, source.versions[0].modelSha256);
   assert.ok((await readFile(join(f.store.dir(copy.id), copy.versions[0].result.model))).length > 0);
 });
+
+test('review minor 6: two older prints of one bundle are two attempts', async () => {
+  const {retainAttempts} = await import('../dist/objects/versions.js');
+  const one = {printId: undefined, bundleId: 'b', dispatchedAt: '2026-11-04T11:00:00.000Z', monitor: {phase: 'ended', endState: 'cancelled'}};
+  const two = {bundleId: 'b', dispatchedAt: '2026-11-04T13:00:00.000Z'};
+  const after = retainAttempts({id: 'p', updatedAtMs: 1, print: one, prints: []}, {id: 'p', updatedAtMs: 2, print: two});
+  assert.equal(after.prints.length, 2);
+  assert.equal(after.prints[1].monitor, undefined, 'the second does not inherit the first one\'s end');
+});

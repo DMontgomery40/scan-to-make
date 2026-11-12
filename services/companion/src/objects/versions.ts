@@ -87,8 +87,12 @@ export function retainAttempts(before: StmObject, next: StmObject): StmObject {
   const attempts = [...(next.prints ?? before.prints ?? [])];
   const keep = (print: StmObject['print'], at: number, fallback?: string) => {
     if (!print) return;
-    const id = print.printId ?? print.bundleId;
-    const index = attempts.findIndex(p => p.id === id);
+    let id = print.printId ?? print.bundleId;
+    let index = attempts.findIndex(p => p.id === id);
+    // Two older prints of one bundle (no printId) are two attempts: a different send time is a new one (review minor 6).
+    if (index >= 0 && !print.printId && attempts[index]!.dispatchedAt && print.dispatchedAt && attempts[index]!.dispatchedAt !== print.dispatchedAt) {
+      id = `${id}@${print.dispatchedAt}`; index = attempts.findIndex(p => p.id === id);
+    }
     const old = index >= 0 ? attempts[index] : undefined;
     // When it was sent, not when the project last changed: a record rewritten later must not move its start.
     const dispatched = print.dispatchedAt ? Date.parse(print.dispatchedAt) : NaN;
