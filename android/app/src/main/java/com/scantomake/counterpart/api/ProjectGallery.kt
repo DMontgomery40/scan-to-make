@@ -62,13 +62,28 @@ data class ProjectGallery(val entries: List<Entry>) {
             }
             val current = project.current ?: return emptyList()
             val label = when (project.kind) { "copy" -> "Your copy"; "published" -> "Model"; else -> "Your part" }
-            if (current.model.lowercase(Locale.ROOT).endsWith(".3mf")) {
-                // The Mac's drawing of all the file's objects first, as on the other clients (Nov 10).
-                // Always an entry (review B2 on #539): with no picture yet ("") the stage says it is coming or that it can't be had.
+            val mesh = partMesh(project)
+            if (mesh == null) {
+                // A designer's 3MF has no merged mesh: the Mac's drawing of all the file's objects first, as on the other
+                // clients (Nov 10). Always an entry (review B2 on #539): with no picture yet ("") the stage says it is coming or that it can't be had.
                 val render = project.pictures["part"] ?: current.renders.firstOrNull()?.let(::renderPath) ?: plates.firstOrNull()?.thumbnail ?: ""
                 return listOf(PrintablePart("result", label, Drawing.Picture(render), Colour.Own, current.sizeMm))
             }
-            return listOf(PrintablePart("result", label, Drawing.Model(if (current.model.startsWith("versions/")) versionMesh(current.model) else "model.stl"), spoolColour(project)?.let { Colour.Spool(it) } ?: Colour.Neutral, current.sizeMm))
+            // A multi-part design turns from its merged mesh, neutral until the MCPs report each part's colour (#769, #645).
+            val multipart = current.model.lowercase(Locale.ROOT).endsWith(".3mf")
+            return listOf(PrintablePart("result", label, Drawing.Model(mesh), if (multipart) Colour.Neutral else spoolColour(project)?.let { Colour.Spool(it) } ?: Colour.Neutral, current.sizeMm))
+        }
+
+        /**
+         * The mesh the part's stage turns (CounterpartKit `Project.partMesh`, #769): `model.stl` for a one-colour design, a
+         * sealed design's own file (`versions/<id>/touched.stl`), or the merged `model.stl` a pass writes beside a multi-part
+         * design's 3MF (`current/model.stl`, `versions/<id>/model.stl`). Null for a designer's published 3MF.
+         */
+        fun partMesh(project: Project): String? {
+            val model = project.current?.model ?: return null
+            if (!model.lowercase(Locale.ROOT).endsWith(".3mf")) return if (model.startsWith("versions/")) model else "model.stl"
+            if (project.kind == "published" || !(model.startsWith("current/") || model.startsWith("versions/"))) return null
+            return versionMesh(model)
         }
 
         /** The one spool the result prints in: the last print's spools, else the colour the printer reported printing it. */

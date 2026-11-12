@@ -640,6 +640,36 @@ final class LayoutParityUITests: XCTestCase {
         XCTAssertFalse(other.descendants(matching: .any).matching(identifier: "design-history").firstMatch.exists, "one design: the page is today's page")
     }
 
+    /// #769, David (Nov 12): "Already printed items no longer have explore in 3D or AR, some do actually but some don't".
+    /// Shaped like his Pink snap-lid box: the newest design is a multi-part `current/model.3mf` (its merged `current/model.stl`
+    /// beside it) and the printed earlier one is `versions/<id>/touched.stl`. Each, on the stage, offers Explore in 3D and an
+    /// AR chip that becomes ready. (The #616 tests used `model.stl` names and no model file, so neither was ever drawn.)
+    func testEveryPrintedDesignOffersExploreIn3DAndARWithProjectsPresent() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try Self.boxSTL().write(to: folder.appendingPathComponent("mic.stl"))
+        let app = XCUIApplication()
+        app.launchArguments = ["-CounterpartFixtures", folder.path, "-CounterpartFixtureSet", "design-history",
+                               "-CounterpartOpen", "counterpart://project/6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a05"]
+        app.launch()
+        func offers3DAndAR(_ when: String) {
+            XCTAssertTrue(app.buttons["Explore in 3D"].waitForExistence(timeout: 20), "\(when): Explore in 3D. \(app.debugDescription)")
+            let ar = app.buttons["gallery-ar"]
+            XCTAssertTrue(ar.waitForExistence(timeout: 10), "\(when): the AR chip")
+            let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "ready"), object: ar)
+            XCTAssertEqual(XCTWaiter().wait(for: [ready], timeout: 20), .completed, "\(when): AR \(String(describing: ar.value))")
+            let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "769 \(when)"; shot.lifetime = .keepAlways; add(shot)
+        }
+        offers3DAndAR("the newest, a multi-part 3MF")
+        let printed = app.buttons["design-40000000-0000-4000-8000-000000000001"]
+        scrollProjectPage(app, until: printed)
+        printed.tap()
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "viewing-earlier-design").firstMatch.waitForExistence(timeout: 5))
+        app.swipeDown(); app.swipeDown()
+        offers3DAndAR("the printed earlier design, touched.stl")
+    }
+
     /// #616 follow-up: the page's cards and Status act on the newest design, so with an earlier design on the stage they
     /// wait for Show the newest, as the Mac's and Android's do. Did it fit? here would answer for the newest print.
     func testAnEarlierDesignOnTheStageLeavesTheNewestsCardsAndStatusAloneWithProjectsPresent() {
