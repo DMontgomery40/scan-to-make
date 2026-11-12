@@ -405,19 +405,19 @@ test('a pass offers only its own engine\'s tools and says which engine it is on:
   // Nov 11: a Blender pass ran cad_setup twice and about twenty cad_run calls hunting for a folder the engine
   // would write to. A pass on Blender or Fusion has no cad_* tools at all (Claude Code 2.1.322 drops them from the tool list).
   const blender = buildTouchupInvocation({pass, printer, claudePath: '/c', kind: 'fit', instructions: 'A hanger'});
-  assert.equal(disallowed(blender), 'mcp__printer__cad_*');
+  assert.equal(disallowed(blender), 'mcp__printer__cad_*,mcp__printer__fusion_mcp_*', 'nor Fusion\'s, unbound and without its lock');
   assert.match(rules(blender), /This pass runs on Blender/);
   const fusion = buildTouchupInvocation({pass, printer, claudePath: '/c', kind: 'fit', engine: 'fusion', documentId: 'doc', handoff, instructions: 'A hanger'});
-  assert.equal(disallowed(fusion), 'mcp__printer__cad_*');
+  assert.equal(disallowed(fusion), 'mcp__printer__cad_*,mcp__printer__blender_mcp_*');
   assert.match(rules(fusion), /This pass runs on Fusion/);
   const located = buildTouchupInvocation({pass, printer, claudePath: '/c', locate: true});
-  assert.equal(disallowed(located), 'mcp__printer__cad_*');
+  assert.equal(disallowed(located), 'mcp__printer__cad_*,mcp__printer__fusion_mcp_*');
   // A code pass has the code engine's tools and its design folder, and none of Blender's or Fusion's.
   const code = buildTouchupInvocation({pass, printer, claudePath: '/c', kind: 'fit', engine: 'code', instructions: 'A hanger', guidance: {design: 'D', slicing: 'S', cad: 'MCP CAD PROMPT'}});
   assert.equal(disallowed(code), 'mcp__printer__blender_mcp_*,mcp__printer__fusion_mcp_*');
   assert.match(rules(code), /This pass runs on the printer MCP's code design engine/);
   assert.match(code.args.at(-1), /- Design folder \(output_dir for every cad_run\): /);
-  assert.equal(code.args.includes('mcp__printer__cad_*'), false);
+  assert.equal(code.args.some(arg => arg.includes('mcp__printer__cad_')), false);
   // A resumed attempt whose session is gone starts cold with the same tools.
   const runs = [];
   const result = await runTouchup({root, objectId: 'pass', scan: [], photos: [], handoff, claudePath: '/c', instructions: 'A hanger', note: 'Taller', kind: 'fit',
@@ -430,7 +430,7 @@ test('a pass offers only its own engine\'s tools and says which engine it is on:
   });
   assert.equal(result.resume?.outcome, 'cold-start');
   assert.equal(runs[1].includes('--resume'), false);
-  assert.equal(runs[1][runs[1].indexOf('--disallowedTools') + 1], 'mcp__printer__cad_*');
+  assert.equal(runs[1][runs[1].indexOf('--disallowedTools') + 1], 'mcp__printer__cad_*,mcp__printer__fusion_mcp_*');
 });
 
 test('the composed rules for a code pass: the MCP\'s cad_design prompt plus only Counterpart\'s own sections, with no Blender, Fusion or script-format words', () => {

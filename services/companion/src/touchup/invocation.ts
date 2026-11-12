@@ -288,6 +288,26 @@ function locatePrompt(pass: TouchupPass, instructions?: string, summary?: string
 }
 
 /** The lean, isolated `claude -p` call for one touch-up pass. Writes the pass's MCP config file. */
+/**
+ * The tools a pass on each engine doesn't get: the other engines'. Nov 11 (#609): a Blender pass ran cad_setup twice and
+ * about twenty cad_run calls hunting for a folder the code engine would write to; a Blender pass with Fusion's tools
+ * could open an unbound Fusion document without the Fusion lock. Claude Code's own rule syntax (a trailing * is a
+ * prefix; checked against 2.1.322), carried in the request's --disallowedTools to every worker.
+ */
+export const OTHER_ENGINES_TOOLS: Record<DesignEngine, readonly string[]> = {
+  blender: ['mcp__printer__cad_*', 'mcp__printer__fusion_mcp_*'],
+  fusion: ['mcp__printer__cad_*', 'mcp__printer__blender_mcp_*'],
+  code: ['mcp__printer__blender_mcp_*', 'mcp__printer__fusion_mcp_*'],
+};
+
+/** Whether a worker request's --disallowedTools takes `server`'s tool `tool` away, as Claude Code reads the flag. */
+export function toolBlocked(args: readonly string[], server: string, tool: string): boolean {
+  const flag = args.indexOf('--disallowedTools');
+  if (flag < 0) return false;
+  const name = `mcp__${server}__${tool}`;
+  return (args[flag + 1] ?? '').split(/[\s,]+/).filter(Boolean).some(rule => rule.endsWith('*') ? name.startsWith(rule.slice(0, -1)) : name === rule);
+}
+
 export const BLENDER_RULES = `${ON_ENGINE.blender}\n` + "- Reach Blender only through the printer MCP's blender_mcp_* tools. Start in the empty scene you are given, and work only with objects in the current scene (bpy.context.scene.objects).";
 /**
  * The printer MCP's own guidance for a pass: how to design for its printers (`fdm_design`) and how its slicer
@@ -390,9 +410,8 @@ export function buildTouchupInvocation(input: {resumeSessionId?: string; pass: T
     '--strict-mcp-config',
     '--tools', 'Read,WebSearch,WebFetch',
     '--allowedTools', 'Read,WebSearch,WebFetch,mcp__printer',
-    // Only this pass's engine's tools: the patterns take the others out of the worker's tool list (checked against
-    // Claude Code 2.1.322). Nov 11 (#609): a Blender pass ran cad_setup twice and about twenty cad_run calls.
-    '--disallowedTools', input.engine === 'code' ? 'mcp__printer__blender_mcp_*,mcp__printer__fusion_mcp_*' : 'mcp__printer__cad_*',
+    // Only this pass's engine's tools. Every worker reads this flag: Claude Code itself, Codex and API workers through toolBlocked.
+    '--disallowedTools', OTHER_ENGINES_TOOLS[input.engine ?? 'blender'].join(','),
     '--disable-slash-commands',
     '--setting-sources', '',
     '--settings', '{"disableAllHooks":true}',
