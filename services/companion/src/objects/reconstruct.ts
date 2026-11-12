@@ -442,7 +442,9 @@ export function resetReconstructionReadiness(): void { readinessCache = undefine
 function startProbe(key: string, at: number, platform: string, env: NodeJS.ProcessEnv): Promise<ReconstructionReadiness> {
   const promise = probeReadiness(platform, env);
   readinessCache = {key, at, promise};
-  void promise.then(result => { readinessSettled = {key, result}; }, () => undefined);
+  // Only the newest probe settles the answer (#768 review): an older one for tools that have since changed, finishing
+  // last, must not pin status and health to its stale result.
+  void promise.then(result => { if (readinessCache?.promise === promise) readinessSettled = {key, result}; }, () => undefined);
   return promise;
 }
 
