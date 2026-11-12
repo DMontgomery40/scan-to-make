@@ -13,7 +13,7 @@ import {CameraUnavailableError, type CameraFrame} from '../printing/camera.js';
 import {CompanionSettingsPatchSchema, FitSchema, type ObjectStatus, type ProjectStatus} from '@scan-to-make/contracts/counterpart';
 import {z} from 'zod';
 import {fitRequest} from './fit.js';
-import {askKind} from './asks.js';
+import {askKind, closedByPrint} from './asks.js';
 import {withNotesOnce} from './notes.js';
 import {objectStatus, projectTitle} from '../events/words.js';
 import {ObjectNotFoundError, type ObjectPass, type StmObject} from './store.js';
@@ -135,7 +135,8 @@ export function publicObject(stored: StmObject): PublicObject {
   const {instructions: _instructions, fit: _fit, ...rest} = withNotesOnce(stored);
   // Every question says its kind, also one saved before kinds were written.
   const kind = askKind(stored);
-  const object: StmObject = {...rest, ...(typed ? {instructions: typed} : {}), ...(fit ? {fit} : {}), ...(rest.ask && kind ? {ask: {...rest.ask, kind}} : {})};
+  // A printed project's question is closed (#638), also one stored open before that rule.
+  const object: StmObject = closedByPrint({...rest, ...(typed ? {instructions: typed} : {}), ...(fit ? {fit} : {}), ...(rest.ask && kind ? {ask: {...rest.ask, kind}} : {})});
   const failure = currentFailureText(object.failure);
   // Carry this worker stop's retry decision to every client, without exposing its local recovery fields.
   // A later printer failure must not inherit Retry from an older worker stop.

@@ -16,6 +16,22 @@ export function askKind(object: Pick<StmObject, 'ask' | 'reconstructionReview'>)
   return ask.type ?? 'closeup';
 }
 
+/** A print is recorded: the part printed (`printed`), was marked Works (`confirmed`), or went to a printer Counterpart can't follow (`sent`). */
+const PRINT_RECORDED: ReadonlySet<StmObject['state']> = new Set(['printed', 'confirmed', 'sent']);
+
+/**
+ * #638: a recorded print closes the open question. Nobody answers a question about a part that is already printed,
+ * and a printed project with an open question is a state nobody designed. The question stays on the project, asked
+ * and then superseded: `answered` with no choices, as a pass that takes its place leaves it (`SUPERSEDES_A_QUESTION`).
+ * The old `question` field goes with it. Applied when a print is recorded and when any project is read, so projects
+ * stored in that state read as closed too. Returns the object itself when there is nothing to close.
+ */
+export function closedByPrint<T extends Pick<StmObject, 'state' | 'ask' | 'question'>>(object: T): T {
+  if (!PRINT_RECORDED.has(object.state) || (object.ask?.status !== 'open' && !object.question)) return object;
+  const {question: _question, ...rest} = object;
+  return {...rest, ...(object.ask?.status === 'open' ? {ask: {...object.ask, status: 'answered' as const}} : {})} as T;
+}
+
 export class InvalidSizesError extends Error {}
 
 /**

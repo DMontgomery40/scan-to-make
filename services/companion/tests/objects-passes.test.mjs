@@ -315,6 +315,50 @@ test('a correction that changes nothing keeps a Done project Done', async t => {
   assert.equal(projectStatus(kept), 'works');
 });
 
+// #638: "Wall holder for three" was marked printed and still carried an open close-up question.
+test('a recorded print closes the open question; it stays on the project as asked, then superseded', async t => {
+  const f = await setup(t, [{result: {summary: 'Made it.'}}, {status: 'needs_closeup', result: {closeup: 'the clip', ask: {question: 'Can you take a close-up of the clip?'}}}]);
+  const object = await f.service.create('A wall holder for three');
+  await f.service.start(object.id);
+  await f.service.settled(object.id);
+  await f.service.correct(object.id, 'Make the clip tighter');
+  const asked = await f.service.settled(object.id);
+  assert.equal(asked.state, 'needs-closeup');
+  assert.equal(asked.ask.status, 'open');
+  const printed = await f.service.setStatus(object.id, 'printed');
+  assert.equal(printed.state, 'printed');
+  assert.equal(printed.ask.status, 'answered', 'nobody can answer it once the part is printed');
+  assert.equal(printed.ask.id, asked.ask.id, 'the question is kept, not deleted');
+  assert.equal(printed.ask.question, 'Can you take a close-up of the clip?');
+  assert.equal(printed.ask.choices, undefined, 'superseded, as a pass that takes its place leaves it: no answer recorded');
+  assert.equal(printed.question, undefined);
+  assert.equal(printed.passes.at(-1).question, 'Can you take a close-up of the clip?', 'the pass still says what it asked');
+  // Marked Works from a question works the same way.
+  const f2 = await setup(t, [{result: {summary: 'Made it.'}}, {status: 'needs_closeup', result: {closeup: 'the clip'}}]);
+  const other = await f2.service.create('A wall holder for two');
+  await f2.service.start(other.id); await f2.service.settled(other.id);
+  await f2.service.correct(other.id, 'Tighter'); await f2.service.settled(other.id);
+  const works = await f2.service.setStatus(other.id, 'works');
+  assert.deepEqual([works.state, works.ask.status], ['confirmed', 'answered']);
+});
+
+test('a stored printed project with an old-style open question reads as closed on every client', async t => {
+  const f = await setup(t, []);
+  const object = await f.service.create('Wall holder for three');
+  // As stored before this rule: printed, an open question saved before kinds were written, and the old closeup field.
+  const stored = await f.store.update(object.id, o => ({...o, state: 'printed', current: {model: 'current/model.stl', renders: []},
+    ask: {id: '00000000-0000-4000-8000-000000000638', question: 'Can you take a close-up of the hooks?', answers: ['camera', 'photos', 'best-guess'], status: 'open', askedAtMs: 1},
+    question: {closeup: 'the hooks'}}));
+  const shown = publicObject(stored);
+  assert.equal(shown.ask.status, 'answered');
+  assert.equal(shown.ask.kind, 'closeup', 'it still says its kind');
+  assert.equal(shown.ask.question, 'Can you take a close-up of the hooks?');
+  assert.equal(shown.question, undefined, 'no layout finds it through the old field either');
+  // An open question on a project that hasn't printed is still open.
+  const waiting = publicObject({...stored, state: 'needs-closeup'});
+  assert.equal(waiting.ask.status, 'open');
+  assert.deepEqual(waiting.question, {closeup: 'the hooks'});
+});
 
 test('a person renaming during a pass wins over the worker title', async t => {
   const f = await setup(t, [{wait: true, result: {title: 'Generated holder'}}]);

@@ -45,7 +45,7 @@ import {publicTouchupText, limitWords, type TouchupActivity, type TouchupResult}
 import {ObjectNotFoundError, ObjectStore, restoreLocate, type LocateSnapshot, type ObjectPrintConfirmation, type StmObject} from './store.js';
 import {fitRequest, workerRequest} from './fit.js';
 import {inheritHistory} from './inherited.js';
-import {answeredSizes, askKind, InvalidSizesError, mergeCheckedSizes, sizesNote, withCheckedSizes} from './asks.js';
+import {answeredSizes, askKind, closedByPrint, InvalidSizesError, mergeCheckedSizes, sizesNote, withCheckedSizes} from './asks.js';
 /** An answer to an open question: photos, words, Best Guess, and for a sizes question its numbers; any together. */
 export type AskAnswer = {bestGuess?: boolean; text?: string; photoNames?: string[]; sizes?: {id: string; mm: number}[]};
 import {AskSchema, type Fit} from '@scan-to-make/contracts/counterpart';
@@ -859,8 +859,9 @@ export class ObjectService {
       const settled = o.print?.uncertain ? {print: {...o.print, uncertain: undefined}} : {};
       switch (status) {
         // Hide from Home: the project keeps its status (Done stays Done) and gets it back when unhidden.
-        case 'works': return {...rest, ...settled, state: o.state === 'printing' ? o.state : 'confirmed', outcome: 'works'};
-        case 'printed': return {...rest, ...settled, state: 'printed'};
+        // Printed or Works records a print: it closes any open question (#638).
+        case 'works': return closedByPrint({...rest, ...settled, state: o.state === 'printing' ? o.state : 'confirmed', outcome: 'works'});
+        case 'printed': return closedByPrint({...rest, ...settled, state: 'printed'});
         // Without a model, only the flags clear: a draft stays a draft.
         case 'not-printed': return {...rest, ...settled, ...(o.current ? {state: 'ready' as const} : {})};
         case 'needs-changes': return {...rest, outcome: 'needs-changes', ...(o.state === 'confirmed' ? {state: 'printed' as const} : {})};
@@ -2156,12 +2157,13 @@ export class ObjectService {
       // A new print after changes asks "Did it fit?" again: needs-changes ends with it (KAN-217).
       case 'done': {
         const {outcome, ...rest} = base;
-        return outcome === 'works' ? {...base, state: 'confirmed', failure: undefined} : {...rest, state: 'printed', failure: undefined};
+        // A finished print closes any open question (#638).
+        return closedByPrint(outcome === 'works' ? {...base, state: 'confirmed', failure: undefined} : {...rest, state: 'printed', failure: undefined});
       }
       case 'cancelled': return {...base, state: o.outcome === 'works' ? 'confirmed' : 'ready', failure: undefined};
       case 'not-started': return {...base, state: 'failed', failure: printEndFailure('not-started', context), print: {...o.print!, uncertain: undefined}};
       case 'replaced': return {...base, state: 'failed', failure: printEndFailure('replaced', context)};
-      case 'sent': return {...base, state: 'sent', failure: undefined, print: {...o.print!, uncertain: true}};
+      case 'sent': return closedByPrint({...base, state: 'sent', failure: undefined, print: {...o.print!, uncertain: true}});
       case 'failed': return {...base, state: 'failed', failure: printEndFailure('failed', context)};
     }
   }
