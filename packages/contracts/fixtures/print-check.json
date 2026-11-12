@@ -40,6 +40,7 @@
       "tint": "orange"
     },
     "print": {
+      "bundleId": "b7a1c2d3-4e5f-4a6b-8c7d-9e0f1a2b3c4d",
       "printId": "faf29c4d-f755-48ae-955b-e9ab323faab9",
       "destination": {
         "id": "current",
