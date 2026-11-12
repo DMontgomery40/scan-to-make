@@ -198,3 +198,24 @@ export function stageStill(p: Project, shown: Still, label: string, unavailableL
   // Nothing is running and no picture came: say so, and Try Again waits once more (a picture that arrives shows at once).
   return { state: "not available", line: role ? NOT_DRAWN_LINE : unavailableLine, retry: !!role };
 }
+/**
+ * The stage's clock for one thing it waits for (#626), as `StagePicture` runs it: `watch` starts a new clock whenever
+ * what is awaited changes (another picture, another entry, Try again) and, while it waits, wakes `settle` once the
+ * patience is up; `waited` is how long that same thing has been awaited (0 for anything else).
+ */
+export function pictureClock(settle: () => void, patience = PICTURE_PATIENCE_MS) {
+  let key: string | undefined, since = 0, timer: ReturnType<typeof setTimeout> | undefined;
+  return {
+    watch(next: string, waiting: boolean) {
+      if (next === key) return;
+      clearTimeout(timer);
+      timer = undefined;
+      key = next;
+      since = Date.now();
+      if (waiting) timer = setTimeout(() => { timer = undefined; settle(); }, patience + 50);
+    },
+    waited(of: string) { return of === key ? Date.now() - since : 0; },
+    /** Unmounting forgets what it watched, so a remount (React StrictMode's included) starts the clock again. */
+    stop() { clearTimeout(timer); timer = undefined; key = undefined; },
+  };
+}

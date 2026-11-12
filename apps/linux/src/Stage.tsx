@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { artifact } from "./bridge";
 import type { Project } from "./types";
-import { canLocate, filePath, gallery, drawnColour, photoPicture, still, sizeText, stageStill, PICTURE_PATIENCE_MS, type GalleryKind, type Still } from "./gallery";
+import { canLocate, filePath, gallery, drawnColour, photoPicture, still, sizeText, stageStill, pictureClock, type GalleryKind, type Still } from "./gallery";
 export function Picture({
   id,
   path,
@@ -274,19 +274,13 @@ export function StagePicture({ project, still: shown, label, unavailableLine, ro
   const [attempt, setAttempt] = useState(0);
   const path = typeof shown === "object" ? shown.picture : undefined;
   const waitingKey = `${project.id}#${role ?? ""}#${label}#${shown === "waiting" ? "waiting" : path ?? "none"}#${attempt}`;
-  const [since, setSince] = useState(() => ({ key: waitingKey, at: Date.now() }));
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => setFailed(false), [project.id, path]);
-  // Every new thing to wait for starts its own clock; Try Again starts it again.
-  useEffect(() => {
-    const at = Date.now();
-    setSince({ key: waitingKey, at });
-    setNow(at);
-    if (shown !== "waiting") return;
-    const timer = setTimeout(() => setNow(Date.now()), PICTURE_PATIENCE_MS + 50);
-    return () => clearTimeout(timer);
-  }, [waitingKey]);
-  const settled = stageStill(project, shown, label, unavailableLine, since.key === waitingKey ? now - since.at : 0, role);
+  // Every new thing to wait for starts its own clock; Try again starts it again (`pictureClock`).
+  const [, setTick] = useState(0);
+  const clock = useRef<ReturnType<typeof pictureClock>>(undefined);
+  clock.current ??= pictureClock(() => setTick((n) => n + 1));
+  useEffect(() => clock.current!.watch(waitingKey, shown === "waiting"), [waitingKey]);
+  useEffect(() => () => clock.current?.stop(), []);
+  const settled = stageStill(project, shown, label, unavailableLine, clock.current.waited(waitingKey), role);
   const coming = `${label}: coming from your computer`;
   if (path && !failed)
     return (

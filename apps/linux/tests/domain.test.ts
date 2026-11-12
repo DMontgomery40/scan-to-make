@@ -1,8 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { canLocate, gallery, drawnColour, photoPicture, still, filePath, stageStill, PICTURE_PATIENCE_MS, NOT_DRAWN_LINE } from "../src/gallery";
-import { designAnswer, designHistory, designThumbnail, inheritedConversation, sealedLine, showingDesign, twoTruthsLine, viewingLine } from "../src/designs";
+import { canLocate, gallery, drawnColour, photoPicture, still, filePath, stageStill, pictureClock, PICTURE_PATIENCE_MS, NOT_DRAWN_LINE } from "../src/gallery";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { ProjectPage } from "../src/ProjectView";
+import { NEWEST_WAITS, earlierOnStage, designAnswer, designHistory, designThumbnail, inheritedConversation, sealedLine, showingDesign, twoTruthsLine, viewingLine } from "../src/designs";
 import {
   MAKE_FROM_SCAN, FIT_CHOICE, COPY_CHOICE, USE_EXISTING_SCAN, canMakeFromScan, scanLineage, scansToReuse, scannedLine,
   FIT_SIZE_SOURCES, fitSizeDetail, fitMissing, makeFromScanParams, newFitChoice,
@@ -1183,4 +1186,122 @@ test("a picture the computer never draws settles into a reason with Try again, n
   const scanned = { ...linux, scan: "scan.usdz" } as Project;
   const scanEntry = gallery(scanned).find((e) => e.kind === "scan")!;
   assert.equal(stageStill(scanned, still(scanned, scanEntry), scanEntry.label, "x", PICTURE_PATIENCE_MS, scanEntry.kind).state, "not available");
+});
+
+// Review of #753 (Muse, P2 ×2): the page itself, with other projects present; every send and answer for the newest
+// waits while an earlier design is on the stage (the Mac's `blocked`); and the stage's own 20 s clock.
+const pageOf = (p: Project, viewing: string | undefined, projects: Project[], queue: object[] = []) =>
+  renderToStaticMarkup(createElement(ProjectPage, {
+    project: p, printers: [], apply() {}, mutate: async () => ({}), onBack() {}, onView() {}, viewing,
+    changes: { queue, loaded: true, error: "", enqueue: async () => {}, discard: async () => {}, retry: async () => {} } as never,
+    capabilities: { projectSettings: true }, projects, onOpenProject() {},
+  }));
+/** The opening tag of the first button whose text starts with `text`. */
+const buttonTag = (html: string, text: string) => {
+  const at = html.indexOf(`>${text}`);
+  assert.ok(at > 0, `a "${text}" control is on the page`);
+  return html.slice(html.lastIndexOf("<button", at), at + 1);
+};
+const fieldsetTag = (html: string, id: string) => {
+  const match = new RegExp(`<fieldset[^>]*data-testid="${id}"[^>]*>`).exec(html);
+  assert.ok(match, `${id} is on the page`);
+  return match[0];
+};
+const disabled = (tag: string) => /\sdisabled=""/.test(tag);
+
+test("the project page with other projects present: designs under the stage, an earlier one on it, and every action for the newest waits (#744)", () => {
+  const pink = { ...project, id: "pink", title: "Pink box", plates: undefined } as Project;
+  const holder = { ...project, id: "holder", title: "Wall holder", plates: undefined } as Project;
+  // Two printed designs (the earlier one unanswered, so its own answer shows), a saved follow-up, an open question,
+  // a plate, and a history carried from another project on the list.
+  const page = {
+    ...hanger,
+    prints: [...hanger.prints!, { id: "p2", bundleId: "b", versionId: widerDesign!.id, startedAtMs: 1793900000000, monitor: { endState: "done" } }],
+    pendingFollowup: "Make the hook longer",
+    ask: { id: "ask-1", question: "How thick is the desk?", answers: ["text", "best-guess"], status: "open" },
+    plates: [{ id: "1:1", fileIndex: 0, plateIndex: 1, name: "Plate 1", fileName: "hanger.3mf", selected: true, sliced: false, status: "ready" }],
+    inherited: { from: { id: "pink", title: "Pink box (old name)" }, items: [{ at: 1, who: "you", text: "A box." }] },
+  } as Project;
+  const projects = [pink, page, holder];
+  const queue = [{ id: "q1", projectId: page.id, note: "Round the edges", state: "uncertain" }];
+  // An open question holds Print by itself, so Print is checked on the page without it.
+  const quiet = { ...page, ask: undefined } as Project;
+  const live = pageOf(page, undefined, projects, queue), quietLive = pageOf(quiet, undefined, projects, queue);
+  const viewing = pageOf(page, firstDesign!.id, projects, queue), quietViewing = pageOf(quiet, firstDesign!.id, projects, queue);
+  assert.equal(disabled(/<button[^>]*data-testid="print"[^>]*>/.exec(quietViewing)![0]), true, "Print waits while an earlier design is on the stage");
+  assert.equal(disabled(/<button[^>]*data-testid="print"[^>]*>/.exec(quietLive)![0]), false, "Print works with the newest on the stage");
+  for (const html of [live, viewing]) {
+    assert.match(html, /data-testid="design-history"/);
+    assert.match(html, /What you have/);
+    assert.match(html, />From “Pink box”</, "the list's own project, by its name now");
+  }
+  // The newest on the stage: nothing waits.
+  assert.doesNotMatch(live, /data-testid="viewing-earlier-design"/);
+  assert.equal(earlierOnStage(page, newestDesign!.id), undefined, "choosing the newest is showing the newest");
+  // An earlier design on the stage: its bar, Show the newest, and its own state in the header.
+  assert.match(viewing, /data-testid="viewing-earlier-design"/);
+  assert.match(viewing, /Earlier design · Printed \w{3} \d{1,2} · Workshop printer/);
+  assert.match(viewing, />Show the newest</);
+  assert.match(viewing, /<p class="status ">Done<\/p>/);
+  assert.ok(viewing.includes(NEWEST_WAITS));
+  const paths: [string, (html: string) => string][] = [
+    ["Ask for changes", (h) => buttonTag(h, "Ask for changes…")],
+    ["Retry saved request (objects.correct)", (h) => buttonTag(h, "Retry saved request")],
+    ["a queued change's retry", (h) => buttonTag(h, "I checked the conversation; retry")],
+    ["the open question", (h) => fieldsetTag(h, "ask-wait")],
+    ["the plates", (h) => fieldsetTag(h, "plates-wait")],
+  ];
+  for (const [name, tag] of paths) {
+    assert.equal(disabled(tag(viewing)), true, `${name} waits while an earlier design is on the stage`);
+    assert.equal(disabled(tag(live)), false, `${name} works with the newest on the stage`);
+  }
+  // The question's own controls sit inside the waiting card.
+  const ask = viewing.slice(viewing.indexOf('data-testid="ask-wait"'));
+  assert.ok(ask.indexOf("Use your best guess") < ask.indexOf("</fieldset>"));
+  // What stays live: each printed design's own answer, and Show the newest.
+  assert.equal(disabled(buttonTag(viewing, "It works")), false);
+  assert.equal(disabled(buttonTag(viewing, "Needs changes")), false);
+  assert.equal(disabled(buttonTag(viewing, "Show the newest")), false);
+  // A reconstruction review (which replaces the question card) waits too.
+  const review = { ...page, ask: undefined, reconstructionReview: { id: "r1", kind: "scale", preview: "reconstruction-preview.stl?reviewId=r1",
+    boundsMin: [0, 0, 0], boundsMax: [1, 1, 1], extents: { x: 1, y: 1, z: 1 }, scaleKnown: false } } as Project;
+  assert.equal(disabled(fieldsetTag(pageOf(review, firstDesign!.id, projects), "review-wait")), true);
+  assert.equal(disabled(fieldsetTag(pageOf(review, undefined, projects), "review-wait")), false);
+  assert.ok(pageOf(review, firstDesign!.id, projects).slice(pageOf(review, firstDesign!.id, projects).indexOf('data-testid="review-wait"')).includes("Confirm this size"));
+});
+
+test("the stage's clock: coming for 20 s, then the reason with Try again; Try again and a new picture start it again (#626)", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 1_000_000 });
+  const ready = { ...project, id: "c", state: "ready", current: { model: "current/model.stl", renders: [] } } as Project;
+  const entry = gallery(ready)[0]!;
+  let woke = 0;
+  const clock = pictureClock(() => woke++);
+  const shownAt = (p: Project, key: string) => stageStill(p, "waiting", entry.label, "x", clock.waited(key), entry.kind);
+  clock.watch("c#part#0", true);
+  assert.equal(shownAt(ready, "c#part#0").state, "waiting");
+  t.mock.timers.tick(PICTURE_PATIENCE_MS - 1);
+  assert.equal(woke, 0);
+  assert.equal(shownAt(ready, "c#part#0").state, "waiting", "19.999 s: still coming");
+  t.mock.timers.tick(51);
+  assert.equal(woke, 1, "the page is woken to settle");
+  assert.deepEqual(shownAt(ready, "c#part#0"), { state: "not available", line: NOT_DRAWN_LINE, retry: true });
+  // While a pass runs it is still coming; when it ends the same wait settles at once.
+  assert.equal(shownAt({ ...ready, state: "touching-up" }, "c#part#0").state, "waiting");
+  // Try again is a new attempt: coming again, for another 20 s.
+  clock.watch("c#part#1", true);
+  assert.equal(shownAt(ready, "c#part#1").state, "waiting");
+  assert.equal(clock.waited("c#part#0"), 0, "the old wait is forgotten");
+  t.mock.timers.tick(PICTURE_PATIENCE_MS + 50);
+  assert.equal(woke, 2);
+  assert.equal(shownAt(ready, "c#part#1").state, "not available");
+  // The same key again keeps its clock; a picture that is shown sets none; a remount starts again.
+  clock.watch("c#part#1", true);
+  assert.equal(woke, 2);
+  clock.watch("c#renders/front.png#0", false);
+  t.mock.timers.tick(10 * PICTURE_PATIENCE_MS);
+  assert.equal(woke, 2, "no clock for a picture that came");
+  clock.stop();
+  clock.watch("c#renders/front.png#0", true);
+  t.mock.timers.tick(PICTURE_PATIENCE_MS + 50);
+  assert.equal(woke, 3, "after an unmount the same wait is timed again");
 });
