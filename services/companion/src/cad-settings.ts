@@ -146,6 +146,8 @@ export class CadSettings {
   #timeouts = 0;
   #retry?: ReturnType<typeof setTimeout>;
   readonly #retryMs: readonly number[];
+  /** Shut down: no check starts, and one still running schedules no other. */
+  #closed = false;
   #setup?: {startedAt: number; seconds: number};
   #result?: {ok: boolean; message: string};
   #refreshing?: Promise<void>;
@@ -160,7 +162,9 @@ export class CadSettings {
   }
 
   /** Stops checking again by itself. */
-  close(): void { clearTimeout(this.#retry); this.#retry = undefined; }
+  close(): void { this.#closed = true; this.#cancelRetry(); }
+
+  #cancelRetry(): void { clearTimeout(this.#retry); this.#retry = undefined; }
 
   /** The row every layout shows. Reads `cad_status` again when the last answer is older than 30 s. */
   async view(): Promise<CadView> {
@@ -200,21 +204,24 @@ export class CadSettings {
 
   /** Asks the printer MCP's `cad_status` now, and tells every client when the row changed. */
   refresh(): Promise<void> {
+    if (this.#closed) return Promise.resolve();
     this.#refreshing ??= (async () => {
       const before = JSON.stringify(this.current());
       try {
         const answer = await this.deps.calls.status();
         this.#status = {...answer, at: this.#now()};
         this.#timeouts = 0;
+        this.#cancelRetry();
       } catch (error) {
         if (error instanceof CadCheckTimedOut) {
           // A row that was answered keeps that answer (no flapping between Ready and busy) and is asked again on a
           // later read; one with no answer yet says the computer is busy and checks again by itself. Only those count
           // towards giving up, so slow checks behind an answer never use up the retries.
-          if (this.#status?.status) { this.#timeouts = 0; this.#status = {...this.#status, at: this.#now()}; }
+          if (this.#status?.status) { this.#timeouts = 0; this.#cancelRetry(); this.#status = {...this.#status, at: this.#now()}; }
           else { this.#timeouts++; this.#status = {status: null, server: error.server, at: this.#now(), slow: true}; this.#checkAgain(); }
         } else {
           this.#timeouts = 0;
+          this.#cancelRetry();
           this.#status = {status: null, server: this.#status?.server ?? 'your printer MCP', at: this.#now(), error: error instanceof Error ? error.message : String(error)};
         }
       }
@@ -266,9 +273,9 @@ export class CadSettings {
   }
 
   #checkAgain(): void {
-    clearTimeout(this.#retry);
+    this.#cancelRetry();
     const delay = this.#retryMs[this.#timeouts - 1];
-    if (delay === undefined) return;
+    if (delay === undefined || this.#closed) return;
     this.#retry = setTimeout(() => { this.#retry = undefined; void this.refresh().catch(() => undefined); }, delay);
     this.#retry.unref?.();
   }

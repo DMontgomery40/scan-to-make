@@ -406,6 +406,30 @@ test('a cad_status check that runs out of time says the computer is busy and che
   broken.close();
 });
 
+// #758 review (P2, #639): a check still running at shutdown must not start another one after it.
+test('closing the code design engine row stops a check in flight from scheduling another, and a settled check cancels a pending retry', async () => {
+  const {CadSettings, CadCheckTimedOut} = await import('../dist/cad-settings.js');
+  let finish, asked = 0;
+  const hanging = new CadSettings({calls: {status: () => { asked++; return new Promise((_, reject) => { finish = () => reject(new CadCheckTimedOut('bambu-printer-mcp')); }); }, setup: async () => assert.fail('no setup')},
+    emit: async () => {}, retryMs: [5, 5]});
+  const running = hanging.refresh();
+  hanging.close();
+  finish(); await running;
+  await new Promise(resolve => setTimeout(resolve, 30));
+  assert.equal(asked, 1, 'no check after close');
+  await hanging.refresh();
+  assert.equal(asked, 1, 'a closed row never starts the printer MCP');
+  // A retry is pending; the row is then answered by another read: the retry is cancelled, not run anyway.
+  let answers = [new CadCheckTimedOut('bambu-printer-mcp'), {status: {configured: false, ready: false}, server: 'bambu-printer-mcp'}], count = 0;
+  const row = new CadSettings({calls: {status: async () => { const next = answers[Math.min(count++, answers.length - 1)]; if (next instanceof Error) throw next; return next; }, setup: async () => assert.fail('no setup')},
+    emit: async () => {}, retryMs: [40]});
+  await row.refresh(); assert.equal(row.current().state, 'checking');
+  await row.refresh(); assert.equal(row.current().state, 'not-set-up');
+  await new Promise(resolve => setTimeout(resolve, 80));
+  assert.equal(count, 2, 'the pending retry was cancelled once the row had its answer');
+  row.close();
+});
+
 test('a refused Set Up shows the MCP\'s own sentence and suggestion, and passes its structured result through unread', async () => {
   const {CadSettings, cadCalls} = await import('../dist/cad-settings.js');
   const {PrinterMcpError} = await import('@scan-to-make/printer-handoff');
