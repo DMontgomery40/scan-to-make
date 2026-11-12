@@ -7,7 +7,7 @@ import {homedir, tmpdir} from 'node:os';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {basename, dirname, extname, isAbsolute, join, relative} from 'node:path';
-import {type PrintAsk, DispatchedPrintError, PrinterMcpError, inspectModelFile, type McpModelPlates, readModelFile, type ModelFileInfo, type ModelFilament, packageLabel, readPrintReport, readPrintRoute, routeArgs, setPrintRoute, timeoutsFor, type PrintRoute,
+import {type PrintAsk, DispatchedPrintError, PrinterMcpError, inspectModelFile, modelPlatePreview, type McpModelPlates, readModelFile, type ModelFileInfo, type ModelFilament, packageLabel, readPrintReport, readPrintRoute, routeArgs, setPrintRoute, timeoutsFor, type PrintRoute,
   type PrintProgress, type PendingElicitation, type PrinterHandoffConfig, type PrinterSelection, type PrinterSlicer, type PrintReport, type PrinterSession, type FilamentProposalInput} from '@scan-to-make/printer-handoff';
 import type {PrintEstimate, PrintSettings, ProjectStatus, ProjectSettingsPatch} from '@scan-to-make/contracts/counterpart';
 import {PrintMonitorRunner, matchJob, milestonesFor, type EventDraft, type MonitorClock, type MonitorEnd, type MonitorTarget} from '../printing/monitor.js';
@@ -469,6 +469,18 @@ function forgetOwnSettings(object: StmObject): Pick<StmObject, 'current'> {
 /** A 3MF model owns its parts and their filaments: a published file, or a design in several colours. */
 function isMultipart(object: Pick<StmObject, 'current'>): boolean {
   return object.current?.model.toLowerCase().endsWith('.3mf') === true;
+}
+
+/** What a designer's 3MF kept as it came says next (#641). */
+const DESIGNER_AS_IS = 'The designer’s file as they made it, with its plates and print settings. It’s ready to print. To change something, say what.';
+
+/**
+ * #641: a copy whose scan is a designer's 3MF and that has no words prints as the designer made it, with no pass.
+ * Photos alone ask for no change. Words with it (or later) run the designer-copy pass.
+ */
+function designerAsIs(object: StmObject): boolean {
+  return passKind(object) === 'copy' && !object.current && !!object.scan?.toLowerCase().endsWith('.3mf')
+    && !object.instructions?.trim() && !object.capture?.length;
 }
 
 /**
@@ -1613,6 +1625,8 @@ export class ObjectService {
     // Photos only show what something looks like; without a scan, the description says what to make.
     if (!object.scan && !object.capture?.length && !object.captureDepth?.length && !object.instructions?.trim() && !object.credit?.url && object.state === 'new')
       throw new InvalidStateError('Describe what to make, or add a scan.');
+    // A designer's 3MF with no words prints as the designer made it: nothing to clean up, so no pass and no photos needed.
+    if (designerAsIs(object) && (object.state === 'new' || object.state === 'failed')) return this.#keepDesignerFile(id);
     // A touch-up works from photos; a model with neither photos nor a request has nothing to go on. A scan brought over
     // from another project with no words is a copy of it: kept as it is, like a copy's scan sent on its own.
     if (object.scan && !object.scanFrom && !object.photos.length && !object.capture?.length && !object.instructions?.trim() && (object.state === 'new' || object.state === 'failed'))
@@ -1642,6 +1656,31 @@ export class ObjectService {
     if (object.state === 'ready' && object.scanSource === 'phone-preview' && object.captureCompletion?.source === 'object-capture') return this.#pass(object, {});
     if (object.state !== 'new' && object.state !== 'failed') throw new InvalidStateError('This object has already been touched up.');
     return this.#pass(object, {});
+  }
+
+  /**
+   * #641: a designer's 3MF sent with no words becomes the model as it came: its parts, plates and print settings, ready
+   * to print. No pass runs (there is no scan to clean up) and no request is made up for one. Its summary says what
+   * happens next; words sent later start the designer-copy pass on this file as before (`designerFile`).
+   */
+  async #keepDesignerFile(id: string): Promise<StmObject> {
+    const object = await this.get(id), dir = this.dir(id);
+    const bytes = await readModelFile(join(dir, 'scan', object.scan!));
+    let info: ModelFileInfo;
+    try { info = inspectModelFile(bytes, '3mf'); } catch (error) { throw new InvalidFileError(error instanceof Error ? error.message : 'That model could not be read.'); }
+    const rendersDir = join(dir, 'current', 'renders');
+    await rm(rendersDir, {recursive: true, force: true});
+    await mkdir(rendersDir, {recursive: true});
+    await writeFile(join(dir, 'current', 'model.3mf'), bytes, {mode: 0o600});
+    // The designer's own picture of the first plate, when the file has one (never a substitute for its geometry).
+    const plate = info.plates[0], preview = plate ? modelPlatePreview(bytes, plate.index) : undefined;
+    const renders: string[] = [];
+    if (preview) { await writeFile(join(rendersDir, `plate-${plate!.index + 1}.png`), preview); renders.push(join('current', 'renders', `plate-${plate!.index + 1}.png`)); }
+    const updated = await this.#deps.store.update(id, o => ({...o, kind: 'copy' as const, state: 'ready' as const, progress: undefined, failure: undefined, failedPass: undefined,
+      current: {model: join('current', 'model.3mf'), renders, summary: DESIGNER_AS_IS},
+      ...(!o.title && info.title ? {title: info.title} : {})}));
+    await this.#emit({id: randomUUID(), type: 'pass.ready', projectId: id});
+    return this.#changed(updated);
   }
 
   async #captureFilesPresent(object: StmObject): Promise<void> {
@@ -3343,9 +3382,9 @@ export class ObjectService {
 
   /**
    * PRD §5.3: a touch-up runs only when the person asked for one, by sending a request with the scan or asking for
-   * changes later. A copy's scan sent on its own becomes the project's model as it is and waits for them. Where this
-   * computer can't make that model's STL (no `scanToStl`), or the scan isn't a mesh it can keep (a designer's 3MF),
-   * the touch-up runs as before.
+   * changes later. A copy's scan sent on its own becomes the project's model as it is and waits for them; a designer's
+   * 3MF sent on its own never gets here (`#keepDesignerFile`). Where this computer can't make that model's STL (no
+   * `scanToStl`), the touch-up runs as before.
    */
   #touchupAsked(object: StmObject, note: string | undefined, kind: PassKind): boolean {
     if (kind !== 'copy' || note !== undefined || object.instructions?.trim()) return true;

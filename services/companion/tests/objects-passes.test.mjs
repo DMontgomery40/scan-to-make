@@ -103,6 +103,51 @@ test("a copy of a designer's 3MF works on that 3MF every pass, never its merged 
   assert.equal(f.inputs[1].currentModel, false, 'it is not told it has a millimetre STL to import');
 });
 
+// #641: a designer's 3MF sent with no words ran a cleanup pass with the scan-cleanup request ("Clean up this scan…").
+test("a designer's 3MF sent with no words is ready to print as the designer made it: no pass; words later still edit it", async t => {
+  const {zipSync, strToU8} = (await import('node:module')).createRequire(new URL('../../printer-handoff/package.json', import.meta.url))('fflate');
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
+  const designer = Buffer.from(zipSync({'[Content_Types].xml': strToU8('<Types/>'), 'Metadata/plate_1.png': new Uint8Array(png),
+    '3D/3dmodel.model': strToU8('<model><metadata name="Title">Caliper card</metadata><resources><object id="1"><mesh/></object></resources><build><item objectid="1"/></build></model>')}));
+  const f = await setup(t, [{parts: true, result: {summary: 'Logo added.'}}]);
+  const kept = async (object, why) => {
+    const ready = await f.service.settled(object.id);
+    assert.equal(ready.state, 'ready', why);
+    assert.equal(ready.kind, 'copy', 'still a copy: words later edit the designer\'s file');
+    assert.equal(ready.current.model, 'current/model.3mf', 'the designer\'s 3MF is what prints, with its plates and settings');
+    assert.ok((await readFile(join(f.store.dir(object.id), 'current', 'model.3mf'))).equals(designer), 'byte for byte');
+    assert.deepEqual(ready.current.renders, ['current/renders/plate-1.png'], 'the designer\'s own picture of the plate');
+    assert.equal(ready.current.summary, 'The designer’s file as they made it, with its plates and print settings. It’s ready to print. To change something, say what.');
+    assert.doesNotMatch(JSON.stringify(ready), /Clean up this scan/, 'never the scan-cleanup sentence');
+    assert.equal(ready.passes.length, 0, 'no pass ran');
+    return ready;
+  };
+  // On its own, with no photos.
+  const bare = await f.service.create(undefined, 'copy');
+  await f.service.addScan(bare.id, 'scan.3mf', designer);
+  await f.service.start(bare.id);
+  const first = await kept(bare, 'no photos needed: there is nothing to clean up');
+  assert.equal(first.title, 'Caliper card', 'named by the file');
+  // With photos, still no words.
+  const pictured = await f.service.create(undefined, 'copy');
+  await f.service.addScan(pictured.id, 'scan.3mf', designer);
+  await f.service.addPhoto(pictured.id, 'photo-01.jpg', JPEG);
+  await f.service.start(pictured.id);
+  await kept(pictured, 'photos alone ask for no change');
+  // Made from that project's file with no words.
+  const again = await f.service.makeFromScan(bare.id, {kind: 'copy'});
+  await until(async () => (await f.store.get(again.id)).state === 'ready');
+  await kept(again, 'brought over, then kept as it came');
+  assert.equal(f.inputs.length, 0, 'no worker ran for any of them');
+  // Words later: the designer-copy pass edits that 3MF, as before.
+  await f.service.correct(bare.id, 'Add the counterpart logo');
+  await f.service.settled(bare.id);
+  const dir = f.store.dir(bare.id);
+  assert.deepEqual(f.inputs[0].scan, [join(dir, 'current', 'model.3mf'), join(dir, 'scan', 'scan.3mf')]);
+  assert.equal(f.inputs[0].designerCopy, true);
+  assert.equal(f.inputs[0].instructions, undefined, 'no invented request: the change is the person\'s words');
+});
+
 test('a copy started with nothing scanned designs its request, and stays a design after the first pass', async t => {
   const f = await setup(t, [{}, {}]);
   const object = await f.service.create('A guitar pick that says Vivi', 'copy');
