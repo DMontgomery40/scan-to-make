@@ -375,9 +375,23 @@ test('a cad_status check that runs out of time says the computer is busy and che
   assert.ok(events.some(event => event.type === 'settings.changed' && event.data.keys[0] === 'cad'), 'every layout is told the row changed');
   // A row that was answered keeps its answer through a timeout: no flapping between Ready and busy.
   answers = [new CadCheckTimedOut('bambu-printer-mcp')]; asked = 0;
-  await settings.refresh();
+  await settings.refresh(); await settings.refresh(); await settings.refresh();
   assert.equal(settings.current().state, 'not-set-up');
-  settings.close();
+  // Slow checks behind an answer never use up the retries: once the answer is gone (Set Up reads the row afresh), a
+  // timeout still says busy and checks again.
+  const T = () => new CadCheckTimedOut('bambu-printer-mcp');
+  let queue = [{status: {configured: false, ready: false}, server: 'bambu-printer-mcp'}, T(), T(), T(), T(), {status: {configured: true, ready: true}, server: 'bambu-printer-mcp'}];
+  const fresh = new CadSettings({calls: {status: async () => { const next = queue.length > 1 ? queue.shift() : queue[0]; if (next instanceof Error) throw next; return next; },
+    setup: async () => ({setup: {ready: true, message: 'Set up.'}, server: 'bambu-printer-mcp'})}, emit: async () => {}, retryMs: [50, 50]});
+  for (let i = 0; i < 4; i++) await fresh.refresh();
+  assert.equal(fresh.current().state, 'not-set-up', 'three slow checks kept the answer');
+  await fresh.setUp();
+  // Set Up reads the row afresh when it ends: wait for that read's outcome.
+  await tick(() => ['checking', 'unavailable'].includes(fresh.current().state) && fresh.current().message !== 'Checking…');
+  assert.equal(fresh.current().message, 'This computer is busy, so bambu-printer-mcp is slow to answer. Counterpart is checking again.', 'busy and checking again, not given up');
+  await tick(() => fresh.current().state === 'ready');
+  assert.equal(fresh.current().state, 'ready');
+  settings.close(); fresh.close();
 
   // Still too busy after the retries: it stops asking and says when it will check again; still not "go to Settings".
   const stuck = new CadSettings({calls: {status: async () => { throw new CadCheckTimedOut('bambu-printer-mcp'); }, setup: async () => assert.fail('no setup')}, emit: async () => {}, retryMs: [5, 5]});

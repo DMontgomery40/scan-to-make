@@ -399,6 +399,13 @@ test('a stored printed project with an old-style open question reads as closed o
   assert.equal(shown.ask.kind, 'closeup', 'it still says its kind');
   assert.equal(shown.ask.question, 'Can you take a close-up of the hooks?');
   assert.equal(shown.question, undefined, 'no layout finds it through the old field either');
+  // The service reads it closed too, so it never refuses what no client can show (a plate choice before Print).
+  const askId = '00000000-0000-4000-8000-000000000639';
+  await f.store.update(object.id, o => ({...o, kind: 'published', ask: {id: askId, type: 'choice', kind: 'choice', question: 'Which file and plate would you like to print?',
+    options: [{id: '0:0', label: 'a · Plate 1'}, {id: '0:1', label: 'a · Plate 2'}], answers: ['choice'], status: 'open', askedAtMs: 1}}));
+  assert.equal((await f.service.get(object.id)).ask.status, 'answered');
+  await assert.rejects(f.service.answerAsk(object.id, askId, ['0:0']), /answered or replaced/);
+  await assert.rejects(f.service.print(object.id, {}), error => !/Choose the model’s file and plate/.test(error.message), 'Print is not held by a question nobody can see');
   // An open question on a project that hasn't printed is still open.
   const waiting = publicObject({...stored, state: 'needs-closeup'});
   assert.equal(waiting.ask.status, 'open');

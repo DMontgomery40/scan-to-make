@@ -208,11 +208,11 @@ export class CadSettings {
         this.#timeouts = 0;
       } catch (error) {
         if (error instanceof CadCheckTimedOut) {
-          this.#timeouts++;
           // A row that was answered keeps that answer (no flapping between Ready and busy) and is asked again on a
-          // later read; one with no answer yet says the computer is busy and checks again by itself.
-          if (this.#status?.status) this.#status = {...this.#status, at: this.#now()};
-          else { this.#status = {status: null, server: error.server, at: this.#now(), slow: true}; this.#checkAgain(); }
+          // later read; one with no answer yet says the computer is busy and checks again by itself. Only those count
+          // towards giving up, so slow checks behind an answer never use up the retries.
+          if (this.#status?.status) { this.#timeouts = 0; this.#status = {...this.#status, at: this.#now()}; }
+          else { this.#timeouts++; this.#status = {status: null, server: error.server, at: this.#now(), slow: true}; this.#checkAgain(); }
         } else {
           this.#timeouts = 0;
           this.#status = {status: null, server: this.#status?.server ?? 'your printer MCP', at: this.#now(), error: error instanceof Error ? error.message : String(error)};

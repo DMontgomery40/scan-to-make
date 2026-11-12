@@ -1074,7 +1074,8 @@ export class ObjectService {
   }
 
   async #read(id: string): Promise<StmObject> {
-    let object = await this.#scanFiles(await this.#deps.store.get(id));
+    // A printed project's question is closed (#638), also one stored open before that rule: the service and every client agree.
+    let object = closedByPrint(await this.#scanFiles(await this.#deps.store.get(id)));
     if (object.state === 'touching-up') object = await this.#freshEstimate(object);
     if (!object.print) return object;
     // A watched print reads its monitor's last report instead of asking the printer again.
