@@ -1216,6 +1216,74 @@ test('Settings → Printers follow-up: the shared two-profile fixture is what th
   assert.deepEqual(await twoProfileMoves(), JSON.parse(await readFile(path, 'utf8')).packages);
 });
 
+/**
+ * #775 (David, Nov 12: "messy af looking, double entries, confusing wording"): Settings → Printer software's row data.
+ * One P1S with two profiles, both on Counterpart's copy; mcp-3D used by nothing. `latest` per package; `own` puts the
+ * P1S's second profile on a checkout of its own. Shared with every client's tests as `mcp-printer-software-*.json`.
+ */
+async function printerSoftware({latest = {'bambu-printer-mcp': '1.1.94', 'mcp-3d-printer-server': '1.2.76'}, own = false} = {}) {
+  const {PrinterSetup} = await import('../dist/printing/setup.js');
+  const bambuOwn = `${APP}/printers/bambu`, generic = `${APP}/printers/generic`, dir = `${HOME}/bambu-printer-mcp`;
+  const env = mac({
+    [`${bambuOwn}/lib/node_modules/bambu-printer-mcp/package.json`]: pkgJson('1.1.94'), [`${bambuOwn}/lib/node_modules/bambu-printer-mcp/dist/index.js`]: '',
+    [`${generic}/lib/node_modules/mcp-3d-printer-server/package.json`]: pkgJson('1.2.76', 'mcp-3d-printer-server'), [`${generic}/lib/node_modules/mcp-3d-printer-server/dist/index.js`]: '',
+    ...(own ? {[`${dir}/.git/HEAD`]: 'x', [`${dir}/package.json`]: pkgJson('1.1.80'), [`${dir}/dist/index.js`]: ''} : {}),
+  });
+  const managed = {backend: 'bambu-printer-mcp', process: {command: '/node', args: [`${bambuOwn}/lib/node_modules/bambu-printer-mcp/dist/index.js`]}};
+  const configs = [
+    {id: 'current', config: managed},
+    {id: 'counterpart-p1s-lan', config: own ? {backend: 'bambu-printer-mcp', process: {command: '/node', args: [`${dir}/dist/index.js`]}} : {...managed, process: {...managed.process, env: {BAMBU_MODE: 'lan'}}}},
+  ];
+  const setup = new PrinterSetup({env, configs: () => configs, list: () => ['bambu', 'generic'], latestVersion: pkg => latest[pkg],
+    catalog: () => ({canonical: () => 'p1s', destinations: [{id: 'p1s', name: 'P1S'}]})});
+  return (await setup.mcps()).packages;
+}
+
+test('#775: two profiles of one printer give one "Used by" name; nothing newer is up to date with no update; no other copy', async () => {
+  const [bambu, generic] = await printerSoftware();
+  assert.deepEqual(bambu.usedBy, ['P1S'], 'one P1S, not one per profile');
+  assert.equal(bambu.uses.length, 2, 'both profiles are still listed for older clients');
+  assert.equal(bambu.upToDate, true);
+  assert.equal(bambu.available, undefined, 'nothing newer: no Update');
+  assert.deepEqual(bambu.moves, []);
+  assert.deepEqual(generic.usedBy, [], 'no printer uses mcp-3D-printer-server');
+  assert.equal(generic.upToDate, true);
+});
+
+test('#775: a newer published version is "available" only beside Counterpart\'s copy; an unknown latest says neither', async () => {
+  const [bambu, generic] = await printerSoftware({latest: {'bambu-printer-mcp': '1.1.95'}});
+  assert.equal(bambu.available, '1.1.95');
+  assert.equal(bambu.upToDate, undefined);
+  assert.equal(generic.available, undefined, 'npm didn\'t answer for it: no Update');
+  assert.equal(generic.upToDate, undefined, 'and no claim that it is up to date');
+});
+
+test('#775: a printer on another copy gets one plain line, a reason, and the Move', async () => {
+  const [bambu] = await printerSoftware({own: true});
+  assert.deepEqual(bambu.usedBy, ['P1S']);
+  assert.equal(bambu.moves.length, 1);
+  const [move] = bambu.moves;
+  assert.equal(move.mcpId, bambu.uses[1].mcpId);
+  assert.deepEqual(move.printers, ['P1S']);
+  assert.equal(move.words, 'P1S runs your own copy (1.1.80)');
+  assert.equal(move.reason, 'Runs from a folder you manage, so Counterpart doesn\'t update it by itself.', 'Q9: why it isn\'t kept current');
+  assert.ok(move.title.startsWith('Move P1S'), 'the title stays for clients that predate #775');
+});
+
+test('#775: the shared printer-software fixtures are what the companion lists', async () => {
+  const {readFile, writeFile} = await import('node:fs/promises');
+  const cases = {
+    'mcp-printer-software-current.json': () => printerSoftware(),
+    'mcp-printer-software-update.json': () => printerSoftware({latest: {'bambu-printer-mcp': '1.1.95', 'mcp-3d-printer-server': '1.2.76'}}),
+    'mcp-printer-software-own-copy.json': () => printerSoftware({own: true}),
+  };
+  for (const [name, make] of Object.entries(cases)) {
+    const path = new URL(`../../../packages/contracts/fixtures/${name}`, import.meta.url);
+    if (process.env.WRITE_FIXTURES === '1') await writeFile(path, JSON.stringify({packages: await make()}, null, 2) + '\n');
+    assert.deepEqual(await make(), JSON.parse(await readFile(path, 'utf8')).packages, name);
+  }
+});
+
 test('Settings → Printers follow-up: opening Settings waits briefly for the npm check it starts, so a new version shows on this visit', async t => {
   const {PrinterSetup} = await import('../dist/printing/setup.js');
   let answer = '1.1.68', delay = 20;

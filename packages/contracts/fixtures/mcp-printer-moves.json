@@ -25,9 +25,17 @@
       "moves": [
         {
           "mcpId": "mcp-0bf7779c72a243f2",
-          "title": "Move Bambu Lab P1S (bambu-printer-mcp, Counterpart’s older copy at ~/Library/Application Support/Scan to Make/printers/bambu-1.1.46) to Counterpart’s updated copy"
+          "title": "Move Bambu Lab P1S (bambu-printer-mcp, Counterpart’s older copy at ~/Library/Application Support/Scan to Make/printers/bambu-1.1.46) to Counterpart’s updated copy",
+          "printers": [
+            "Bambu Lab P1S"
+          ],
+          "words": "Bambu Lab P1S runs an earlier copy (1.1.65)"
         }
       ],
+      "usedBy": [
+        "Bambu Lab P1S"
+      ],
+      "upToDate": true,
       "appCopy": {
         "kind": "app",
         "path": "/Users/ada/Library/Application Support/Scan to Make/printers/bambu",
@@ -71,9 +79,18 @@
       "moves": [
         {
           "mcpId": "mcp-1b78b4cdc93d85d2",
-          "title": "Move Bambu Lab P1S (mcp-3D-printer-server, your copy at ~/mcp-3D-printer-server) to Counterpart’s updated copy"
+          "title": "Move Bambu Lab P1S (mcp-3D-printer-server, your copy at ~/mcp-3D-printer-server) to Counterpart’s updated copy",
+          "printers": [
+            "Bambu Lab P1S"
+          ],
+          "words": "Bambu Lab P1S runs your own copy (1.2.25)",
+          "reason": "Runs from a folder you manage, so Counterpart doesn't update it by itself."
         }
       ],
+      "usedBy": [
+        "Bambu Lab P1S"
+      ],
+      "upToDate": true,
       "appCopy": {
         "kind": "app",
         "path": "/Users/ada/Library/Application Support/Scan to Make/printers/generic",

@@ -1,0 +1,81 @@
+{
+  "packages": [
+    {
+      "package": "bambu-printer-mcp",
+      "label": "bambu-printer-mcp",
+      "description": "Bambu Lab printers",
+      "installed": true,
+      "version": "1.1.94",
+      "latestVersion": "1.1.94",
+      "appMcpId": "mcp-48ef5a6a983b42fc",
+      "uses": [
+        {
+          "destinationId": "current",
+          "printerId": "p1s",
+          "printer": "P1S",
+          "mcpId": "mcp-48ef5a6a983b42fc",
+          "kind": "app",
+          "path": "/Users/ada/Library/Application Support/Scan to Make/printers/bambu",
+          "version": "1.1.94",
+          "canMove": false,
+          "managed": true,
+          "words": "P1S uses Counterpart’s copy (1.1.94)."
+        },
+        {
+          "destinationId": "counterpart-p1s-lan",
+          "printerId": "p1s",
+          "printer": "P1S",
+          "mcpId": "mcp-48ef5a6a983b42fc",
+          "kind": "app",
+          "path": "/Users/ada/Library/Application Support/Scan to Make/printers/bambu",
+          "version": "1.1.94",
+          "canMove": false,
+          "managed": true,
+          "words": "P1S uses Counterpart’s copy (1.1.94)."
+        }
+      ],
+      "moves": [],
+      "usedBy": [
+        "P1S"
+      ],
+      "upToDate": true,
+      "appCopy": {
+        "kind": "app",
+        "path": "/Users/ada/Library/Application Support/Scan to Make/printers/bambu",
+        "version": "1.1.94"
+      },
+      "installs": [
+        {
+          "kind": "app",
+          "path": "/Users/ada/Library/Application Support/Scan to Make/printers/bambu",
+          "version": "1.1.94"
+        }
+      ]
+    },
+    {
+      "package": "mcp-3d-printer-server",
+      "label": "mcp-3D-printer-server",
+      "description": "Prusa, Klipper, OctoPrint, Duet, Repetier, Creality — and Bambu",
+      "installed": true,
+      "version": "1.2.76",
+      "latestVersion": "1.2.76",
+      "appMcpId": "mcp-5be13374a64448f0",
+      "uses": [],
+      "moves": [],
+      "usedBy": [],
+      "upToDate": true,
+      "appCopy": {
+        "kind": "app",
+        "path": "/Users/ada/Library/Application Support/Scan to Make/printers/generic",
+        "version": "1.2.76"
+      },
+      "installs": [
+        {
+          "kind": "app",
+          "path": "/Users/ada/Library/Application Support/Scan to Make/printers/generic",
+          "version": "1.2.76"
+        }
+      ]
+    }
+  ]
+}
