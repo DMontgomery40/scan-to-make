@@ -1327,6 +1327,11 @@ struct PassTimeline: View {
             if let change = pass.requestedChange {
                 Text("Your change: “\(change)”").font(.footnote).foregroundStyle(.secondary).lineLimit(3).padding(.bottom, 8)
             }
+            // #616: the pass that sealed a design says which one, so Activity and the design sections name the same thing.
+            if let sealed = DesignHistory(project).sealedLine(passStartedAtMs: pass.startedAtMs) {
+                Label(sealed, systemImage: "seal").font(.footnote).foregroundStyle(.secondary).padding(.bottom, 8)
+                    .accessibilityIdentifier("pass-\(index + 1)-sealed")
+            }
             ForEach(Array(steps.enumerated()), id: \.offset) { i, step in
                 HStack(alignment: .top, spacing: 12) {
                     VStack(spacing: 0) {

@@ -54,6 +54,9 @@ public struct DesignHistoryView<Thumbnail: View>: View {
                         }.buttonStyle(.plain).accessibilityIdentifier("design-\(version.id)")
                     }
                 }
+                if let restored = project.historyRestored {
+                    Text(restored).font(.footnote).foregroundStyle(.secondary)
+                }
             }.accessibilityIdentifier("design-history")
         }
     }

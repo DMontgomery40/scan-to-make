@@ -3527,7 +3527,9 @@ export class ObjectService {
     // changed nothing leaves the outcome alone, and a Done project stays Done.
     const beforeSeal = await store.get(id);
     const pass = beforeSeal.passes.find(p => p.startedAtMs === startedAtMs);
-    const version = current && (result.status === 'done' || result.status === 'unchanged') ? await sealVersion(beforeSeal, dir, current, {startedAtMs, endedAtMs: now, ...(pass?.note ? {note: pass.note} : {})}) : undefined;
+    // A pass that said it changed nothing keeps the design it started from, even when its file was written again.
+    const kept = result.status === 'unchanged' ? beforeSeal.versions?.at(-1) : undefined;
+    const version = kept ?? (current && (result.status === 'done' || result.status === 'unchanged') ? await sealVersion(beforeSeal, dir, current, {startedAtMs, endedAtMs: now, ...(pass?.note ? {note: pass.note} : {})}) : undefined);
     const changed = !!version && !beforeSeal.versions?.some(v => v.id === version.id);
     const updated = await store.update(id, o => ({...(changed ? (({outcome: _outcome, ...rest}) => rest)(o) : o),
       state: state === 'ready' && !changed && o.outcome === 'works' ? 'confirmed' : state, progress: undefined,
@@ -3549,7 +3551,8 @@ export class ObjectService {
     const saving = updated.passes.find(p => p.startedAtMs === startedAtMs)?.stages?.find(item => item.id === 'saving');
     if (saving?.endedAtMs !== undefined) void this.#deps.passTimings?.record(kind, result.engine ?? 'blender', 'saving', (saving.endedAtMs - saving.startedAtMs) / 1000).catch(() => undefined);
     const size = sizeText(updated.current?.sizeMm);
-    if (state === 'ready') await this.#emit({id: randomUUID(), type: 'pass.ready', projectId: id, ...(size ? {detail: {size}} : {})});
+    const printedBefore = changed && (updated.versions ?? []).slice(0, -1).some(v => v.printedAtMs !== undefined || updated.prints?.some(p => p.versionId === v.id && p.monitor?.endState === 'done'));
+    if (state === 'ready') await this.#emit({id: randomUUID(), type: 'pass.ready', projectId: id, ...(size || printedBefore ? {detail: {...(size ? {size} : {}), ...(printedBefore ? {printedBefore} : {})}} : {})});
     else if (state === 'needs-closeup') await this.#emit({id: randomUUID(), type: 'pass.ask', projectId: id, ...(ask ? {data: {askId: ask.id}} : {}),
       detail: {question: ask?.question ?? `Can you take a close-up of ${result.closeup ?? 'a part of the object'}?`}});
     else await this.#emit({id: randomUUID(), type: 'pass.failed', projectId: id, detail: {reason: updated.failure ?? 'The touch-up stopped without a model.'}});

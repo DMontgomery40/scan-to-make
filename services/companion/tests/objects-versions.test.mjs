@@ -78,3 +78,74 @@ test('migration restores finished designs and the pink box print absent from obj
     for (let i = 0; i < passes.length; i++) assert.equal(await readFile(join(passes[i].dir, 'out/touched.stl'), 'utf8'), STL(i+1));
   }
 });
+
+// #616: the migration over anonymised structural copies of four real projects (packages/contracts/fixtures/
+// versions-migration-real.json): real times, statuses, engines, identical-or-not outputs, code runs, frame folders and
+// events. Expectations are written from DESIGN.md §5 and the stored folders, not from this code's output.
+test('migration over the four real project structures restores their designs and attempts without guessing an answer', async () => {
+  const {ProjectDesignsSchema} = await import('@scan-to-make/contracts/counterpart');
+  const {utimes} = await import('node:fs/promises');
+  const root = await tempDir('versions-real-');
+  const {projects} = JSON.parse(await readFile(new URL('../../../packages/contracts/fixtures/versions-migration-real.json', import.meta.url)));
+  for (const row of projects) {
+    const dir = join(root, row.name), expected = row.expected;
+    for (const pass of row.passes) {
+      if (!pass.dir) continue;
+      const out = join(dir, pass.dir, 'out'); await mkdir(out, {recursive: true});
+      for (const [name, n] of Object.entries(pass.out ?? {})) await writeFile(join(out, name), name.endsWith('.stl') ? STL(n) : `3mf ${n}`);
+      for (let i = 0; i < pass.renders; i++) await writeFile(join(out, `${i}_view.png`), `render ${pass.startedAtMs} ${i}`);
+      for (const part of pass.parts ?? []) await writeFile(join(out, part), `part ${part}`);
+      for (const [j, run] of (pass.cad ?? []).entries()) {
+        const folder = join(dir, pass.dir, 'cad', `cad-run-${j}`); await mkdir(folder, {recursive: true});
+        await writeFile(join(folder, 'part.stl'), run.matches ? STL(pass.out['touched.stl']) : `solid other${j}\nendsolid other${j}\n`);
+        if (run.script) await writeFile(join(folder, 'part.py'), `# run ${j}`);
+        if (run.parameters) await writeFile(join(folder, 'part.parameters.json'), '{}');
+        if (run.step) await writeFile(join(folder, 'part.step'), 'STEP');
+      }
+    }
+    for (const print of row.prints) {
+      const frames = join(dir, 'prints', print.id, 'frames'); await mkdir(frames, {recursive: true});
+      for (const [i, at] of print.frames.entries()) { const file = join(frames, `${i}.jpg`); await writeFile(file, 'jpg'); await utimes(file, at / 1000, at / 1000); }
+    }
+    const latest = row.passes.filter(p => p.out?.['touched.stl']).at(-1);
+    await mkdir(join(dir, 'current'), {recursive: true}); await writeFile(join(dir, 'current', 'model.stl'), STL(latest.out['touched.stl']));
+    const object = {id: row.name, kind: row.kind, state: row.state, ...(row.outcome ? {outcome: row.outcome} : {}), photos: [], createdAtMs: 1, updatedAtMs: row.updatedAtMs,
+      passes: row.passes.map(({out: _o, renders: _r, parts: _p, cad: _c, ...pass}) => pass), current: {model: 'current/model.stl', renders: []}, ...(row.print ? {print: row.print} : {})};
+    const migrated = await migrateProjectVersions(object, dir, {events: row.events, stlInfo: async () => [10, 20, 30]});
+    const label = row.name;
+    assert.deepEqual(migrated.versions.map(v => v.passStartedAtMs), expected.versionPasses.map(i => row.passes[i].startedAtMs), label);
+    assert.deepEqual(migrated.versions.map(v => v.outcome ?? null), expected.outcomes, label);
+    assert.deepEqual(migrated.prints.map(p => ({id: p.id.slice(0, 8), version: migrated.versions.findIndex(v => v.id === p.versionId) + 1, end: p.monitor?.endState ?? null,
+      ...(expected.attempts.find(a => a.id === p.id.slice(0, 8))?.startedAt ? {startedAt: new Date(p.startedAtMs).toISOString()} : {})})), expected.attempts, label);
+    if (expected.lastDesign) assert.deepEqual(Object.keys(migrated.versions.at(-1).result.design ?? {}).sort(), expected.lastDesign, label);
+    if (expected.lastModel) assert.ok(migrated.versions.at(-1).result.model.endsWith(expected.lastModel), label);
+    assert.equal(!!migrated.historyRestored, expected.restored, label);
+    assert.ok(objectStatus(migrated).text.startsWith(expected.status), `${label}: ${objectStatus(migrated).text}`);
+    // What every client decodes, and nothing the person had is gone or changed.
+    ProjectDesignsSchema.parse(migrated);
+    for (const pass of row.passes) for (const [name, n] of Object.entries(pass.out ?? {}))
+      assert.equal(await readFile(join(dir, pass.dir, 'out', name), 'utf8'), name.endsWith('.stl') ? STL(n) : `3mf ${n}`);
+    for (const version of migrated.versions) assert.ok((await readFile(join(dir, version.result.model))).length > 0, `${label}: ${version.result.model}`);
+    // A second start changes nothing.
+    assert.deepEqual(await migrateProjectVersions(migrated, dir, {events: row.events}), migrated);
+  }
+});
+
+test('an attempt starts when it was sent, not when its project last changed (#616)', async t => {
+  const f = await setup(t);
+  const sent = '2026-11-08T00:23:42.929Z';
+  await f.store.update(f.id, o => ({...o, state: 'printing', print: {printId: 'p1', bundleId: 'b', dispatchedAt: sent}}));
+  await new Promise(resolve => setTimeout(resolve, 5));
+  await f.store.update(f.id, o => ({...o, state: 'failed', print: {...o.print, monitor: {phase: 'ended', endState: 'failed', endedAt: '2026-11-08T01:24:08.204Z'}}}));
+  const attempt = (await f.store.get(f.id)).prints.find(p => p.printId === 'p1');
+  assert.equal(new Date(attempt.startedAtMs).toISOString(), sent);
+  assert.ok(attempt.startedAtMs <= Date.parse(attempt.monitor.endedAt));
+});
+
+test('a new design of a printed thing is announced as new, and the printed one as unchanged (#616)', async () => {
+  const {eventWords} = await import('../dist/events/words.js');
+  const words = eventWords('pass.ready', undefined, {title: 'AirPods Max desk hanger', size: '89 × 105 × 80 mm', printedBefore: true});
+  assert.equal(words.title, 'Your new AirPods Max desk hanger design is ready');
+  assert.equal(words.body, 'The printed one is unchanged · 89 × 105 × 80 mm');
+  assert.equal(eventWords('pass.ready', undefined, {title: 'Hook'}).title, 'Hook is ready to print');
+});

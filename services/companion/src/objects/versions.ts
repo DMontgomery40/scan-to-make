@@ -70,7 +70,9 @@ export function retainAttempts(before: StmObject, next: StmObject): StmObject {
     const id = print.printId ?? print.bundleId;
     const index = attempts.findIndex(p => p.id === id);
     const old = index >= 0 ? attempts[index] : undefined;
-    const attempt: PrintAttempt = {...old, ...print, id, startedAtMs: old?.startedAtMs ?? at,
+    // When it was sent, not when the project last changed: a record rewritten later must not move its start.
+    const dispatched = print.dispatchedAt ? Date.parse(print.dispatchedAt) : NaN;
+    const attempt: PrintAttempt = {...old, ...print, id, startedAtMs: old?.startedAtMs ?? (Number.isFinite(dispatched) ? dispatched : at),
       ...(old?.versionId || print.versionId || fallback ? {versionId: old?.versionId ?? print.versionId ?? fallback} : {})};
     if (index >= 0) attempts[index] = attempt; else attempts.push(attempt);
   };
@@ -94,6 +96,8 @@ export async function migrateProjectVersions(object: StmObject, dir: string, opt
   const versions: DesignVersion[] = [...(object.versions ?? [])];
   if (object.kind !== 'published') for (const pass of [...object.passes].sort((a,b) => a.startedAtMs - b.startedAtMs)) {
     if (!['done', 'unchanged'].includes(pass.status ?? '') || pass.endedAtMs === undefined || !pass.dir) continue;
+    // A pass that said it changed nothing is the same design, even when its file was written again.
+    if (pass.status === 'unchanged' && versions.length) continue;
     const folder = resolve(dir, pass.dir);
     if (!inside(dir, folder)) continue;
     const out = join(folder, 'out');
@@ -156,13 +160,12 @@ export async function migrateProjectVersions(object: StmObject, dir: string, opt
     if (times.length) attempts.push({id: name, printId: name, bundleId: name, startedAtMs: times[0]!, versionId: versionAt(times[0]!)});
   }
   attempts.sort((a,b) => a.startedAtMs - b.startedAtMs);
-  for (let i = 0; i < versions.length; i++) {
-    const version = versions[i]!;
-    if (i === versions.length - 1 && object.outcome) version.outcome = object.outcome;
-    else if (i < versions.length - 1) {
-      const done = printedAt(version, attempts), nextStarted = versions[i+1]!.passStartedAtMs ?? versions[i+1]!.sealedAtMs;
-      if (done !== undefined && (options.events ?? []).some(e => e.type === 'project.updated' && e.data?.keys?.includes('status') && time(e) > done && time(e) < nextStarted)) version.outcome = 'works';
-    }
-  }
+  // The person's answer stays exactly where it is today: on the newest design. Earlier answers are not guessed back from
+  // when a status changed: events record that it changed, not to what, and on the hanger (Nov 11) a status set four
+  // minutes after a print David called half printed was not "It works". An earlier printed design keeps its own quiet
+  // "Did it fit?" instead (#616, DESIGN.md §5 rule 3: "The app can be asked; it must not guess").
+  const latest = versions.at(-1);
+  const answer = object.outcome ?? (object.state === 'confirmed' ? 'works' : undefined);
+  if (latest && answer && !latest.outcome) latest.outcome = answer;
   return {...migrated, versionsV1: true, ...(versions.length > 1 ? {historyRestored: restoredWords} : {})};
 }

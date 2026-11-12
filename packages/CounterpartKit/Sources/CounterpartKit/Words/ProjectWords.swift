@@ -274,8 +274,10 @@ public struct ProjectWords: Equatable, Sendable {
         // The Mac's own words win when it writes them (KAN-214 PR 3), except while this phone is still sending, and
         // except when they're about another phase than the Works shown here.
         let macWords = project.status.flatMap { $0.text.isEmpty || project.state == .new ? nil : $0 }
-        if let historyLine = DesignHistory(project).line { self.line = historyLine }
-        else if let macWords, !(phase == .confirmed && macWords.phase != ProjectPhase.confirmed.rawValue) { self.line = macWords.text } else { self.line = line }
+        // #616: a Mac that knows designs writes the two-truth line itself; an older Mac's words are used as before, and
+        // the line is derived here only when the Mac wrote none.
+        if let macWords, !(phase == .confirmed && macWords.phase != ProjectPhase.confirmed.rawValue) { self.line = macWords.text }
+        else { self.line = DesignHistory(project).line ?? line }
         page = PageActions(project, phase: phase, actions: actions, sending: sending, localScan: localScan)
     }
 

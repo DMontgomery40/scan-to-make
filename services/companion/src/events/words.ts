@@ -111,6 +111,8 @@ export interface WordsContext {
   item?: string;
   question?: string;
   reason?: string;
+  /** pass.ready: an earlier design of this project was printed, and it is unchanged (#616). */
+  printedBefore?: boolean;
 }
 
 export const NOTIFY: Record<CounterpartEventType, NotifyLevel> = {
@@ -151,7 +153,9 @@ export function eventWords(type: CounterpartEventType, data: CounterpartEvent['d
   switch (type) {
     case 'pass.started': title = `Your Mac is working on ${t}`; body = minutes ? `About ${minutes} min. You can put your phone down.` : "You can put your phone down. We'll let you know when it's ready."; break;
     case 'pass.stage': title = t; body = joined(data?.stage, minutes ? `about ${minutes} min` : undefined) || 'Working on it'; break;
-    case 'pass.ready': title = `${t} is ready to print`; body = context.size ?? 'Ready to print'; break;
+    // A new design of something already printed names the new one and never implies the printed one went away (#616).
+    case 'pass.ready': title = context.printedBefore ? `Your new ${t} design is ready` : `${t} is ready to print`;
+      body = context.printedBefore ? joined('The printed one is unchanged', context.size) : context.size ?? 'Ready to print'; break;
     case 'pass.ask': title = `${t}: ${context.question ?? 'can you take a close-up?'}`; body = 'Take a photo, choose one, or let your Mac make its best guess.'; break;
     case 'pass.failed': title = `${t} didn't finish`; body = context.reason ?? 'Something went wrong on your Mac. Try again.'; break;
     case 'print.preparing': title = `Getting ${t} ready`; body = data?.stage ?? 'Preparing the print'; break;
@@ -228,17 +232,16 @@ export function rowDetail(text: string | undefined, reason = false): string | un
 
 /** The §4 line for a project, with its symbol and colour. */
 export function objectStatus(object: StatusSource, updatedAtMs?: number): ObjectStatus {
+  // #616: the newest design is unprinted and unanswered while an earlier one was printed. Both are true, so the line says
+  // both. Every other case keeps today's words (a one-design project reads exactly as before; Done stays Done).
   const latest = object.versions?.at(-1);
-  if (latest && !['new', 'touching-up', 'needs-closeup', 'printing', 'failed', 'sent'].includes(object.state)) {
+  if (latest && object.versions!.length > 1 && !latest.outcome && !['new', 'touching-up', 'needs-closeup', 'printing', 'failed', 'sent', 'confirmed', 'printed'].includes(object.state)) {
     const printed = (version: typeof latest) => version.printedAtMs ?? object.prints?.filter(p => p.versionId === version.id && p.monitor?.endState === 'done').map(p => p.monitor?.endedAt ? Date.parse(p.monitor.endedAt) : p.startedAtMs).filter(Number.isFinite).sort((a,b) => b-a)[0];
-    const at = printed(latest);
-    if (at !== undefined) {
-      if (latest.outcome === 'works') return {phase: 'confirmed', text: 'Done · it works', symbol: 'checkmark.circle.fill', tint: 'green'};
-      return {phase: 'printed', text: `Printed ${formatDate(new Date(at).toISOString())}`, symbol: 'shippingbox', tint: 'secondary'};
+    const earlier = printed(latest) === undefined ? object.versions!.slice(0,-1).map(printed).filter((n): n is number => n !== undefined).sort((a,b) => b-a)[0] : undefined;
+    if (earlier !== undefined) {
+      const when = formatDate(new Date(earlier).toISOString());
+      return {phase: 'ready', text: `New one ready · printed ${when}`, detail: `Printed ${when} · that design is unchanged`, symbol: 'checkmark.seal', tint: 'accent'};
     }
-    const earlier = object.versions!.slice(0,-1).map(printed).filter((n): n is number => n !== undefined).sort((a,b) => b-a)[0];
-    if (earlier !== undefined) return {phase: 'ready', text: `New one ready · printed ${formatDate(new Date(earlier).toISOString())}`, detail: `Printed ${formatDate(new Date(earlier).toISOString())} · the earlier design is unchanged`, symbol: 'checkmark.seal', tint: 'accent'};
-    return {phase: 'ready', text: 'Ready to print', symbol: 'checkmark.seal', tint: 'accent'};
   }
   const printer = object.print?.destination?.name ?? 'your printer';
   switch (object.state) {

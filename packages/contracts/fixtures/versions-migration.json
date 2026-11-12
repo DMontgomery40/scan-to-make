@@ -108,7 +108,7 @@
     "expected": [
       {
         "summary": "Design 1",
-        "outcome": "works"
+        "outcome": null
       },
       {
         "summary": "Design 2",
@@ -169,7 +169,7 @@
     "expected": [
       {
         "summary": "Design 1",
-        "outcome": "works"
+        "outcome": null
       },
       {
         "summary": "Design 2",

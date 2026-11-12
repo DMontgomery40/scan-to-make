@@ -472,3 +472,51 @@ export const InheritedHistorySchema = z.object({
   fit: FitSchema.optional(),
 });
 export type InheritedHistory = z.infer<typeof InheritedHistorySchema>;
+
+// #616: a project's designs and print attempts, beside the old one-slot `current`/`print`/`outcome` (which stay for older
+// clients). A design is sealed when a pass finishes with a model and is never edited or replaced afterwards: only its
+// own answer (`outcome`, `printedAtMs`) and its own pictures are added later. Paths are relative to the project folder
+// and live under `versions/<id>/`. The newest design is the last; there is no stored "current version".
+const relativePath = z.string().min(1).max(512).refine(path => !path.startsWith('/') && !path.split('/').includes('..'));
+export const DesignVersionSchema = z.object({
+  id: z.string().min(1).max(128),
+  sealedAtMs: z.number().finite(),
+  /** The pass that sealed it (Activity's "This became the … design"). */
+  passStartedAtMs: z.number().finite().optional(),
+  /** The person's words that asked for it. */
+  note: z.string().optional(),
+  modelSha256: z.string().regex(/^[0-9a-f]{64}$/),
+  result: z.object({model: relativePath, renders: z.array(relativePath), summary: z.string().optional(),
+    sizeMm: z.tuple([z.number(), z.number(), z.number()]).optional()}).passthrough(),
+  picture: relativePath.optional(),
+  pictures: z.record(z.string(), relativePath).optional(),
+  pictureStates: z.record(z.string(), z.enum(['drawing', 'failed'])).optional(),
+  outcome: z.enum(['works', 'needs-changes']).optional(),
+  printedAtMs: z.number().finite().optional(),
+});
+export type DesignVersion = z.infer<typeof DesignVersionSchema>;
+/** One print of one design. Appended, never replaced: a later print never removes an earlier one. */
+export const PrintAttemptSchema = z.object({
+  id: z.string().min(1).max(128),
+  /** Absent only for a published file's print (its plates carry the history) or an attempt before any design. */
+  versionId: z.string().min(1).max(128).optional(),
+  startedAtMs: z.number().finite(),
+  printId: z.string().optional(),
+  bundleId: z.string(),
+  destination: z.object({id: z.string(), name: z.string()}).optional(),
+  monitor: z.object({endState: MonitorEndSchema.optional(), endedAt: iso.optional()}).passthrough().optional(),
+}).passthrough();
+export type PrintAttempt = z.infer<typeof PrintAttemptSchema>;
+export const ProjectDesignsSchema = z.object({
+  versions: z.array(DesignVersionSchema).optional(),
+  prints: z.array(PrintAttemptSchema).optional(),
+  /** Written once by the startup migration when it rebuilt earlier designs from this Mac's pass folders. */
+  historyRestored: z.string().optional(),
+}).superRefine((value, context) => {
+  const ids = new Set(value.versions?.map(v => v.id));
+  if (ids.size !== (value.versions?.length ?? 0)) context.addIssue({code: 'custom', message: 'design ids repeat'});
+  for (const attempt of value.prints ?? []) if (attempt.versionId && !ids.has(attempt.versionId)) context.addIssue({code: 'custom', message: `print ${attempt.id} names no design`});
+  const sealed = value.versions?.map(v => v.sealedAtMs) ?? [];
+  if (sealed.some((at, i) => i > 0 && at < sealed[i - 1]!)) context.addIssue({code: 'custom', message: 'designs are oldest first'});
+});
+export type ProjectDesigns = z.infer<typeof ProjectDesignsSchema>;
