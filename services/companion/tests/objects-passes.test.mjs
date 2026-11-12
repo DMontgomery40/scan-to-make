@@ -544,10 +544,12 @@ test('a code design is kept as the project\'s design source, a change starts fro
   await assert.rejects(readFile(join(dir, 'current', 'design', 'touched.py')), {code: 'ENOENT'});
 });
 
-test('a size question is its own kind: numbers on the wire, numbers back, and the worker reads them as measured', async t => {
-  const asked = [{label: 'width at the pink stripe', mm: 64, from: 'scan'}, {label: 'width at the waist', mm: 53, from: 'scan'}, {label: 'height to the cap tip', mm: 107, from: 'published'}];
+test('a size question is its own kind: numbers on the wire, numbers back, and the worker is told which were measured and which accepted', async t => {
+  const asked = [{label: 'width at the pink stripe', mm: 64, from: 'scan'}, {label: 'width at the waist', mm: 53, from: 'estimate'},
+    {label: 'height to the cap tip', mm: 107, from: 'published', product: 'MiO 1.62 oz bottle', reference: 'the maker\'s product page'},
+    {label: 'cap diameter', mm: 28, from: 'scan'}];
   const f = await setup(t, [
-    {status: 'needs_closeup', result: {ask: {question: 'The maker doesn\'t publish this bottle\'s size. Can you confirm or correct these?', sizes: asked}}},
+    {status: 'needs_closeup', result: {ask: {question: 'Can you confirm or correct these?', sizes: asked}}},
     {status: 'done'}]);
   const object = await f.service.create('A wall holder for three of these', 'fit', undefined, {sizeSource: 'lookup'});
   await f.service.start(object.id);
@@ -557,28 +559,60 @@ test('a size question is its own kind: numbers on the wire, numbers back, and th
   assert.equal(ask.kind, 'sizes');
   assert.equal(ask.type, undefined, 'a client from before kinds shows the question and its text box');
   assert.deepEqual(ask.answers, ['sizes', 'text', 'camera']);
-  assert.deepEqual(ask.sizes, asked.map((size, index) => ({id: `size-${index + 1}`, ...size})));
+  assert.deepEqual(ask.sizes, asked.map((size, index) => ({id: `size-${index + 1}`, ...size})), 'each size keeps its source, product and reference');
   // Sizes it didn't ask about, a size twice, or a number that isn't one are refused, and nothing is consumed.
   for (const bad of [[{id: 'longest', mm: 60}], [{id: 'size-1', mm: 63}, {id: 'size-1', mm: 64}], [{id: 'size-1', mm: 0}], []])
     await assert.rejects(f.service.answerCloseup(object.id, {sizes: bad}), /sizes|size/i);
   assert.equal((await f.service.get(object.id)).ask.status, 'open');
-  // Two corrected, one confirmed, with words beside them.
-  await f.service.answerCloseup(object.id, {sizes: [{id: 'size-1', mm: 63}, {id: 'size-2', mm: 53}, {id: 'size-3', mm: 107.5}], text: 'The waist is where it narrows under the label.'});
+  // One corrected, one typed again at the same number, two left as asked, with words beside them.
+  await f.service.answerCloseup(object.id, {sizes: [{id: 'size-1', mm: 63}, {id: 'size-2', mm: 53}, {id: 'size-3', mm: 107}, {id: 'size-4', mm: 28}], measured: ['size-1', 'size-4'],
+    text: 'The waist is where it narrows under the label.'});
   const done = await f.service.settled(object.id);
   assert.equal(done.state, 'ready');
-  // New's fit choice is kept as it was; the checked sizes are their own list, by the question's labels.
+  // New's fit choice is kept as it was; the checked sizes are their own list, by the question's labels, with their sources.
   assert.deepEqual(done.fit, {sizeSource: 'lookup'});
   assert.deepEqual(done.checkedSizes, [
-    {label: 'width at the pink stripe', mm: 63, certainty: 'measured'}, {label: 'width at the waist', mm: 53, certainty: 'confirmed'}, {label: 'height to the cap tip', mm: 107.5, certainty: 'measured'}]);
+    {label: 'width at the pink stripe', mm: 63, certainty: 'measured', from: 'scan', asked: 64},
+    {label: 'width at the waist', mm: 53, certainty: 'accepted', from: 'estimate', asked: 53},
+    {label: 'height to the cap tip', mm: 107, certainty: 'accepted', from: 'published', product: 'MiO 1.62 oz bottle', reference: 'the maker\'s product page', asked: 107},
+    {label: 'cap diameter', mm: 28, certainty: 'measured', from: 'scan', asked: 28}]);
   assert.equal(publicObject(done).checkedSizes, undefined, 'the companion\'s own record');
+  // The person's own message says which numbers they measured and which they let stand.
+  assert.ok(done.messages.some(message => message.text === 'The waist is where it narrows under the label.'));
   const note = f.inputs[1].note;
-  assert.match(note, /Treat these as measured:\n- width at the pink stripe: 63 mm \(corrected; you had 64 mm\)\n- width at the waist: 53 mm \(confirmed\)\n- height to the cap tip: 107\.5 mm \(corrected; you had 107 mm\)/);
+  assert.match(note, /Only the ones marked "measured by the person" were measured on the real object[^\n]*\n- width at the pink stripe: 63 mm, measured by the person \(you had 64 mm\)\n- width at the waist: 53 mm, accepted; your estimate, not a measurement\n- height to the cap tip: 107 mm, accepted; published for MiO 1\.62 oz bottle \(source: the maker's product page\)\n- cap diameter: 28 mm, measured by the person\n/);
+  assert.doesNotMatch(note, /Treat these as measured/);
   assert.match(note, /The waist is where it narrows under the label\./);
   // This pass and every later one are told each size by its label and how sure it is, never as "the overall size";
   // the request is still only the person's words.
-  assert.match(f.inputs[1].instructions, /Sizes the person checked on the real object[^\n]*\n- width at the pink stripe: 63 mm, measured by the person\n- width at the waist: 53 mm, confirmed\n- height to the cap tip: 107\.5 mm, measured by the person$/);
+  assert.match(f.inputs[1].instructions, /Sizes from the person's answers to your earlier questions[^\n]*\n- width at the pink stripe: 63 mm, measured by the person \(you had 64 mm\)\n- width at the waist: 53 mm, accepted; your estimate, not a measurement\n- height to the cap tip: 107 mm, accepted; published for MiO 1\.62 oz bottle \(source: the maker's product page\)\n- cap diameter: 28 mm, measured by the person$/);
   assert.doesNotMatch(f.inputs[1].instructions, /exact overall size/);
   assert.equal(publicObject(done).instructions, 'A wall holder for three of these');
+});
+
+test('a sizes answer with no words shows the person\'s numbers as measured or accepted as asked', async t => {
+  const f = await setup(t, [
+    {status: 'needs_closeup', result: {ask: {question: 'Is this right?', sizes: [{label: 'width', mm: 64, from: 'scan'}, {label: 'depth', mm: 30, from: 'estimate'}]}}},
+    {status: 'done'}]);
+  const object = await f.service.create('A clip', 'fit', undefined, {sizeSource: 'lookup'});
+  await f.service.start(object.id);
+  await f.service.settled(object.id);
+  // As a phone from before Nov 12 sends it: no `measured`.
+  await f.service.answerCloseup(object.id, {sizes: [{id: 'size-1', mm: 64}, {id: 'size-2', mm: 31}]});
+  const done = await f.service.settled(object.id);
+  assert.equal(done.messages.at(-1).text, 'width: 64 mm (accepted as asked)\ndepth: 31 mm (measured)');
+  assert.deepEqual(done.checkedSizes.map(size => size.certainty), ['accepted', 'measured']);
+});
+
+test('a published size with no product or source named is not kept: the question stands as words', async t => {
+  for (const size of [{label: 'width', mm: 71.5, from: 'published'}, {label: 'width', mm: 71.5, from: 'published', product: 'iPhone 16 Pro'}]) {
+    const f = await setup(t, [{status: 'needs_closeup', result: {closeup: 'the phone', ask: {question: 'Is this the width?', sizes: [size]}}}]);
+    const object = await f.service.create('A phone mount', 'fit');
+    await f.service.start(object.id);
+    const ask = publicObject(await f.service.settled(object.id)).ask;
+    assert.equal(ask.kind, 'closeup', JSON.stringify(size));
+    assert.equal(ask.sizes, undefined);
+  }
 });
 
 test('a question with no sizes, or with a size that is not whole, stays a close-up question', async t => {

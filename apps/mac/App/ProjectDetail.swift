@@ -898,7 +898,9 @@ struct MacAskSizes: View {
                     VStack(alignment: .leading, spacing: 1) {
                         Text(field.label.prefix(1).uppercased() + field.label.dropFirst()).font(.body)
                             .fixedSize(horizontal: false, vertical: true)
-                        Text(AskSizesForm.source(field.from)).font(.caption).foregroundStyle(.secondary)
+                        // Where the number came from (#622): a published one names its product and source, so it can run to two lines.
+                        Text(AskSizesForm.source(field)).font(.caption).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     TextField("", text: $field.text)

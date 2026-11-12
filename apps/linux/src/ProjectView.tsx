@@ -8,7 +8,7 @@ import {
   askAnswerable,
   sizesCarried,
   sizeFields,
-  sizesAnswer,
+  sizesParams,
   sizeSource,
   sizesUnchanged,
   canSelectPlate,
@@ -175,9 +175,9 @@ function AskCard({
   const [selected, setSelected] = useState<string[]>([]);
   const [text, setText] = useState("");
   const [photos, setPhotos] = useState<string[]>([]);
-  // A size question's fields, prefilled once per question; what is sent is `sizesAnswer`'s rule.
+  // A size question's fields, prefilled once per question; what is sent is `sizesParams`'s rule: the numbers, and which ones the person typed.
   const [fields, setFields] = useState(() => sizeFields(ask));
-  const sizes = fields && sizesAnswer(fields);
+  const sizes = fields && sizesParams(fields);
   // A kind this build doesn't know: the question and the update sentence, and no answer control at all.
   if (!askAnswerable(ask))
     return (
@@ -258,7 +258,7 @@ function AskCard({
             <label className="field ask-size" key={field.id}>
               <span>
                 {field.label.charAt(0).toUpperCase() + field.label.slice(1)}
-                <small> {sizeSource(field.from)}</small>
+                <small> {sizeSource(field.from, field.product, field.reference)}</small>
               </span>
               <span className="ask-size-input">
                 <input
@@ -280,7 +280,7 @@ function AskCard({
               mutate("objects.answerCloseup", {
                 id: project.id,
                 bestGuess: false,
-                sizes,
+                ...sizes,
                 ...(text.trim() ? { text: text.trim() } : {}),
                 ...(photos.length ? { photoNames: photos } : {}),
               })

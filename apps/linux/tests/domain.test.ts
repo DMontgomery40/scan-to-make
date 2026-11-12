@@ -13,6 +13,7 @@ import {
   passHeading,
   sizeFields,
   sizesAnswer,
+  sizesParams,
   sizesUnchanged,
   sizeSource,
   KNOWN_ASK_KINDS,
@@ -879,8 +880,7 @@ test("a size question is number fields with the companion's labels, prefilled, w
   assert.equal(sizeFields({ kind: "closeup", sizes: ask.sizes }), undefined);
   assert.equal(sizeFields({ kind: "sizes", sizes: [] }), undefined);
   assert.equal(sizeFields(undefined), undefined);
-  assert.equal(sizeSource("published"), "from the maker");
-  assert.equal(sizeSource("scan"), "from your scan");
+  assert.equal(sizeSource("scan"), "Read from your scan");
   assert.deepEqual(KNOWN_ASK_KINDS, ["closeup", "file", "choice", "region", "scale", "sizes"]);
   // The same forms on every client (F8): digits with at most one decimal part.
   const typed = (text: string) => sizesAnswer([{ ...fields[0], text }])?.[0].mm;
@@ -895,6 +895,25 @@ test("a size question is number fields with the companion's labels, prefilled, w
   for (const kind of KNOWN_ASK_KINDS) assert.equal(askAnswerable({ kind }), true, kind);
   assert.equal(askAnswerable({}), true);
   assert.equal(askAnswerable({ kind: "colour" }), false);
+});
+
+// #622: the Forester phone mount (packages/contracts/fixtures/size-sources.json, which CounterpartKit, Android and the
+// companion read too). Each field says where the computer's number came from, a published one with its product and
+// where it was published; an untouched number goes as accepted and only a typed one as measured.
+test("each size keeps its source, and only a number the person typed is sent as measured", () => {
+  const doc = JSON.parse(readFileSync(new URL("../../../packages/contracts/fixtures/size-sources.json", import.meta.url), "utf8"));
+  for (const row of doc.words) assert.equal(sizeSource(row.from, row.product, row.reference), row.other, row.from);
+  const fields = sizeFields(doc.ask)!;
+  assert.deepEqual(fields.map((f) => sizeSource(f.from, f.product, f.reference)), [
+    "Published for JETech clear case for iPhone 16 Pro · example.invalid", "Published for JETech clear case for iPhone 16 Pro · JETech product listing (placeholder)",
+    "Your computer's estimate, not measured", "Read from your scan", "Published size, product not named"]);
+  for (const answer of doc.answers) {
+    const edited = fields.map((f) => (f.id in answer.edits ? { ...f, text: answer.edits[f.id] } : f));
+    assert.deepEqual(sizesParams(edited), { sizes: answer.sizes, measured: answer.measured }, answer.name);
+    assert.equal(sizesUnchanged(edited), answer.unchanged, answer.name);
+    assert.deepEqual(sizesCarried(edited), answer.sizes, answer.name);
+  }
+  assert.equal(sizesParams(fields.map((f) => ({ ...f, text: "" }))), undefined);
 });
 
 test("an ended pass from an older companion is worded from its status, never headed Working", () => {

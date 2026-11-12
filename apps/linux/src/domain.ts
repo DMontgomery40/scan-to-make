@@ -875,6 +875,8 @@ export interface SizeField {
   id: string;
   label: string;
   from: string;
+  product?: string;
+  reference?: string;
   asked: number;
   text: string;
 }
@@ -887,7 +889,14 @@ export function sizeText(mm: number): string {
 /** The fields of a size question, prefilled; undefined when the question isn't one (CounterpartKit `AskSizesForm`). */
 export function sizeFields(ask: Pick<Ask, "kind" | "sizes"> | undefined): SizeField[] | undefined {
   if (ask?.kind !== "sizes" || !ask.sizes?.length) return undefined;
-  return ask.sizes.map((size) => ({ id: size.id, label: size.label, from: size.from, asked: size.mm, text: sizeText(size.mm) }));
+  return ask.sizes.map((size) => ({ id: size.id, label: size.label, from: size.from, ...(size.product ? { product: size.product } : {}),
+    ...(size.reference ? { reference: size.reference } : {}), asked: size.mm, text: sizeText(size.mm) }));
+}
+
+/** The person typed or edited this number (anything but the prefilled text, spaces aside). Untouched, it is the
+ *  computer's number accepted, never a measurement (#622; CounterpartKit `AskSizesForm.Field.measured`). */
+export function sizeMeasured(field: SizeField): boolean {
+  return field.text.trim() !== sizeText(field.asked);
 }
 
 function millimetres(text: string): number | undefined {
@@ -898,7 +907,7 @@ function millimetres(text: string): number | undefined {
 }
 
 /** What to send: every field that holds a number. Undefined while a filled field isn't a number, or none is filled.
- *  A field left blank is a size the person doesn't know: it is left out, never sent as confirmed. */
+ *  A field left blank is a size the person doesn't know: it is left out, never sent as accepted. */
 export function sizesAnswer(fields: SizeField[]): { id: string; mm: number }[] | undefined {
   const sizes: { id: string; mm: number }[] = [];
   for (const field of fields) {
@@ -916,14 +925,41 @@ export function sizesCarried(fields: SizeField[]): { id: string; mm: number }[] 
   return sizesAnswer(fields) ?? (fields.every((field) => !field.text.trim()) ? "none" : "invalid");
 }
 
+/** The answer's params for the companion: the numbers, and `measured`, the ids the person typed or edited (contracts
+ *  `SizesAnswerSchema`, #622). Undefined while nothing can be sent. */
+export function sizesParams(fields: SizeField[]): { sizes: { id: string; mm: number }[]; measured: string[] } | undefined {
+  const sizes = sizesAnswer(fields);
+  if (!sizes) return undefined;
+  return { sizes, measured: fields.filter((field) => sizes.some((size) => size.id === field.id) && sizeMeasured(field)).map((field) => field.id) };
+}
+
 /** False for a kind this build doesn't know: the card shows the question and says to update, and offers no answer
  *  at all (CounterpartKit `Ask.answerable`). A question with no kind is from a companion older than kinds. */
 export const askAnswerable = (ask: Pick<Ask, "kind">) => !ask.kind || KNOWN_ASK_KINDS.includes(ask.kind);
 
-/** Nothing was changed: the button says Confirm. */
-export const sizesUnchanged = (fields: SizeField[]) => fields.every((field) => millimetres(field.text) === millimetres(sizeText(field.asked)));
+/** Nothing was typed: the button says Confirm, and every number goes as accepted. */
+export const sizesUnchanged = (fields: SizeField[]) => !fields.some(sizeMeasured);
 
-export const sizeSource = (from: string) => (from === "published" ? "from the maker" : "from your scan");
+/** Where a published size was published, short: a link's site (without "www."), or the document's name as given. */
+function sizePlace(reference: string | undefined): string | undefined {
+  const trimmed = reference?.trim();
+  if (!trimmed) return undefined;
+  const host = /^https?:\/\/([^/?#:]+)/i.exec(trimmed)?.[1]?.toLowerCase();
+  return host?.replace(/^www\./, "") || trimmed;
+}
+
+/** Under a field: where the computer's number came from (#622; CounterpartKit `AskSizesForm.source`, in this client's
+ *  words). A published one names the product it is for and where it was published; a source this build doesn't know
+ *  reads as an estimate, never as the scan or the maker's. */
+export function sizeSource(from: string, product?: string, reference?: string): string {
+  if (from === "published") {
+    const named = product?.trim();
+    if (!named) return "Published size, product not named";
+    const place = sizePlace(reference);
+    return place ? `Published for ${named} · ${place}` : `Published for ${named}`;
+  }
+  return from === "scan" ? "Read from your scan" : "Your computer's estimate, not measured";
+}
 /** The line under a project's title in the list grouped by phase (CounterpartKit `ProjectWords.row`). */
 export function rowWords(p: Project): string {
   return p.status?.detail?.trim() || words(p);

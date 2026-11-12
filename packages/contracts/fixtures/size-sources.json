@@ -1,0 +1,44 @@
+{
+  "about": "#622: a size question's sources and how the person checked each number, as every client's size card and the companion read them. The question is the Forester phone mount's (real project 53a48b5e, Nov 10) as the worker should have asked it: the phone is in a JETech clear case, whose published size is 153.9 x 75.4 x 12.4 mm (the reference here is a placeholder, not the maker's page), the wallet's numbers are the Mac's guesses, one is read off the scan, and one is a published size from a question saved before Nov 12, with no product named. `words` is the line under each field: `apple` on the iPhone, iPad and Mac, `other` on Android and Linux, which call the Mac 'your computer'. A source a client doesn't know reads as an estimate, never as 'from your scan'. `answers`: the card's fields after `edits` (by id; an empty string is a blank field), what is sent (`sizes`, and `measured`, the ids the person typed or edited), and whether the button says Confirm (`unchanged`). The companion reads `ask` with AskSchema and checks `certainty` against `answeredSizes`. Read by CounterpartKit AskSizesFormTests, Android AskSizesFormTests, Linux domain.test.ts and the companion's asks.test.mjs.",
+  "ask": {
+    "id": "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a22",
+    "question": "Is the phone in its case? Please check these numbers.",
+    "kind": "sizes",
+    "answers": ["sizes", "text", "camera"],
+    "status": "open",
+    "askedAtMs": 1794337179999,
+    "sizes": [
+      {"id": "size-1", "label": "Phone width in its case", "mm": 75.4, "from": "published", "product": "JETech clear case for iPhone 16 Pro", "reference": "https://www.example.invalid/jetech-clear-case-placeholder"},
+      {"id": "size-2", "label": "Phone length in its case", "mm": 153.9, "from": "published", "product": "JETech clear case for iPhone 16 Pro", "reference": "JETech product listing (placeholder)"},
+      {"id": "size-3", "label": "Total thickness through the wallet", "mm": 18, "from": "estimate"},
+      {"id": "size-4", "label": "Wallet width", "mm": 65, "from": "scan"},
+      {"id": "size-5", "label": "Phone width, bare", "mm": 71.5, "from": "published"}
+    ]
+  },
+  "words": [
+    {"from": "published", "product": "JETech clear case for iPhone 16 Pro", "reference": "https://www.example.invalid/jetech-clear-case-placeholder",
+     "apple": "Published for JETech clear case for iPhone 16 Pro · example.invalid", "other": "Published for JETech clear case for iPhone 16 Pro · example.invalid"},
+    {"from": "published", "product": "JETech clear case for iPhone 16 Pro", "reference": "JETech product listing (placeholder)",
+     "apple": "Published for JETech clear case for iPhone 16 Pro · JETech product listing (placeholder)", "other": "Published for JETech clear case for iPhone 16 Pro · JETech product listing (placeholder)"},
+    {"from": "published", "product": "iPhone 16 Pro, bare (no case)",
+     "apple": "Published for iPhone 16 Pro, bare (no case)", "other": "Published for iPhone 16 Pro, bare (no case)"},
+    {"from": "published", "apple": "Published size, product not named", "other": "Published size, product not named"},
+    {"from": "scan", "apple": "Read from your scan", "other": "Read from your scan"},
+    {"from": "estimate", "apple": "The Mac's estimate, not measured", "other": "Your computer's estimate, not measured"},
+    {"from": "caliper-photo", "apple": "The Mac's estimate, not measured", "other": "Your computer's estimate, not measured"}
+  ],
+  "answers": [
+    {"name": "Confirm with nothing touched", "edits": {},
+     "sizes": [{"id": "size-1", "mm": 75.4}, {"id": "size-2", "mm": 153.9}, {"id": "size-3", "mm": 18}, {"id": "size-4", "mm": 65}, {"id": "size-5", "mm": 71.5}],
+     "measured": [], "unchanged": true, "certainty": ["accepted", "accepted", "accepted", "accepted", "accepted"]},
+    {"name": "spaces around an untouched number are not an edit", "edits": {"size-1": " 75.4 "},
+     "sizes": [{"id": "size-1", "mm": 75.4}, {"id": "size-2", "mm": 153.9}, {"id": "size-3", "mm": 18}, {"id": "size-4", "mm": 65}, {"id": "size-5", "mm": 71.5}],
+     "measured": [], "unchanged": true, "certainty": ["accepted", "accepted", "accepted", "accepted", "accepted"]},
+    {"name": "the wallet measured: one number changed, one typed again as 65.0, the bare width left blank", "edits": {"size-3": "19", "size-4": "65.0", "size-5": ""},
+     "sizes": [{"id": "size-1", "mm": 75.4}, {"id": "size-2", "mm": 153.9}, {"id": "size-3", "mm": 19}, {"id": "size-4", "mm": 65}],
+     "measured": ["size-3", "size-4"], "unchanged": false, "certainty": ["accepted", "accepted", "measured", "measured"]},
+    {"name": "a comma typed for the decimal is the person's number", "edits": {"size-1": "75,4"},
+     "sizes": [{"id": "size-1", "mm": 75.4}, {"id": "size-2", "mm": 153.9}, {"id": "size-3", "mm": 18}, {"id": "size-4", "mm": 65}, {"id": "size-5", "mm": 71.5}],
+     "measured": ["size-1"], "unchanged": false, "certainty": ["measured", "accepted", "accepted", "accepted", "accepted"]}
+  ]
+}

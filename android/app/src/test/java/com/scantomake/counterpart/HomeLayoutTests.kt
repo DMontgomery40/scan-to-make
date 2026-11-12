@@ -382,6 +382,7 @@ class HomeLayoutTests {
         compose.onNode(hasTestTag("ask-size-size-1")).performScrollTo().assertTextContains("64")
         compose.onNode(hasTestTag("ask-size-size-2")).performScrollTo().assertTextContains("53.5")
         compose.onNodeWithText("Width at the waist").assertExists()
+        compose.onAllNodes(hasText("Read from your scan")).assertCountEquals(2)
         compose.onAllNodes(hasText("Make Your Best Guess")).assertCountEquals(0)
         compose.onAllNodes(hasText("Choose")).assertCountEquals(0)
         compose.onNodeWithText("Caliper Photo").assertExists()
@@ -389,6 +390,8 @@ class HomeLayoutTests {
         compose.waitUntil(5_000) { sent != null }
         val body = WireJson.parseToJsonElement(sent!!).jsonObject
         assertEquals(WireJson.parseToJsonElement("""[{"id":"size-1","mm":64},{"id":"size-2","mm":53.5}]"""), body["sizes"])
+        // #622: Confirm with nothing typed sends no measurement.
+        assertEquals(WireJson.parseToJsonElement("[]"), body["measured"])
     }
 
     /** Review F2 on #456: a question picture that fails to load (the computer asleep) draws nothing, not an empty box

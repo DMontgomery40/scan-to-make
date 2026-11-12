@@ -563,10 +563,13 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
         /// `sizes`: the sizes to confirm or correct, prefilled.
         public var sizes: [Size]?
         /// One size in millimetres. `id` is opaque; `label` says what to measure; `from` is where the Mac's number
-        /// came from (`scan` or `published`).
+        /// came from (`published`, `scan` or `estimate`); a published one names its `product` and `reference` (#622).
         public struct Size: Codable, Equatable, Sendable, Identifiable {
             public var id: String; public var label: String; public var mm: Double; public var from: String
-            public init(id: String, label: String, mm: Double, from: String) { self.id = id; self.label = label; self.mm = mm; self.from = from }
+            public var product: String?; public var reference: String?
+            public init(id: String, label: String, mm: Double, from: String, product: String? = nil, reference: String? = nil) {
+                self.id = id; self.label = label; self.mm = mm; self.from = from; self.product = product; self.reference = reference
+            }
         }
         public init(id: String, question: String, photo: String? = nil, region: Region? = nil, answers: [String], status: String = "open", askedAtMs: Double? = nil,
                     kind: String? = nil, sizes: [Size]? = nil) {

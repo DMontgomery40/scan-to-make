@@ -1,7 +1,7 @@
 import {randomUUID} from 'node:crypto';
 import {mkdir, readdir, readFile, rename, rm, writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
-import type {Fit} from '@scan-to-make/contracts/counterpart';
+import type {Fit, SizeFrom} from '@scan-to-make/contracts/counterpart';
 import {withPassEnded, type PassStatus} from './pass-end.js';
 import type {TouchupActivity, TouchupChange, WorkerLimit} from '../touchup/runner.js';
 import type {PassStage} from '../touchup/stages.js';
@@ -27,7 +27,14 @@ export interface ObjectPrintConfirmation {
   supported: boolean;
 }
 
-export interface CheckedSize { label: string; mm: number; certainty: 'confirmed' | 'measured' }
+/**
+ * A size the person sent back for a size question (#622). `certainty` is how they checked it: `measured` (typed or
+ * edited the number) or `accepted` (confirmed the Mac's number untouched). `confirmed` is how an accepted size was
+ * stored before Nov 12: it stays as stored and is read as accepted, with its source unknown. `from`, `product` and
+ * `reference` are where the Mac's number came from (`AskSizeSchema`); `asked` is that number.
+ */
+export interface CheckedSize { label: string; mm: number; certainty: 'accepted' | 'measured' | 'confirmed';
+  from?: SizeFrom; product?: string; reference?: string; asked?: number }
 export interface ObjectMessage { id: string; text: string; atMs: number; photos: string[];
   /** The sending client's own id for this message. A second request carrying it is the same message arriving again,
    *  never a new one (Nov 10: a note whose reply was lost was sent again and started a second design pass). */

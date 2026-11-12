@@ -319,12 +319,14 @@ public extension ControlClient {
     func answerCloseup(_ id: String, bestGuess: Bool, photoNames: [String] = []) async throws -> Project {
         let result: ObjectReply = try await call("objects.answerCloseup", ["id": .string(id), "bestGuess": .bool(bestGuess), "photoNames": .array(photoNames.map(JSONValue.string))]); return result.object
     }
-    /// A size question's numbers (`AskSizesForm.answer`): the sizes it listed, confirmed or corrected.
+    /// A size question's numbers (`AskSizesForm.answer`): the sizes it listed, accepted as asked or measured.
     func answerSizes(_ id: String, sizes: [AskSizesForm.Answer]) async throws -> Project {
         let result: ObjectReply = try await call("objects.answerCloseup", Self.sizesParams(id, sizes)); return result.object
     }
+    /// The numbers, and `measured`: the ids the person typed or edited (contracts `SizesAnswerSchema`, #622).
     static func sizesParams(_ id: String, _ sizes: [AskSizesForm.Answer]) -> [String: JSONValue] {
-        ["id": .string(id), "bestGuess": .bool(false), "sizes": .array(sizes.map { .object(["id": .string($0.id), "mm": .number($0.mm)]) })]
+        ["id": .string(id), "bestGuess": .bool(false), "sizes": .array(sizes.map { .object(["id": .string($0.id), "mm": .number($0.mm)]) }),
+         "measured": .array(sizes.filter(\.measured).map { .string($0.id) })]
     }
     /// Prints the current model. `checked` only after an
     /// uncertain print, once the user has looked at the printer. Like every mutation, a deadline after

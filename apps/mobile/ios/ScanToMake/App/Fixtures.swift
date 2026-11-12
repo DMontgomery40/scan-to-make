@@ -489,7 +489,8 @@ enum Fixtures {
             ask["question"] = "Kroger doesn't publish this bottle's size. Can you confirm or correct what the scan reads?"
             ask["sizes"] = [["id": "size-1", "label": "width at the widest point", "mm": 64, "from": "scan"],
                             ["id": "size-2", "label": "width at the waist", "mm": 53.5, "from": "scan"],
-                            ["id": "size-3", "label": "thickness", "mm": 32, "from": "scan"],
+                            // The scan can't see the back: the Mac's own estimate (#622), never "from your scan".
+                            ["id": "size-3", "label": "thickness", "mm": 32, "from": "estimate"],
                             ["id": "size-4", "label": "height to the cap tip", "mm": 107, "from": "scan"]]
         }
         // A kind this build doesn't know (a later Mac's question): the card must offer no answer at all.
