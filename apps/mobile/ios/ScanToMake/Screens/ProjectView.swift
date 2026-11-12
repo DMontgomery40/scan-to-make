@@ -394,7 +394,9 @@ struct ProjectView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if writing { ToolbarItem(placement: .confirmationAction) { Button("Done") { writing = false } } }
-            if let modelURL {
+            // The page's model file is the newest design's: while an earlier design is on the stage it isn't offered, so
+            // Share never sends a different model from the one shown (train 11-12b review; the Mac blocks the same way).
+            if let modelURL = viewingDesign == nil ? modelURL : nil {
                 ToolbarItem(placement: .topBarTrailing) {
                     ShareLink(item: modelURL, preview: SharePreview("\(words.title).\(object.preservesPublishedFilaments ? "3mf" : "stl")")) { Image(systemName: "square.and.arrow.up") }
                 }
@@ -420,7 +422,7 @@ struct ProjectView: View {
                             .accessibilityIdentifier("more-make-from-scan")
                         Divider()
                     }
-                    if let modelURL { ShareLink(object.preservesPublishedFilaments ? "Share 3MF" : "Share STL", item: modelURL) }
+                    if let modelURL = viewingDesign == nil ? modelURL : nil { ShareLink(object.preservesPublishedFilaments ? "Share 3MF" : "Share STL", item: modelURL) }
                     if let arURL { ShareLink("Share USDZ", item: arURL) } else if let scanURL { ShareLink("Share Your Scan (USDZ)", item: scanURL) }
                     Divider()
                     Button("Delete Project", systemImage: "trash", role: .destructive) { confirmDelete = true }.disabled(away)
