@@ -1060,11 +1060,16 @@ export class ObjectService {
    * as it was on disk and is only read this way.
    */
   named(object: StmObject): StmObject {
-    const destination = object.print?.destination;
     // A snapshot from before names were stored has none to correct.
-    if (typeof destination?.name !== 'string') return object;
-    const name = this.#printerName(destination.id, destination.name);
-    return name === destination.name ? object : {...object, print: {...object.print!, destination: {...destination, name}}};
+    const rename = <T extends {destination?: {id: string; name: string}}>(record: T): T => {
+      const destination = record.destination;
+      if (typeof destination?.name !== 'string') return record;
+      const name = this.#printerName(destination.id, destination.name);
+      return name === destination.name ? record : {...record, destination: {...destination, name}};
+    };
+    // Every kept attempt (#616) carries the same snapshot as the last print, so it is read the same way.
+    const print = object.print ? rename(object.print) : undefined, prints = object.prints?.map(rename);
+    return print === object.print && (prints ?? []).every((p, i) => p === object.prints![i]) ? object : {...object, ...(print ? {print} : {}), ...(prints ? {prints} : {})};
   }
 
   /**
