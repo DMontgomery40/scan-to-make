@@ -39,10 +39,9 @@ struct ProjectView: View {
     @State private var loading = true
     @State private var resumed = false
     @State private var confirmDelete = false
-    @State private var modelURL: URL?
     @Environment(\.scenePhase) private var scenePhase
-    /// The part's USDZ once the stage's AR chip has prepared it (Share offers it too).
-    @State private var arURL: URL?
+    /// The part's AR file once the stage's AR chip has prepared it, with the model it was written from (Share offers it too).
+    @State private var arFile: PreparedAR?
     @State private var scanURL: URL?
     @State private var captureWarning: String?
     @State private var askWorking = false
@@ -350,10 +349,10 @@ struct ProjectView: View {
                             Text(version.label).font(.callout)
                         }
                         Spacer()
-                        Button("Show the newest") { self.viewingDesign = nil }
+                        Button("Show the newest") { self.viewingDesign = nil; arFile = nil }
                     }.padding(.horizontal, 20).accessibilityElement(children: .contain).accessibilityIdentifier("viewing-earlier-design")
                 }
-                DesignHistoryView(project: object, select: { viewingDesign = $0 }, answer: { versionId, status in
+                DesignHistoryView(project: object, select: { viewingDesign = $0; arFile = nil }, answer: { versionId, status in
                     act { try await store.mac.client.setStatus(object.id, status == "works" ? .works : .needsChanges, versionId: versionId) }
                 }, thumbnail: { version in
                     if let path = version.picture ?? version.result.renders.first {
@@ -400,7 +399,7 @@ struct ProjectView: View {
             if writing { ToolbarItem(placement: .confirmationAction) { Button("Done") { writing = false } } }
             // The page's model file is the newest design's: while an earlier design is on the stage it isn't offered, so
             // Share never sends a different model from the one shown (train 11-12b review; the Mac blocks the same way).
-            if let modelURL = viewingDesign == nil ? modelURL : nil {
+            if let modelURL = viewingDesign == nil ? modelURL(object) : nil {
                 ToolbarItem(placement: .topBarTrailing) {
                     ShareLink(item: modelURL, preview: SharePreview("\(words.title).\(object.preservesPublishedFilaments ? "3mf" : "stl")")) { Image(systemName: "square.and.arrow.up") }
                 }
@@ -426,8 +425,9 @@ struct ProjectView: View {
                             .accessibilityIdentifier("more-make-from-scan")
                         Divider()
                     }
-                    if let modelURL = viewingDesign == nil ? modelURL : nil { ShareLink(object.preservesPublishedFilaments ? "Share 3MF" : "Share STL", item: modelURL) }
-                    if let arURL { ShareLink("Share USDZ", item: arURL) } else if let scanURL { ShareLink("Share Your Scan (USDZ)", item: scanURL) }
+                    if let modelURL = viewingDesign == nil ? modelURL(object) : nil { ShareLink(object.preservesPublishedFilaments ? "Share 3MF" : "Share STL", item: modelURL) }
+                    // Only the AR file of the model and colour on the stage now (review of #770), the AR chip's own test.
+                    if let arURL = ProjectGalleryView.arUSDZ(arFile, store: store, project: object.showingDesign(viewingDesign), modelURL: modelURL(object)) { ShareLink("Share USDZ", item: arURL) } else if let scanURL { ShareLink("Share Your Scan (USDZ)", item: scanURL) }
                     Divider()
                     Button("Delete Project", systemImage: "trash", role: .destructive) { confirmDelete = true }.disabled(away)
                 } label: { Image(systemName: "ellipsis") }
@@ -483,9 +483,9 @@ struct ProjectView: View {
             MediaTrace.record("page.model-begin", ["key": object.current?.model ?? "none", "scene": String(describing: scenePhase)], context: context)
             MediaTrace.record(Task.isCancelled ? "page.model-cancelled" : "page.model-demanded", ["scene": String(describing: scenePhase)], context: context)
         }
-        .task(id: "\(store.models.file(object, "model.stl")?.path ?? "")#\(object.spoolColour ?? "")") {
-            modelURL = store.models.file(object, "model.stl"); arURL = nil
-            MediaTrace.record("page.model-published", ["file": String(modelURL != nil), "scene": String(describing: scenePhase)],
+        .task(id: "\(modelURL(object)?.path ?? "")#\(object.spoolColour ?? "")") {
+            // The trace only: the page reads its model from the store in `body` (#769), never from state this task sets.
+            MediaTrace.record("page.model-published", ["file": String(modelURL(object) != nil), "scene": String(describing: scenePhase)],
                               context: store.models.traceContext(object, "model.stl") ?? MediaTrace.Context(project: object.id, version: String(Int64(object.mediaVersion))))
         }
     }
@@ -603,11 +603,18 @@ struct ProjectView: View {
         }
     }
 
+    /// The page's model (the file that prints, the newest design's), read from the store wherever the page shows it (#769).
+    /// It was `@State` that a one-shot `.task(id:)` set: on David's phone the pushed page's tasks are cancelled 4 ms after it
+    /// appears (NavigationStack, as #720 found for the stage) and the instance on screen never ran it, so a model that came
+    /// 40 ms later never reached the stage: no Explore in 3D and no AR. `ModelFiles.fetches` is observed, so the stage
+    /// follows the store.
+    private func modelURL(_ object: Project) -> URL? { store.models.file(object, "model.stl") }
+
     @ViewBuilder private func hero(_ object: Project, _ words: ProjectWords, stage: CGFloat) -> some View {
         VStack(spacing: 8) {
             ProjectGalleryView(store: store, project: object, words: words,
                                height: stage,
-                               modelURL: modelURL, arURL: $arURL, localScan: scanURL, working: working || away,
+                               modelURL: modelURL(object), arFile: $arFile, localScan: scanURL, working: working || away,
                                locate: { act { try await store.mac.client.locate(object.id) } })
             .task(id: "\(object.id)#\(object.scan ?? "")") {
                 // The scan while it's only on this phone, for Share until the Mac has it.

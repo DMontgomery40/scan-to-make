@@ -340,6 +340,31 @@ final class CompanionClientTests: XCTestCase {
         }
     }
 
+    /// #769: a multi-part design's merged mesh, `current/model.stl` beside its `current/model.3mf`, is what the stage turns
+    /// and AR is written from. The phone asks for it by that path; `model.stl` still brings the 3MF that prints, and
+    /// nothing else under `current/` is asked for.
+    func testAMultiPartDesignsMergedMeshDownloadsByItsOwnPath() async throws {
+        let fake = FakeTransport { request, _ in HTTPReply(status: 200, body: Data((request.url!.path.hasSuffix("/current/model.stl") ? "mesh" : "3mf").utf8)) }
+        let c = try client(fake)
+        defer { try? FileManager.default.removeItem(at: c.cache) }
+        let box = project(["kind": "fit", "current": ["model": "current/model.3mf", "renders": []]])
+        let mesh = try await c.download(box, "current/model.stl")
+        XCTAssertEqual(try Data(contentsOf: mesh), Data("mesh".utf8))
+        XCTAssertTrue(fake.calls.contains { $0.request.url?.path == "/v1/objects/\(box.id)/current/model.stl" }, fake.calls.map { $0.request.url?.path ?? "" }.joined(separator: ", "))
+        let printed = try await c.download(box, "model.stl")
+        XCTAssertEqual(try Data(contentsOf: printed), Data("3mf".utf8), "model.stl is still the file that prints")
+        XCTAssertNotEqual(mesh, printed)
+        XCTAssertEqual(CompanionClient.scope("GET", "/v1/objects/\(box.id)/current/model.stl"), "projects:read")
+        XCTAssertNil(CompanionClient.scope("GET", "/v1/objects/\(box.id)/current/object.json"))
+        // Kept on the phone as a model, as the page's model.stl is, and so is an earlier design's own mesh.
+        XCTAssertEqual(OnDeviceLibrary.Kind.of("current/model.stl"), .model)
+        XCTAssertEqual(OnDeviceLibrary.Kind.of("versions/2d67e062-42b7-4d91-ab77-212a490a5a65/touched.stl"), .model)
+        XCTAssertEqual(OnDeviceLibrary.Kind.of("versions/2d67e062-42b7-4d91-ab77-212a490a5a65/pictures/part.png"), .picture)
+        for refused in ["current/model.3mf", "current/../object.json", "current/design/inputs/scan.obj"] {
+            do { _ = try await c.download(box, refused); XCTFail(refused) } catch {}
+        }
+    }
+
     func testHTTPDownloadRefusalKeepsStatus() async throws {
         let fake = FakeTransport { _, _ in HTTPReply(status: 503, body: Data()) }
         let c = try client(fake)

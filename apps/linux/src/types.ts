@@ -176,6 +176,8 @@ export interface Project {
   current?: {
     model: string;
     renders: string[];
+    /** #769: the merged mesh beside a multi-part design's 3MF, listed by the computer only while the file is there. */
+    mergedMesh?: string;
     sizeMm?: number[];
     summary?: string;
     changes?: { tag: string; text: string }[];

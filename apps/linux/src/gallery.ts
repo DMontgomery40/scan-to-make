@@ -58,13 +58,31 @@ export function printableParts(p: Project): PrintablePart[] {
   const current = p.current;
   if (!current) return [];
   const label = p.kind === "copy" ? "Your copy" : p.kind === "published" ? "Model" : "Your part";
-  if (current.model.toLowerCase().endsWith(".3mf")) {
-    // The computer's drawing of all the file's objects first, as on the other clients (Nov 10).
-    // Always an entry (review B2 on #539): with no picture yet ("") the stage says it is coming or that it can't be had.
+  const mesh = partMesh(p);
+  if (!mesh) {
+    // A designer's 3MF has no merged mesh: the computer's drawing of all the file's objects first, as on the other
+    // clients (Nov 10). Always an entry (review B2 on #539): with no picture yet ("") the stage says it is coming or that it can't be had.
     const render = p.pictures?.part ?? (current.renders[0] ? renderPath(current.renders[0]) : plates[0]?.thumbnail) ?? "";
     return [{ id: "result", label, drawing: { picture: render }, colour: "own", sizeMm: current.sizeMm }];
   }
-  return [{ id: "result", label, drawing: { model: "model.stl" }, colour: spoolColour(p) ?? "neutral", sizeMm: current.sizeMm }];
+  // A multi-part design turns from its merged mesh, neutral until the MCPs report each part's colour (#769, #645).
+  const multipart = current.model.toLowerCase().endsWith(".3mf");
+  return [{ id: "result", label, drawing: { model: mesh }, colour: multipart ? "neutral" : spoolColour(p) ?? "neutral", sizeMm: current.sizeMm }];
+}
+
+/**
+ * The mesh the part's stage turns (CounterpartKit `Project.partMesh`, #769): `model.stl` for a one-colour design, a sealed
+ * design's own file (`versions/<id>/touched.stl`), or the merged `model.stl` a pass writes beside a multi-part design's 3MF
+ * (`current/model.stl`, `versions/<id>/model.stl`), only when the computer lists it (`mergedMesh`, there only while the
+ * file is: review of #770). None for a designer's published 3MF, or a 3MF whose merged mesh isn't listed: its picture.
+ */
+export function partMesh(p: Project): string | undefined {
+  const model = p.current?.model;
+  if (!model) return undefined;
+  if (!model.toLowerCase().endsWith(".3mf")) return model.startsWith("versions/") ? model : "model.stl";
+  if (p.kind === "published" || !(model.startsWith("current/") || model.startsWith("versions/"))) return undefined;
+  const sibling = `${model.slice(0, model.lastIndexOf("/"))}/model.stl`;
+  return p.current?.mergedMesh === sibling ? sibling : undefined;
 }
 
 export function scanModels(p: Project): string[] {

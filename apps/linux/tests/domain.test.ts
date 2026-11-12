@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { canLocate, gallery, drawnColour, photoPicture, still, filePath, stageStill, pictureClock, PICTURE_PATIENCE_MS, NOT_DRAWN_LINE } from "../src/gallery";
+import { canLocate, gallery, partMesh, drawnColour, photoPicture, still, filePath, stageStill, pictureClock, PICTURE_PATIENCE_MS, NOT_DRAWN_LINE } from "../src/gallery";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { ProjectPage } from "../src/ProjectView";
@@ -1138,8 +1138,20 @@ test("an earlier design opens on the same stage from its own files, with Show th
   const page = [others[0]!, hanger, others[1]!].find((p) => p.id === hanger.id)!;
   const history = designHistory(page, "UTC");
   const shown = showingDesign(page, history.have[0]!.id);
-  assert.equal(shown.current?.model, `versions/${firstDesign!.id}/model.stl`);
-  assert.equal(filePath(shown, "model.stl"), `versions/${firstDesign!.id}/model.stl`, "Explore in 3D reads the design's own model");
+  // Named as David's records name it (#769): a sealed design is touched.stl, never model.stl.
+  assert.equal(shown.current?.model, `versions/${firstDesign!.id}/touched.stl`);
+  assert.equal(filePath(shown, "model.stl"), `versions/${firstDesign!.id}/touched.stl`, "Explore in 3D reads the design's own model");
+  assert.deepEqual(gallery(shown)[0]?.drawing, { model: `versions/${firstDesign!.id}/touched.stl` }, "a printed earlier design turns in 3D");
+  // A sealed multi-part design (touched.3mf) turns from the merged model.stl beside it, neutral (#769).
+  const lid = showingDesign(page, widerDesign!.id);
+  assert.deepEqual(gallery(lid)[0]?.drawing, { model: `versions/${widerDesign!.id}/model.stl` });
+  assert.equal(gallery(lid)[0]?.colour, "neutral");
+  assert.equal(filePath(lid, "model.stl"), `versions/${widerDesign!.id}/model.stl`);
+  // Review of #770: when the computer lists no merged mesh beside the 3MF (none written, or an older companion), the design
+  // is its picture: no Explore in 3D that would fail.
+  const bare = { ...lid, current: { ...lid.current!, mergedMesh: undefined } } as Project;
+  assert.equal(partMesh(bare), undefined);
+  assert.ok("picture" in gallery(bare)[0]!.drawing, "a picture, not a model to turn");
   assert.equal(filePath(shown, `renders/front.png`), `versions/${firstDesign!.id}/renders/front.png`);
   assert.equal(shown.state, "confirmed");
   assert.equal(words(shown), "Done", "the header shows the design's own state, never the newest's words");

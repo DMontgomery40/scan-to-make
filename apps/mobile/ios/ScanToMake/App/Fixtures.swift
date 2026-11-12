@@ -90,7 +90,7 @@ enum Fixtures {
         "sealedAtMs": 1793750400000,
         "modelSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "result": {
-          "model": "versions/10000000-0000-4000-8000-000000000001/model.stl",
+          "model": "versions/10000000-0000-4000-8000-000000000001/touched.stl",
           "renders": [
             "versions/10000000-0000-4000-8000-000000000001/renders/front.png"
           ],
@@ -109,7 +109,7 @@ enum Fixtures {
         "sealedAtMs": 1793836800000,
         "modelSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
         "result": {
-          "model": "versions/10000000-0000-4000-8000-000000000002/model.stl",
+          "model": "versions/10000000-0000-4000-8000-000000000002/touched.3mf",
           "renders": [],
           "summary": "A wider rest."
         }
@@ -190,7 +190,7 @@ enum Fixtures {
         "id": "30000000-0000-4000-8000-000000000001",
         "sealedAtMs": 1793750400000,
         "modelSha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
-        "result": {"model": "versions/30000000-0000-4000-8000-000000000001/model.stl", "renders": [], "summary": "A flat lip."},
+        "result": {"model": "versions/30000000-0000-4000-8000-000000000001/touched.stl", "renders": [], "summary": "A flat lip."},
         "outcome": "works"
       },
       {
@@ -220,6 +220,70 @@ enum Fixtures {
         "monitor": {"phase": "ended", "endState": "done", "endedAt": "2026-11-06T18:00:00Z"}
       }
     ]
+  },
+  {
+    "id": "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a05",
+    "title": "Pink snap-lid box",
+    "kind": "fit",
+    "instructions": "A snap-lid box, pink, with letters on the lid.",
+    "state": "confirmed",
+    "outcome": "works",
+    "createdAtMs": 1793750400000,
+    "updatedAtMs": 1793980800000,
+    "photos": [],
+    "passes": [],
+    "current": {"model": "current/model.3mf", "mergedMesh": "current/model.stl", "renders": [], "summary": "Letters on the lid."},
+    "versions": [
+      {
+        "id": "40000000-0000-4000-8000-000000000001",
+        "sealedAtMs": 1793750400000,
+        "modelSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+        "result": {"model": "versions/40000000-0000-4000-8000-000000000001/touched.stl", "renders": [], "summary": "A plain box."},
+        "printedAtMs": 1793808000000,
+        "outcome": "works"
+      },
+      {
+        "id": "40000000-0000-4000-8000-000000000002",
+        "sealedAtMs": 1793980800000,
+        "modelSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+        "result": {"model": "versions/40000000-0000-4000-8000-000000000002/touched.3mf", "mergedMesh": "versions/40000000-0000-4000-8000-000000000002/model.stl", "renders": [], "summary": "Letters on the lid."},
+        "printedAtMs": 1794340000000,
+        "outcome": "works"
+      }
+    ],
+    "prints": []
+  },
+  {
+    "id": "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a06",
+    "title": "Caliper card logo",
+    "kind": "fit",
+    "instructions": "A snap-lid box, pink, with letters on the lid.",
+    "state": "confirmed",
+    "outcome": "works",
+    "createdAtMs": 1793750400000,
+    "updatedAtMs": 1793980800000,
+    "photos": [],
+    "passes": [],
+    "current": {"model": "current/model.3mf", "renders": ["current/renders/mic.png"], "summary": "Letters on the lid."},
+    "versions": [
+      {
+        "id": "50000000-0000-4000-8000-000000000001",
+        "sealedAtMs": 1793750400000,
+        "modelSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+        "result": {"model": "versions/50000000-0000-4000-8000-000000000001/touched.stl", "renders": [], "summary": "A plain box."},
+        "printedAtMs": 1793808000000,
+        "outcome": "works"
+      },
+      {
+        "id": "50000000-0000-4000-8000-000000000002",
+        "sealedAtMs": 1793980800000,
+        "modelSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+        "result": {"model": "versions/50000000-0000-4000-8000-000000000002/touched.3mf", "renders": [], "summary": "Letters on the lid."},
+        "printedAtMs": 1794340000000,
+        "outcome": "works"
+      }
+    ],
+    "prints": []
   }
 ]
 """#.utf8)
@@ -669,7 +733,21 @@ enum Fixtures {
         if path.hasSuffix("/asks/\(bottleAsk).jpg") { return "ask-bottle.jpg" }
         if path.hasSuffix("/" + bottlePicture) { return "bottle-picture.png" }
         if let range = path.range(of: #"/capture/[0-9]{4}\.heic$"#, options: .regularExpression) { return "bottle-capture/" + path[range].dropFirst("/capture/".count) }
-        if path.hasSuffix("/model.stl") { return "mic.stl" }
+        // The meshes the Mac serves, as David's records name them (#769): a page's model.stl, a multi-part design's merged
+        // current/model.stl and the model.stl sealed beside a touched.3mf, an earlier design's touched.stl. Never a 3MF as an STL.
+        // A merged mesh only where the project lists it, as the companion serves it (review of #770).
+        if let range = path.range(of: #"/(current|versions/[0-9a-f-]{36})/model\.stl$"#, options: .regularExpression) {
+            let mesh = String(path[range].dropFirst())
+            let listed = objects().contains { object in
+                let results = [object["current"]] + ((object["versions"] as? [[String: Any]]) ?? []).map { $0["result"] }
+                return results.contains { result in
+                    let result = result as? [String: Any]
+                    return result?["mergedMesh"] as? String == mesh || result?["model"] as? String == mesh
+                }
+            }
+            return listed ? "mic.stl" : nil
+        }
+        if path.hasSuffix("/model.stl") || path.hasSuffix("/touched.stl") { return "mic.stl" }
         if Fixtures.set == "ar-stage", path.contains("/scan/") { return "scan.usdz" }
         if path.hasSuffix("/pictures/scan-0123456789abcdef.png") || path.hasSuffix("/pictures/part-0123456789abcdef.png") { return "thumb-potato.png" }
         if path.hasSuffix("/camera.jpg") { return "bed.jpg" }

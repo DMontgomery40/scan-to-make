@@ -640,6 +640,60 @@ final class LayoutParityUITests: XCTestCase {
         XCTAssertFalse(other.descendants(matching: .any).matching(identifier: "design-history").firstMatch.exists, "one design: the page is today's page")
     }
 
+    /// #769, David (Nov 12): "Already printed items no longer have explore in 3D or AR, some do actually but some don't".
+    /// Shaped like his Pink snap-lid box: the newest design is a multi-part `current/model.3mf` (its merged `current/model.stl`
+    /// beside it) and the printed earlier one is `versions/<id>/touched.stl`. Each, on the stage, offers Explore in 3D and an
+    /// AR chip that becomes ready. (The #616 tests used `model.stl` names and no model file, so neither was ever drawn.)
+    func testEveryPrintedDesignOffersExploreIn3DAndARWithProjectsPresent() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try Self.boxSTL().write(to: folder.appendingPathComponent("mic.stl"))
+        let app = XCUIApplication()
+        app.launchArguments = ["-CounterpartFixtures", folder.path, "-CounterpartFixtureSet", "design-history",
+                               "-CounterpartOpen", "counterpart://project/6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a05"]
+        app.launch()
+        func offers3DAndAR(_ when: String) {
+            XCTAssertTrue(app.buttons["Explore in 3D"].waitForExistence(timeout: 20), "\(when): Explore in 3D. \(app.debugDescription)")
+            let ar = app.buttons["gallery-ar"]
+            XCTAssertTrue(ar.waitForExistence(timeout: 10), "\(when): the AR chip")
+            let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "ready"), object: ar)
+            XCTAssertEqual(XCTWaiter().wait(for: [ready], timeout: 20), .completed, "\(when): AR \(String(describing: ar.value))")
+            let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "769 \(when)"; shot.lifetime = .keepAlways; add(shot)
+        }
+        offers3DAndAR("the newest, a multi-part 3MF")
+        let printed = app.buttons["design-40000000-0000-4000-8000-000000000001"]
+        scrollProjectPage(app, until: printed)
+        printed.tap()
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "viewing-earlier-design").firstMatch.waitForExistence(timeout: 5))
+        app.swipeDown(); app.swipeDown()
+        offers3DAndAR("the printed earlier design, touched.stl")
+    }
+
+    /// Review of #770: the same multi-part design when the Mac lists no merged mesh beside its 3MF (none was written, or an
+    /// older Mac that doesn't say) is its picture alone, as before #769: no Explore in 3D, no AR chip, no line or Try Again
+    /// for a model that can't come.
+    func testAMultiPartDesignWithNoMergedMeshShowsOnlyItsPictureWithProjectsPresent() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try Self.boxSTL().write(to: folder.appendingPathComponent("mic.stl"))
+        let app = XCUIApplication()
+        app.launchArguments = ["-CounterpartFixtures", folder.path, "-CounterpartFixtureSet", "design-history",
+                               "-CounterpartOpen", "counterpart://project/6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a06"]
+        app.launch()
+        let title = app.buttons["project-title"]
+        XCTAssertTrue(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", "Caliper card logo"), object: title)], timeout: 20) == .completed)
+        XCTAssertTrue(app.images["gallery-stage-picture"].waitForExistence(timeout: 10), "its picture on the stage: \(app.debugDescription)")
+        // Long enough for a model fetch to have started, refused and said so, had one been asked for.
+        RunLoop.current.run(until: Date().addingTimeInterval(4))
+        XCTAssertFalse(app.buttons["Explore in 3D"].exists, "no 3D to turn")
+        XCTAssertFalse(app.buttons["gallery-ar"].exists, "no AR from a picture")
+        XCTAssertFalse(app.descendants(matching: .any)["gallery-model-unavailable"].exists, "no line for a model that can't come")
+        XCTAssertFalse(app.buttons["gallery-model-retry"].exists, "no Try Again that can't succeed")
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "770 multi-part, no merged mesh"; shot.lifetime = .keepAlways; add(shot)
+    }
+
     /// #616 follow-up: the page's cards and Status act on the newest design, so with an earlier design on the stage they
     /// wait for Show the newest, as the Mac's and Android's do. Did it fit? here would answer for the newest print.
     func testAnEarlierDesignOnTheStageLeavesTheNewestsCardsAndStatusAloneWithProjectsPresent() {
@@ -2466,6 +2520,34 @@ final class OnDeviceLibraryUITests: XCTestCase {
         assertTurnsFromThePhone(app, "after a relaunch, Mac away")
         let relaunched = XCTAttachment(screenshot: app.screenshot()); relaunched.name = "720-page-relaunch-away"; relaunched.lifetime = .keepAlways; add(relaunched)
         app.terminate()
+    }
+
+    /// #769, David's phone trace (Nov 12, build 202611121212): Wall holder, Crochet potato, AirPods hanger, BAG CLIP and
+    /// others, opened from Home, logged one `page.model-published file=false`, their stage appeared and disappeared within
+    /// 4 ms, and `model.published ready=true` 40 ms later never reached the page: no Explore in 3D, no AR. The page's model
+    /// came from `@State` that a one-shot task set. Here the model reaches the phone just after the page is pushed from
+    /// Home's own row (not a launch link), and the stage must still offer Explore in 3D and AR.
+    func testAModelThatArrivesJustAfterThePageOpensIsOnTheStageWithProjectsPresent() throws {
+        let folder = try folder()
+        try cube(40).write(to: folder.appendingPathComponent("mic.stl"))
+        let app = launch(folder, ["-CounterpartSlowModel", "1.5", "-CounterpartStageIdle", "30"])
+        let search = app.textFields["project-search"]
+        if app.collectionViews["Sidebar"].exists, search.waitForExistence(timeout: 20) {
+            pick(app, search, "Mic mount", "sidebar-project-6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01", file: #filePath, line: #line)
+        } else {
+            let row = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@ AND NOT (label BEGINSWITH %@)", "Mic mount", "Mic mount v")).firstMatch
+            XCTAssertTrue(row.waitForExistence(timeout: 20), app.debugDescription)
+            for _ in 0..<6 where !row.isHittable { app.swipeUp() }
+            row.tap()
+        }
+        XCTAssertTrue(app.buttons["project-title"].waitForExistence(timeout: 10), app.debugDescription)
+        let explore = app.buttons["Explore in 3D"]
+        XCTAssertTrue(explore.waitForExistence(timeout: 20), "the model came after the page opened, and the stage has it: \(app.debugDescription)")
+        let ar = app.buttons["gallery-ar"]
+        XCTAssertTrue(ar.waitForExistence(timeout: 10))
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "ready"), object: ar)
+        XCTAssertEqual(XCTWaiter().wait(for: [ready], timeout: 20), .completed, "AR for the model that came: \(String(describing: ar.value))")
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "769-model-after-open"; shot.lifetime = .keepAlways; add(shot)
     }
 
     /// Back to Home and into Mic mount again (iPhone), or to another project and back by the sidebar (iPad). The iPad finds

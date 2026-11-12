@@ -127,7 +127,7 @@ object Media {
             sendPhotos(uploader, id, photos)
             return client.start(id)
         }
-        if (ReconstructionAnswers.CAPABILITY !in client.health().capabilities) throw ReconstructionAnswers.updateHost
+        ReconstructionAnswers.hostRefusal({ client.health() }, { kotlinx.coroutines.delay(it) })?.let { throw it }
         val ar = captureKind(context, id) == "ar"
         val cameraJson = if (ar) verifiedCaptureCamera(context, id, frames) else null
         val project = client.get(id)

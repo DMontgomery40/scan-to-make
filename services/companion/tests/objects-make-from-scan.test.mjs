@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
-import {mkdir, readFile, readdir, writeFile} from 'node:fs/promises';
+import {mkdir, readFile, readdir, unlink, writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {ObjectStore} from '../dist/objects/store.js';
 import {ObjectService} from '../dist/objects/service.js';
@@ -49,7 +49,7 @@ async function fixture(t, {denied = [], replies = []} = {}) {
     let json; try { json = JSON.parse(text); } catch {}
     return {status: response.status, json};
   };
-  return {call, scopes, service, store, events, inputs};
+  return {call, scopes, service, store, events, inputs, base};
 }
 
 /** A finished copy project with a Mac-rebuilt scan, its phone preview, photos, capture frames and checked sizes: the Leatherman. */
@@ -432,4 +432,67 @@ test('a sealed design serves its own model and renders, and nothing else under v
   assert.equal((await call('GET', `/v1/objects/${project.id}/${folder}/secret.txt`)).status, 404);
   assert.equal((await call('GET', `/v1/objects/${project.id}/versions/00000000-0000-4000-8000-000000000000/model.stl`)).status, 404);
   assert.equal((await call('POST', `/v1/objects/${project.id}/${version.result.model}`, {})).status, 405);
+});
+
+// #769: a multi-part design's model is current/model.3mf with the merged current/model.stl beside it (David's Pink snap-lid
+// box, Caliper card logo, Guitar pick). The stage turns the merged mesh and AR is written from it, so a client with read
+// access gets it by that path; model.stl stays the 3MF that prints; nothing else under current/ is served there.
+test('a multi-part design serves its merged mesh at current/model.stl, and model.stl stays the 3MF that prints', async t => {
+  const root = await tempDir('objects-multipart-');
+  const parts = join(root, 'parts.3mf'); await writeFile(parts, 'the 3mf that prints');
+  const {call, service, store, scopes, base} = await fixture(t, {replies: [{status: 'done', summary: 'Made the box and its lid.', parts}]});
+  const project = await service.create('A box and its lid.', 'fit');
+  await service.start(project.id); await service.settled(project.id);
+  assert.equal((await store.get(project.id)).current.model, 'current/model.3mf');
+  const get = path => fetch(`${base}/v1/objects/${project.id}/${path}`);
+  const mesh = await get('current/model.stl');
+  assert.equal(mesh.status, 200);
+  assert.equal(mesh.headers.get('content-type'), 'model/stl');
+  assert.equal(await mesh.text(), STL, 'the merged mesh the pass wrote');
+  assert.ok(scopes.includes('projects:read'));
+  const printed = await get('model.stl');
+  assert.equal(printed.headers.get('content-type'), 'model/3mf', 'model.stl is unchanged: the file that prints');
+  assert.equal(await printed.text(), 'the 3mf that prints');
+  // Nothing else under current/: not a file the project doesn't list, not a render by path, not a way out.
+  await writeFile(join(store.dir(project.id), 'current', 'secret.txt'), 'not a model');
+  for (const path of ['current/model.3mf', 'current/secret.txt', 'current/renders/front.png', 'current/%2e%2e/object.json', 'current/model.stl.bak'])
+    assert.equal((await get(path)).status, 404, path);
+  assert.equal((await call('POST', `/v1/objects/${project.id}/current/model.stl`, {})).status, 405);
+  // A designer's published 3MF has no merged mesh to serve.
+  await store.update(project.id, o => ({...o, kind: 'published'}));
+  assert.equal((await get('current/model.stl')).status, 404, 'published');
+  // A one-colour design's current model is its STL.
+  await store.update(project.id, o => ({...o, kind: 'fit', current: {...o.current, model: 'current/model.stl'}}));
+  assert.equal((await get('current/model.stl')).status, 200);
+});
+
+// Review of #770: a client draws a multi-part design in 3D only when the Mac says its merged mesh is there (`mergedMesh` on
+// `current` and on each design's result, read from disk as the project is read, as `scanFiles` is). No file, no field:
+// the design stays its picture, with no 3D that can't come.
+test('a multi-part design lists its merged mesh only while the file is there, on current and on each sealed design', async t => {
+  const root = await tempDir('objects-multipart-mesh-');
+  const parts = join(root, 'parts.3mf'); await writeFile(parts, 'the 3mf that prints');
+  const {call, service, store} = await fixture(t, {replies: [{status: 'done', summary: 'Made the box and its lid.', parts}]});
+  const project = await service.create('A box and its lid.', 'fit');
+  await service.start(project.id); await service.settled(project.id);
+  let object = (await call('GET', `/v1/objects/${project.id}`)).json.object;
+  assert.equal(object.current.model, 'current/model.3mf');
+  assert.equal(object.current.mergedMesh, 'current/model.stl');
+  const sealed = object.versions.at(-1);
+  assert.ok(sealed.result.model.endsWith('.3mf'), sealed.result.model);
+  assert.equal(sealed.result.mergedMesh, `versions/${sealed.id}/model.stl`);
+  assert.equal((await call('GET', `/v1/objects/${project.id}/${sealed.result.mergedMesh}`)).status, 200);
+  // The files go: the fields go with them.
+  await unlink(join(store.dir(project.id), 'current', 'model.stl'));
+  await unlink(join(store.dir(project.id), sealed.result.mergedMesh));
+  object = (await call('GET', `/v1/objects/${project.id}`)).json.object;
+  assert.equal(object.current.mergedMesh, undefined);
+  assert.equal(object.versions.at(-1).result.mergedMesh, undefined);
+  assert.equal((await call('GET', '/v1/objects')).json.objects.find(o => o.id === project.id).current.mergedMesh, undefined, 'the list says the same');
+  // A one-colour design, or a designer's published 3MF, never lists one.
+  await writeFile(join(store.dir(project.id), 'current', 'model.stl'), STL);
+  await store.update(project.id, o => ({...o, kind: 'published'}));
+  assert.equal((await call('GET', `/v1/objects/${project.id}`)).json.object.current.mergedMesh, undefined, 'published');
+  await store.update(project.id, o => ({...o, kind: 'fit', current: {...o.current, model: 'current/model.stl'}}));
+  assert.equal((await call('GET', `/v1/objects/${project.id}`)).json.object.current.mergedMesh, undefined, 'an STL design is its own mesh');
 });

@@ -12,8 +12,9 @@ struct ProjectGalleryView: View {
     let words: ProjectWords
     let height: CGFloat
     let modelURL: URL?
-    /// The part's AR file once the AR chip has prepared it (the page's Share offers it too).
-    @Binding var arURL: URL?
+    /// The part's AR file once the AR chip has prepared it, with the model and colour it was written from (the page's
+    /// Share offers it too). Only the file for the model on the stage now is shown: never the newest design's on an earlier one.
+    @Binding var arFile: PreparedAR?
     /// The scan while it is still only on this phone (before the Mac has it).
     let localScan: URL?
     var working = false
@@ -32,11 +33,25 @@ struct ProjectGalleryView: View {
     @State private var arFailed = false
     @State private var arTask: Task<Void, Never>?
 
-    /// A sealed design shown on the stage (#616) draws from its own mesh, fetched like any project file.
-    private var versionModel: String? { project.current?.model.hasPrefix("versions/") == true ? Project.versionMesh(project.current!.model) : nil }
-    private var effectiveModelURL: URL? {
-        if let versionModel { return store.models.file(project, versionModel) }
+    /// The part's own mesh when it isn't the page's `model.stl` (`Project.partMesh`, #769): a sealed design's file
+    /// (`versions/<id>/touched.stl`, #616), or a multi-part design's merged `current/model.stl`. Fetched like any project file.
+    private var ownMesh: String? { project.partMesh.flatMap { $0 == "model.stl" ? nil : $0 } }
+    private var effectiveModelURL: URL? { Self.stageModel(store: store, project: project, modelURL: modelURL) }
+    /// The colour the part's AR file is written in (`Project.arTint`).
+    private var arTint: String? { project.arTint }
+    /// The AR file for the model and colour on the stage now, if one was written (`PreparedAR`, as Share asks it).
+    private var arURL: URL? { Self.arUSDZ(arFile, store: store, project: project, modelURL: modelURL) }
+
+    /// The part's mesh file on the stage: its own mesh when it has one (an earlier design's, a multi-part design's merged
+    /// mesh), else the page's model.
+    static func stageModel(store: ProjectsStore, project: Project, modelURL: URL?) -> URL? {
+        if let own = project.partMesh, own != "model.stl" { return store.models.file(project, own) }
         return modelURL
+    }
+
+    /// The USDZ the AR chip and the page's Share offer: only one written from the model and colour on the stage now.
+    static func arUSDZ(_ file: PreparedAR?, store: ProjectsStore, project: Project, modelURL: URL?) -> URL? {
+        file?.usdz(for: stageModel(store: store, project: project, modelURL: modelURL), tint: project.arTint)
     }
     private var gallery: ProjectGallery { ProjectGallery(project: project, scanOnThisDevice: localScan != nil) }
     private var entry: ProjectGallery.Entry? {
@@ -57,11 +72,11 @@ struct ProjectGalleryView: View {
         .onChange(of: scenePhase) { _, phase in if phase != .active { cancelAR() } }
         .onChange(of: selected) { cancelAR(); arFailed = false }
         .onDisappear { cancelAR() }
-        .task(id: "\(project.id)#\(project.scan ?? "")#\(Int64(project.mediaVersion))#\(String(describing: project.scanFiles))#\(scenePhase)") {
+        .task(id: "\(project.id)#\(ownMesh ?? "")#\(project.scan ?? "")#\(Int64(project.mediaVersion))#\(String(describing: project.scanFiles))#\(scenePhase)") {
             // The store fetches them, so leaving the page never stops a download (Nov 10). Coming back to the page or to
             // the app starts again one that failed meanwhile (a suspended app's transfer drops).
             guard scenePhase == .active else { return }
-            if let versionModel { store.models.want(project, versionModel) }
+            if let ownMesh { store.models.want(project, ownMesh) }
             if case .file(let path) = scanModel { store.models.want(project, path) }
             if gallery.entries.contains(where: { $0.kind == .together }), case .file(let path) = togetherModel { store.models.want(project, path) }
         }
@@ -111,7 +126,7 @@ struct ProjectGalleryView: View {
         case .model(let drawn) where entry.kind == .part || drawn == "model.stl": (drawn, nil)
         case .model: (nil, scanURL == nil ? scanModel : nil)
         // Together needs both: the scan, and the part (review S4: with the scan here and the part missing it said nothing).
-        case .assembly: togetherScanURL == nil ? (nil, togetherModel) : (effectiveModelURL == nil ? "model.stl" : nil, nil)
+        case .assembly: togetherScanURL == nil ? (nil, togetherModel) : (effectiveModelURL == nil ? ownMesh ?? "model.stl" : nil, nil)
         case .picture: (nil, nil)
         }
         let fetch: ModelFiles.Fetch? = if let path { effectiveModelURL == nil ? store.models.fetch(project, path) : nil }
@@ -231,7 +246,8 @@ struct ProjectGalleryView: View {
     // MARK: AR: one control, for what the stage shows
 
     /// What the stage's AR chip can do for an entry (Nov 11: one AR control, not a chip and a second button). A part is
-    /// prepared on tap; the scan is Object Capture's own USDZ. Together, a plate and a multi-colour 3MF's picture have no
+    /// prepared on tap from the mesh its stage turns (`Entry.arMesh`, #769: an earlier design's own file, a multi-part
+    /// design's merged mesh); the scan is Object Capture's own USDZ. Together, a plate and a designer's 3MF picture have no
     /// AR file the phone can make, so they offer none. While the model comes the chip is there and says so; when it didn't
     /// come, the chip waits, dimmed, for the stage's Try Again (#606, David: "ar is gone").
     enum ARChip: Equatable { case show(URL), prepare(URL), preparing, failed(URL), failedScan(URL), needsMac, coming, didntCome(String) }
@@ -248,12 +264,12 @@ struct ProjectGalleryView: View {
     private func arChip(_ entry: ProjectGallery.Entry) -> ARChip? {
         switch entry.kind {
         case .part:
-            guard case .model(let path) = entry.drawing, path == "model.stl" else { return nil }
+            guard let path = entry.arMesh else { return nil }
             if arPreparing { return .preparing }
             if let arURL { return .show(arURL) }
             if let effectiveModelURL { return arFailed ? .failed(effectiveModelURL) : .prepare(effectiveModelURL) }
             // While the model a design draws from is coming, the chip says so (#606); an earlier design's is its own file (#616).
-            return store.away ? .needsMac : waiting(for: versionModel ?? path)
+            return store.away ? .needsMac : waiting(for: ownMesh ?? path)
         case .scan:
             if let scanURL, scanURL.pathExtension.lowercased() == "usdz" { return arFailed ? .failedScan(scanURL) : .show(scanURL) }
             if case .file = scanModel, store.away { return .needsMac }
@@ -271,7 +287,7 @@ struct ProjectGalleryView: View {
                 // A file that went away meanwhile (the cache was cleared) is made again rather than showing nothing.
                 if !ARModel.show(url) {
                     arFailed = true
-                    if let effectiveModelURL, url == arURL { arURL = nil; prepareAR(effectiveModelURL) }
+                    if let effectiveModelURL, url == arURL { arFile = nil; prepareAR(effectiveModelURL) }
                 }
             } label: { Label("AR", systemImage: "arkit") }
                 .stageButton().accessibilityValue("ready")
@@ -309,14 +325,14 @@ struct ProjectGalleryView: View {
     private func prepareAR(_ stl: URL) {
         arTask?.cancel()
         arPreparing = true; arFailed = false
-        let tint = project.spoolColour, scene = String(describing: scenePhase)
+        let tint = arTint, scene = String(describing: scenePhase)
         arTask = Task {
             let prepared = await MediaTrace.$context.withValue(MediaTrace.Context(file: stl, scene: scene)) {
                 await ARModel.usdz(fromSTL: stl, tint: tint)
             }
             guard !Task.isCancelled else { return }
             arPreparing = false
-            if let prepared, ARModel.show(prepared) { arURL = prepared } else { arFailed = true }
+            if let prepared, ARModel.show(prepared) { arFile = PreparedAR(from: stl, tint: tint, usdz: prepared) } else { arFailed = true }
         }
     }
 

@@ -206,3 +206,31 @@ class StlParserTests {
         assertNull(StlParser.parse(bad))
     }
 }
+
+class HostReadinessTests {
+    private fun health(caps: Set<String>, checking: Set<String> = emptySet()) = CompanionClient.Health(caps, null, checking)
+
+    /** #751 review: a companion that has just started says it is still checking; the phone waits, never "Update Counterpart". */
+    @Test fun aHostStillCheckingIsWaitedForNotCalledOutOfDate() = kotlinx.coroutines.runBlocking {
+        val answers = ArrayDeque(listOf(
+            health(emptySet(), setOf(ReconstructionAnswers.CAPABILITY)),
+            health(emptySet(), setOf(ReconstructionAnswers.CAPABILITY)),
+            health(setOf(ReconstructionAnswers.CAPABILITY))))
+        var waited = 0L
+        assertNull(ReconstructionAnswers.hostRefusal({ answers.removeFirst() }, { waited += it }))
+        assertEquals(4_000L, waited)
+    }
+
+    @Test fun anOlderHostStillGetsTheUpdateLineAtOnce() = kotlinx.coroutines.runBlocking {
+        var waited = 0L
+        assertEquals("update-host", ReconstructionAnswers.hostRefusal({ health(emptySet()) }, { waited += it })?.code)
+        assertEquals(0L, waited)
+    }
+
+    @Test fun aCheckThatNeverSettlesSaysTheComputerIsGettingReadyNotUpdate() = kotlinx.coroutines.runBlocking {
+        var waited = 0L
+        val refusal = ReconstructionAnswers.hostRefusal({ health(emptySet(), setOf(ReconstructionAnswers.CAPABILITY)) }, { waited += it }, limitMs = 6_000)
+        assertEquals("host-checking", refusal?.code)
+        assertEquals(6_000L, waited)
+    }
+}

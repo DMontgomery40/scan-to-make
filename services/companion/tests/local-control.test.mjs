@@ -306,3 +306,73 @@ test('status.get names the host platform for desktop clients, as an added field'
   assert.equal(hostPlatform('linux'), 'linux');
   assert.equal(hostPlatform('win32'), 'other');
 });
+
+// #751: after every Mac update the companion's first status.get was refused (`unavailable`) and a later one timed out
+// at 10 s, then it recovered by itself. Two causes, one per symptom: status.get listed paired devices as a store
+// write, whose lock is taken once or refused, while the Mac app's other first calls (devices.list,
+// liveActivity.tokens) listed them too; and it waited for the reconstruction tools' first check, which a new payload
+// can take longer than 10 s to answer.
+async function slowReadinessProbe(t, seconds) {
+  const {resetReconstructionReadiness} = await import('../dist/objects/reconstruct.js');
+  const root=await mkdtemp('/tmp/stmc-probe-');
+  const probe=join(root,'linux-reconstruct');
+  await writeFile(probe,`#!/bin/sh\nsleep ${seconds}\necho '{"ok":true,"versions":{"probe":"1"}}'\n`,{mode:0o755});
+  const saved={linux:process.env.SCAN_TO_MAKE_LINUX_RECONSTRUCT,mac:process.env.SCAN_TO_MAKE_MAC_RECONSTRUCT};
+  process.env.SCAN_TO_MAKE_LINUX_RECONSTRUCT=probe;process.env.SCAN_TO_MAKE_MAC_RECONSTRUCT=probe;
+  resetReconstructionReadiness();
+  t.after(async()=>{
+    for(const [key,value] of [['SCAN_TO_MAKE_LINUX_RECONSTRUCT',saved.linux],['SCAN_TO_MAKE_MAC_RECONSTRUCT',saved.mac]]){if(value===undefined)delete process.env[key];else process.env[key]=value;}
+    resetReconstructionReadiness();await rm(root,{recursive:true,force:true});
+  });
+}
+const objectsWithoutPrinters={printSettingsAvailable:false,printCopiesAvailable:false};
+
+test('a cold status.get answers at once while the reconstruction check runs, says it is checking, then reports how it settled (#751)',async t=>{
+  await slowReadinessProbe(t,1.5); // longer than this fixture's 1 s request deadline
+  const f=await fixture(t,{objects:objectsWithoutPrinters});
+  const started=Date.now();
+  const first=await f.call('status.get');
+  assert.ok(first.result,`refused: ${JSON.stringify(first.error)}`);
+  assert.ok(Date.now()-started<500,`took ${Date.now()-started} ms`);
+  assert.equal(first.result.capabilities.reconstructionReviewV1,false);
+  assert.deepEqual(first.result.checking,['reconstructionReviewV1']);
+  let later;
+  for(const until=Date.now()+8000;Date.now()<until;await new Promise(r=>setTimeout(r,100))){
+    later=await f.call('status.get');
+    if(!later.result?.checking)break;
+  }
+  assert.ok(later.result,`refused: ${JSON.stringify(later.error)}`);
+  assert.equal(later.result.checking,undefined);
+  assert.equal(later.result.capabilities.reconstructionReviewV1,true);
+});
+
+test('the calls the Mac app makes first after an update all answer at once when they arrive together (#751)',async t=>{
+  await slowReadinessProbe(t,1.5);
+  const f=await fixture(t,{objects:objectsWithoutPrinters,liveActivityTokens:{list:async()=>({tokens:[]}),removeDevice:async()=>{}}});
+  const invitation=(await f.call('pairing.create')).result;
+  await f.auth.exchange('owner@example.test',{code:invitation.code,deviceName:'Phone'});
+  const methods=[...Array(4).fill('status.get'),...Array(4).fill('devices.list'),...Array(4).fill('liveActivity.tokens'),'jobs.list','nearby.list','confirmations.list'];
+  const started=Date.now();
+  const replies=await Promise.all(methods.map(method=>f.call(method)));
+  assert.ok(Date.now()-started<1000,`took ${Date.now()-started} ms`);
+  replies.forEach((reply,index)=>assert.ok(reply.result,`${methods[index]} refused: ${JSON.stringify(reply.error)}`));
+  for(const reply of replies.slice(0,4))assert.equal(reply.result.pairedDeviceCount,1);
+  for(const reply of replies.slice(4,8))assert.equal(reply.result.devices.length,1);
+});
+
+test('/healthz answers at once while the reconstruction check runs, and says it is checking (#751)',async t=>{
+  await slowReadinessProbe(t,1.5);
+  const {startCompanionServer}=await import('../dist/server.js');
+  const {request}=await import('node:http');
+  const server=await startCompanionServer({port:0,objects:{...objectsWithoutPrinters,close:async()=>{}}});
+  t.after(()=>server.close());
+  const started=Date.now();
+  const health=await new Promise((resolve,reject)=>{
+    const req=request(server.url+'/healthz',res=>{let body='';res.on('data',chunk=>body+=chunk);res.on('end',()=>resolve({status:res.statusCode,body:JSON.parse(body)}));});
+    req.setTimeout(5000,()=>req.destroy(Error('test timeout')));req.once('error',reject);req.end();
+  });
+  assert.ok(Date.now()-started<500,`took ${Date.now()-started} ms`);
+  assert.equal(health.status,200);
+  assert.equal(health.body.capabilities.reconstructionReviewV1,false);
+  assert.deepEqual(health.body.checking,['reconstructionReviewV1']);
+});

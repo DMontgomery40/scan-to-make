@@ -24,3 +24,11 @@ test('a design history is refused when a print names no design, ids repeat, or d
   // A published file's prints have no design: its plates carry their history.
   assert.equal(ProjectDesignsSchema.safeParse({versions: [], prints: [{id: 'p', bundleId: 'b', startedAtMs: 2}]}).success, true);
 });
+
+// #769 (review of #770): a sealed multi-part design lists the merged mesh beside its 3MF only while it is there.
+test('a sealed design may list its merged mesh, inside the project only', () => {
+  const version = mergedMesh => ({id: 'a', sealedAtMs: 1, modelSha256: 'a'.repeat(64), result: {model: 'versions/a/touched.3mf', renders: [], ...(mergedMesh ? {mergedMesh} : {})}});
+  assert.equal(ProjectDesignsSchema.parse({versions: [version('versions/a/model.stl')]}).versions[0].result.mergedMesh, 'versions/a/model.stl');
+  assert.equal(ProjectDesignsSchema.parse({versions: [version()]}).versions[0].result.mergedMesh, undefined, 'an older Mac says nothing');
+  assert.equal(ProjectDesignsSchema.safeParse({versions: [version('../elsewhere.stl')]}).success, false);
+});

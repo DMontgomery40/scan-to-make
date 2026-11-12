@@ -42,7 +42,7 @@ import {ObjectService} from './objects/service.js';
 import {generateTitle} from './objects/title.js';
 import {PassTimings} from './touchup/stages.js';
 import {printerStlSize} from './objects/stl-size.js';
-import {findMacReconstruct,macScanToStl} from './objects/reconstruct.js';
+import {findMacReconstruct,macScanToStl,reconstructionReadinessNow} from './objects/reconstruct.js';
 import {macDrawPicture} from './objects/pictures.js';
 import {runTouchup, acquireBlenderLock, CODE_LOCK_PATH} from './touchup/touchup.js';
 import {CadSettings, cadCalls} from './cad-settings.js';
@@ -311,6 +311,9 @@ const displayName = macDisplayName();
 // PRD §5.10: a phone on the owner's Apple Account enrols with a token the Mac app publishes to their private CloudKit.
 // CloudKit enrolment needs the signed Mac app to publish the token; no other host offers it.
 const icloud = remoteAuth?.transport === 'lan' && process.platform === 'darwin' ? new IcloudEnrolment(join(remoteAuth.directory, 'mac-id')) : undefined;
+// Start the reconstruction tools' readiness check now, not on the first status: a new payload's first check can take
+// longer than a control request's 10 s (#751). Status and /healthz say it is checking until it settles.
+if (objects) reconstructionReadinessNow();
 const server = await startCompanionServer({
   lanTls,
   ...(displayName ? { name: displayName } : {}),

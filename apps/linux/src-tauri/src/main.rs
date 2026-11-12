@@ -187,6 +187,14 @@ fn referenced(o: &Value, path: &str) -> bool {
     {
         return true;
     }
+    // A multi-part design's merged mesh beside its 3MF (#769): what Explore in 3D turns. A designer's published 3MF has none.
+    if o["kind"].as_str() != Some("published") {
+        if let Some(model) = o.pointer("/current/model").and_then(Value::as_str) {
+            if model.to_lowercase().ends_with(".3mf") && model.starts_with("current/") && path == "current/model.stl" {
+                return true;
+            }
+        }
+    }
     for pointer in ["/current/renders", "/photos", "/requestPhotos"] {
         if let Some(list) = o.pointer(pointer).and_then(Value::as_array) {
             if list.iter().any(|v| {
@@ -216,6 +224,16 @@ fn referenced(o: &Value, path: &str) -> bool {
                 .chain(version["pictures"].as_object().into_iter().flat_map(|m| m.values()));
             if listed.into_iter().any(|v| v.as_str() == Some(path)) {
                 return true;
+            }
+            // The merged mesh sealed beside a multi-part design's 3MF (#769).
+            if let Some(model) = version["result"]["model"].as_str() {
+                if model.to_lowercase().ends_with(".3mf") {
+                    if let Some((folder, _)) = model.rsplit_once('/') {
+                        if path == format!("{folder}/model.stl") {
+                            return true;
+                        }
+                    }
+                }
             }
         }
     }
@@ -763,6 +781,24 @@ mod tests {
             assert!(!referenced(&o, p));
         }
     }
+    #[test]
+    fn a_multi_part_designs_merged_mesh_is_readable_and_a_published_3mf_has_none() {
+        // #769: David's Pink snap-lid box: current/model.3mf, its merged current/model.stl, a sealed touched.3mf beside its model.stl.
+        let id = "64cb716c-5fea-89b0-a10b-d163ebfca3bc";
+        let o = json!({"kind":"fit","current":{"model":"current/model.3mf","renders":[]},
+            "versions":[{"id":id,"result":{"model":format!("versions/{id}/touched.3mf"),"renders":[]}}]});
+        assert!(referenced(&o, "current/model.stl"));
+        assert!(referenced(&o, &format!("versions/{id}/model.stl")));
+        assert!(!referenced(&o, "current/secret.stl"));
+        assert!(!referenced(&o, &format!("versions/{id}/other.stl")));
+        let published = json!({"kind":"published","current":{"model":"original/x.3mf","renders":[]}});
+        assert!(!referenced(&published, "current/model.stl"));
+        let stl = json!({"kind":"fit","current":{"model":"current/model.stl","renders":[]},
+            "versions":[{"id":id,"result":{"model":format!("versions/{id}/touched.stl"),"renders":[]}}]});
+        assert!(referenced(&stl, &format!("versions/{id}/touched.stl")));
+        assert!(!referenced(&stl, &format!("versions/{id}/model.stl")), "no merged mesh beside an STL design");
+    }
+
     #[test]
     fn a_sealed_designs_listed_files_are_readable_and_nothing_else_under_versions() {
         let id = "10000000-0000-4000-8000-000000000001";
