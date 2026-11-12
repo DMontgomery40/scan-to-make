@@ -58,7 +58,8 @@ public enum NotificationActions {
         case "pass.ready": .ready
         case "pass.ask": .ask
         case "print.confirm": .confirm
-        case "print.started", "print.first-layer", "print.milestone": .progress
+        // #630 print.check: the camera shows nothing coming out of the nozzle. Watch it, and Pause if you want: never automatic.
+        case "print.started", "print.first-layer", "print.milestone", "print.check": .progress
         case "print.paused": .paused
         case "print.done": .done
         case "print.cancelled", "print.sent": .ended
@@ -156,7 +157,7 @@ public enum NotificationActions {
         case (.needsChanges, "print.done"): return .needsChanges(projectId, note: words.map { afterPrinting + $0 })
         case (.askForChanges, "pass.ready"): return words.map { .correct(projectId, note: $0) }
         case (.bestGuess, "pass.ask"): return .bestGuess(projectId)
-        case (.pause, "print.first-layer"), (.pause, "print.milestone"), (.pause, "print.started"): return .control(projectId, .pause)
+        case (.pause, "print.first-layer"), (.pause, "print.milestone"), (.pause, "print.started"), (.pause, "print.check"): return .control(projectId, .pause)
         case (.resume, "print.paused"): return .control(projectId, .resume)
         default: return nil
         }

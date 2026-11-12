@@ -48,6 +48,8 @@ object NotificationActions {
         "pass.ask" -> listOf(Action.Camera, Action.BestGuess)
         "print.confirm" -> listOf(Action.OpenProject)
         "print.started", "print.first-layer", "print.milestone" -> listOf(Action.OpenPrint, Action.Pause)
+        // #630: the camera shows nothing coming out of the nozzle. The person looks, and pauses if they want to: never automatic.
+        "print.check" -> listOf(Action.OpenPrint, Action.Pause)
         "print.paused" -> listOf(Action.OpenPrint, Action.Resume)
         "print.done" -> listOf(Action.ItWorks, Action.NeedsChanges, Action.OpenProject)
         "print.failed", "print.not-started", "pass.failed" -> listOf(Action.TryAgain, Action.OpenProject)
@@ -102,7 +104,7 @@ object NotificationActions {
             a == Action.NeedsChanges && type == "print.done" -> Command.NeedsChanges(projectId, words?.let { AFTER_PRINTING + it })
             a == Action.AskForChanges && type == "pass.ready" -> words?.let { Command.Correct(projectId, it) }
             a == Action.BestGuess && type == "pass.ask" -> Command.BestGuess(projectId)
-            a == Action.Pause && type in setOf("print.started", "print.first-layer", "print.milestone") -> Command.Control(projectId, CompanionClient.PrintControl.Pause)
+            a == Action.Pause && type in setOf("print.started", "print.first-layer", "print.milestone", "print.check") -> Command.Control(projectId, CompanionClient.PrintControl.Pause)
             a == Action.Resume && type == "print.paused" -> Command.Control(projectId, CompanionClient.PrintControl.Resume)
             else -> null
         }

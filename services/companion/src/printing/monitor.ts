@@ -1,5 +1,5 @@
 import {randomUUID} from 'node:crypto';
-import type {PrintReport} from '@scan-to-make/printer-handoff';
+import type {PhysicalAssessment, PhysicalEvidence, PrintReport} from '@scan-to-make/printer-handoff';
 import type {CounterpartEventType, PrintLive, PrintMonitor} from '@scan-to-make/contracts/counterpart';
 import {printPreparing} from '../events/words.js';
 
@@ -15,6 +15,9 @@ export const MONITOR = {
   /** A gap longer than this between two reports means the Mac slept or the companion was down: no back-fill. */
   backfillGapMs: 60_000,
   frameCapMs: 10_000,
+  /** One camera check (#630) never runs longer than this; it runs beside the reads, never holding one back. */
+  checkCapMs: 150_000,
+  checkTries: 3,
   /** With no report at all for this long, the monitor stops and says contact was lost. */
   giveUpAfterMs: 12 * 60 * 60_000,
 } as const;
@@ -70,6 +73,27 @@ export interface MonitorTarget {
   estimate?: {seconds?: number; grams?: number};
 }
 
+/** What a camera check (#630) saw in one saved frame, after it was submitted to the MCP. */
+export interface PhysicalCheck {
+  frameId: string;
+  /** The MCP saved this frame as the first layer's. */
+  firstLayer: boolean;
+  deposition: 'absent' | 'present' | 'unknown';
+  /** The frame that was judged, to attach to the event it causes. */
+  jpeg?: Buffer;
+  /** The MCP's verdict after the observation, when it gave one. */
+  physical?: PhysicalEvidence;
+}
+
+interface RunningCheck {frameId: string; controller: AbortController; outcome?: PhysicalCheck; settled: boolean; done: Promise<void>}
+
+/**
+ * What a camera check came to: an observation submitted (`PhysicalCheck`), `no-worker` (no Claude Code login chosen:
+ * nothing was tried, so the frame stays eligible on every read, for the moment one is chosen), or undefined (nothing
+ * could be judged or submitted: no record or assess tool, a stale or changed frame; a bounded number of tries).
+ */
+export type CheckResult = PhysicalCheck | 'no-worker' | undefined;
+
 export interface MonitorDeps {
   clock?: MonitorClock;
   /** One report through the destination's held session. */
@@ -83,6 +107,13 @@ export interface MonitorDeps {
   emit(draft: EventDraft): Promise<void>;
   /** The milestone percentages currently chosen (companion setting). */
   milestones(): readonly number[];
+  /**
+   * #630: judge the saved frame the MCP asked about (`progress.physical.assessment`) with the vision worker and submit
+   * the observation. Undefined when it couldn't (no worker, no frame, nothing certain enough to submit).
+   */
+  check?(assessment: PhysicalAssessment, signal: AbortSignal): Promise<CheckResult>;
+  /** Saves a judged camera frame as event `eventId`'s frame; resolves to its relative path. */
+  keepFrame?(eventId: string, jpeg: Buffer): Promise<string | undefined>;
   /** Tests only: the frame wait cap (PRD: 10 s). */
   frameCapMs?: number;
   /** A print dispatched without an identity was recognised by its file name: persist the job name. */
@@ -176,6 +207,12 @@ export class PrintMonitorRunner {
   #lastStatus?: {at: number; progress?: number; state: string; layer?: number; stage?: string; problems: string};
   #lastState?: string;
   #live?: PrintLive;
+  /** The camera check running now (one at a time), and the frames already judged or tried (one try each). */
+  #check?: RunningCheck;
+  #checked = new Set<string>();
+  /** Tries per frame whose check failed on the way (the session reconnecting, a timeout): a few more on later reads. */
+  #tries = new Map<string, number>();
+  #evidence?: {frameId: string; jpeg: Buffer};
 
   constructor(target: MonitorTarget, deps: MonitorDeps, state?: PrintMonitor) {
     this.target = target;
@@ -195,10 +232,15 @@ export class PrintMonitorRunner {
       ...(report ? {data: eventData(report)} : {}), ...extra};
   }
 
-  async #emit(type: CounterpartEventType, report: PrintReport | undefined, options: {frame?: boolean; signal: AbortSignal; data?: EventDraft['data']}) {
-    const draft = this.#draft(type, report);
+  async #emit(type: CounterpartEventType, report: PrintReport | undefined, options: {frame?: boolean; jpeg?: Buffer; signal: AbortSignal; data?: EventDraft['data']; detail?: EventDraft['detail']}) {
+    const draft = this.#draft(type, report, options.detail ? {detail: options.detail} : {});
     if (options.data) draft.data = {...draft.data, ...options.data};
-    if (options.frame && this.#deps.frame) {
+    // The judged frame itself, not a newer one from a different moment.
+    if (options.jpeg && this.#deps.keepFrame) {
+      const kept = await this.#deps.keepFrame(draft.id, options.jpeg).catch(() => undefined);
+      if (kept) draft.frame = kept;
+    }
+    if (options.frame && !draft.frame && this.#deps.frame) {
       // A frame never holds an event back more than 10 s: a slow camera means no frame.
       const controller = new AbortController();
       const abort = () => controller.abort();
@@ -217,6 +259,7 @@ export class PrintMonitorRunner {
 
   async #finish(end: MonitorEnd, report: PrintReport | undefined, signal: AbortSignal) {
     const now = this.#clock.now();
+    this.#check?.controller.abort();
     // A failure's own report is the record: its problems are what stopped the print (an idle report after the
     // job is gone carries the code that stopped it), not the last report while it ran.
     if (report && end === 'failed') this.#observe(report);
@@ -229,7 +272,10 @@ export class PrintMonitorRunner {
     await this.#save();
     await this.#deps.end(end, report, this.state);
     const event = events[end];
-    if (event) await this.#emit(event[0], report, {frame: event[1], signal});
+    // #630: firmware "finished" after the MCP's camera evidence said nothing was coming out: the done event says so,
+    // in the MCP's own words (its first problem; the MCP keeps that verdict and its problem after FINISH).
+    const check = end === 'done' && this.#state.checkSent ? this.#state.checkMessage : undefined;
+    if (event) await this.#emit(event[0], report, {frame: event[1], signal, ...(check ? {detail: {reason: check}} : {})});
   }
 
   #interval(): number {
@@ -299,6 +345,7 @@ export class PrintMonitorRunner {
         await this.#deps.adopted?.(report.job.name);
       }
       this.#state = {...this.#state, phase: 'watching'};
+      report = await this.#physical(report, signal);
       this.#observe(report);
       await this.#save();
       await this.#emit('print.started', report, {signal, data: {
@@ -322,6 +369,7 @@ export class PrintMonitorRunner {
       if (recovered) await this.#save();
       return;
     }
+    report = await this.#physical(report, signal);
     this.#observe(report);
     const previous = this.#lastState;
     this.#lastState = report.state;
@@ -361,16 +409,10 @@ export class PrintMonitorRunner {
     // printer still shows while it prepares the next one).
     if (printPreparing(report.state, report.job)) return;
     if (report.state === 'finished' || report.state === 'failed' || report.state === 'cancelled') quiet = true;
-    const job = report.job;
-    if (!this.#state.firstLayerSent) {
-      const reached = job?.layer !== undefined && job.totalLayers !== undefined && job.totalLayers > 0 ? job.layer >= 2 : (job?.progress ?? 0) >= 5;
-      if (reached) {
-        this.#state = {...this.#state, firstLayerSent: true};
-        await this.#save();
-        if (!quiet) await this.#emit('print.first-layer', report, {frame: true, signal});
-      }
-    }
-    const progress = job?.progress;
+    // "First layer's down" is said only from the camera (#630, `#physical`): a layer counter isn't plastic on the plate.
+    // After a camera check found nothing coming out, a percentage isn't news either: it's recorded without a notification.
+    if (this.#state.checkSent) quiet = true;
+    const progress = report.job?.progress;
     if (progress === undefined) return;
     const crossed = this.#deps.milestones().filter(milestone => progress >= milestone && !this.#state.milestonesSent.includes(milestone)).sort((a, b) => a - b);
     if (!crossed.length) return;
@@ -379,6 +421,68 @@ export class PrintMonitorRunner {
     // Several at once (a fast jump): only the highest is news.
     if (!quiet) await this.#emit('print.milestone', report, {frame: true, signal, data: {progress: crossed.at(-1)!}});
   }
+
+  /**
+   * #630: the camera checks the MCP asks for. A check runs beside the reads (one at a time, capped); what it saw is
+   * acted on at the next read. "First layer's down" only when the judged first-layer frame shows plastic; when the
+   * MCP's verdict is that nothing is coming out, one time-sensitive `print.check` with the frame. Never a control.
+   */
+  async #physical(report: PrintReport, signal: AbortSignal): Promise<PrintReport> {
+    const check = this.#check;
+    if (check?.settled) {
+      this.#check = undefined;
+      const outcome = check.outcome;
+      if (outcome?.jpeg) this.#evidence = {frameId: outcome.frameId, jpeg: outcome.jpeg};
+      if (outcome?.firstLayer && outcome.deposition === 'present' && !this.#state.firstLayerSent && !this.#state.checkSent
+          && !printPreparing(report.state, report.job) && activeStates.has(report.state)) {
+        this.#state = {...this.#state, firstLayerSent: true};
+        await this.#save();
+        await this.#emit('print.first-layer', report, {jpeg: outcome.jpeg, frame: true, signal});
+      }
+    }
+    // Sent once, from a report that itself carries the MCP's verdict and its words (a read that crossed the submit
+    // waits for the next one). The words are kept, so the card and the done keep them if a later report drops them.
+    const words = report.problems[0]?.message;
+    if (report.physical?.status === 'suspect_no_extrusion' && words && !this.#state.checkSent) {
+      this.#state = {...this.#state, checkSent: true, checkMessage: words.slice(0, 500)};
+      await this.#save();
+      const named = report.physical.evidence;
+      const evidence = this.#evidence && (named.includes(this.#evidence.frameId) || !named.length) ? this.#evidence.jpeg : undefined;
+      await this.#emit('print.check', report, {jpeg: evidence, frame: true, signal});
+    }
+    const asked = report.physical?.assessment;
+    // After the check was sent nothing more is judged: a later observation can't take the MCP's verdict back.
+    if (!asked?.required || !this.#deps.check || this.#check || this.#state.checkSent || this.#checked.has(asked.frameId) || !activeStates.has(report.state)) return report;
+    this.#checked.add(asked.frameId);
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    signal.addEventListener('abort', abort, {once: true});
+    const timer = setTimeout(abort, MONITOR.checkCapMs);
+    const running: RunningCheck = {frameId: asked.frameId, controller, settled: false, done: Promise.resolve()};
+    // Only a submitted observation uses the frame up. The MCP asks for an unobserved first-layer frame before any later
+    // one, so a frame left unobserved would stop every later check: one that wasn't tried (no worker) stays eligible,
+    // and one that failed or couldn't be judged is tried again on a later read, up to three times.
+    const release = (counts: boolean) => {
+      if (signal.aborted) return;
+      if (counts) {
+        const tries = (this.#tries.get(asked.frameId) ?? 0) + 1;
+        this.#tries.set(asked.frameId, tries);
+        if (tries >= MONITOR.checkTries) return;
+      }
+      this.#checked.delete(asked.frameId);
+    };
+    running.done = this.#deps.check(structuredClone(asked), controller.signal).then(outcome => {
+      if (outcome === 'no-worker') return release(false);
+      if (!outcome) return release(true);
+      if (!controller.signal.aborted) running.outcome = outcome;
+    }, () => release(true))
+      .finally(() => { running.settled = true; clearTimeout(timer); signal.removeEventListener('abort', abort); });
+    this.#check = running;
+    return report;
+  }
+
+  /** Tests: resolves when the camera check now running has finished. */
+  async checked(): Promise<void> { await this.#check?.done; }
 
   async #unreachable(now: number, signal: AbortSignal) {
     if (this.#state.unreachableSince) return;

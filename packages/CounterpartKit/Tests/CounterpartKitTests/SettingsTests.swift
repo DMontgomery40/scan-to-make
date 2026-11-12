@@ -65,7 +65,10 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(try json(SettingsPatch.general("keepAwake", false)), #"{"general":{"keepAwake":false}}"#)
         XCTAssertEqual(try json(SettingsPatch.ai(kind: "codex-cli", expectedRevision: "r1")), #"{"ai":{"choice":{"kind":"codex-cli"},"expectedRevision":"r1"}}"#)
         XCTAssertEqual(SettingsSchema.aiKinds.filter(\.fromPhone).map(\.kind), ["none", "claude-code", "codex-cli"])
-        XCTAssertEqual(SettingsSchema.notificationTypes.count, 16)
+        XCTAssertEqual(SettingsSchema.notificationTypes.count, 17)
+        // #630: nothing coming out of the nozzle is on by default on the phone and the Mac.
+        XCTAssertTrue(SettingsSchema.defaultValue("print.check", mac: true))
+        XCTAssertTrue(SettingsSchema.defaultValue("print.check", mac: false))
         XCTAssertFalse(SettingsSchema.notificationTypes.contains { $0.id == "plate.blocked" })
     }
 

@@ -35,7 +35,7 @@ enum NotificationSwitch: String, CaseIterable, Identifiable {
         case .firstLayer: return ["print.first-layer"]
         case .paused: return ["print.paused"]
         case .done: return ["print.done"]
-        case .problem: return ["print.failed", "print.not-started", "pass.failed"]
+        case .problem: return ["print.failed", "print.not-started", "pass.failed", "print.check"]
         case .lost: return ["print.unreachable"]
         }
     }
@@ -79,7 +79,7 @@ enum MacNotificationTypes {
         ("pass.ready", "Ready to print"), ("pass.ask", "Needs a photo or an answer"), ("pass.failed", "Couldn't finish the model"),
         ("print.confirm", "Printer needs a yes"), ("print.started", "Print started"), ("print.first-layer", "First layer down"),
         ("print.milestone", "Progress updates"), ("print.paused", "Print paused"), ("print.done", "Print done"),
-        ("print.failed", "Print failed"), ("print.not-started", "Print didn't start"), ("print.cancelled", "Print stopped"),
+        ("print.failed", "Print failed"), ("print.check", "Nothing coming out of the nozzle"), ("print.not-started", "Print didn't start"), ("print.cancelled", "Print stopped"),
         ("print.unreachable", "Lost contact with the printer"), ("print.sent", "Sent to a printer Counterpart can't follow"),
         ("mcp.update.done", "Printer software updated"), ("mcp.update.failed", "Printer software update failed"),
     ]

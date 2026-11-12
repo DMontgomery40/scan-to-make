@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  PrinterSession, detectCapabilities, readPrintReport, readPrinterInfo, readiness, updateCommand,
+  PrinterSession, detectCapabilities, readPrintReport, readPrinterInfo, readiness, updateCommand, readPrintRecordFrames, submitPrintAssessment,
 } from '../dist/index.js';
 
 const at = new Date('2026-11-01T18:00:00.000Z');
@@ -90,6 +90,53 @@ test('reports come from counterpart_print_progress when present and are validate
   await assert.rejects(readPrintReport(old.session), error => error.code === 'progress-unavailable' && /^Update mcp-3D-printer-server in Settings → Printers/.test(error.detail));
   assert.deepEqual(old.calls, []);
   assert.equal(await readPrinterInfo(old.session), undefined);
+});
+
+test('#630: progress.physical is forwarded (verdict, evidence, the frame to judge); a physical field this version cannot read never costs the report', async () => {
+  const frameId = '5468cf4d-81d5-46ab-b8db-2e3342938a53';
+  const physical = {status: 'unknown', evidence: [], limitations: ['Firmware completion is separate from physical success.'],
+    assessment: {required: true, frameId, referenceFrameIds: [], layer: 1, expectedHeightMm: 0.2, expectedFootprintMm: [10.6, 71.3, 245.4, 180.6], instruction: 'Fetch this frame'}};
+  const progress = {contract: 'counterpart/1', observedAt: at.toISOString(), state: 'printing', job: {name: 'part', layer: 1, totalLayers: 265}, problems: [], physical};
+  const {session} = sessionWith([tool('counterpart_print_progress', {host: {}, type: {}})], {counterpart_print_progress: json(progress)});
+  const report = await readPrintReport(session);
+  assert.deepEqual(report.physical, {status: 'unknown', evidence: [], assessment: {required: true, frameId, referenceFrameIds: [], layer: 1, expectedHeightMm: 0.2, expectedFootprintMm: [10.6, 71.3, 245.4, 180.6]}});
+  const newer = sessionWith([tool('counterpart_print_progress')], {counterpart_print_progress: json({...progress, physical: {status: 'suspect_something_new', evidence: [frameId], assessment: {frameId: 'not-a-frame'}}})});
+  const kept = await readPrintReport(newer.session);
+  assert.deepEqual([kept.physical.status, kept.physical.evidence, kept.physical.assessment], ['suspect_something_new', [frameId], undefined], 'an unreadable assessment is dropped, the verdict kept');
+  const broken = sessionWith([tool('counterpart_print_progress')], {counterpart_print_progress: json({...progress, physical: 'yes'})});
+  const report2 = await readPrintReport(broken.session);
+  assert.equal(report2.physical, undefined);
+  assert.equal(report2.state, 'printing');
+});
+
+test('#630: counterpart_print_record images are bound to their frames, and counterpart_print_assess gets the exact hashes and the route', async () => {
+  const jobId = '1b2c3d4e-0000-4000-8000-000000000000', frameId = '5468cf4d-81d5-46ab-b8db-2e3342938a53', sha = 'a'.repeat(64), artifact = 'b'.repeat(64);
+  const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]);
+  const record = {contract: 'counterpart/1', status: 'recorded', record: {id: jobId, dispatch: {sha256: artifact}, frames: [
+    {id: frameId, role: 'first_layer', layer: 1, status: 'captured', sha256: sha, imageContentIndex: 1, expectedHeightMm: 0.2},
+    {id: '00000000-0000-4000-8000-000000000001', role: 'periodic', layer: 11, status: 'captured', sha256: sha}]}, physical: {status: 'unknown', evidence: [], limitations: []}};
+  const assessed = {contract: 'counterpart/1', status: 'recorded', physical: {status: 'suspect_no_extrusion', evidence: [frameId], limitations: []}};
+  const {session, calls} = sessionWith([
+    tool('counterpart_print_record', {frame_format: {}, frame_ids: {}, job_id: {}, host: {}, type: {}, port: {}}),
+    tool('counterpart_print_assess', {job_id: {}, artifact_sha256: {}, frame_id: {}, image_sha256: {}, visibility: {}, footprint_visible: {}, deposition: {}, attempted: {}, host: {}, type: {}}),
+  ], {
+    counterpart_print_record: {content: [{type: 'text', text: JSON.stringify(record)}, {type: 'image', data: jpeg.toString('base64'), mimeType: 'image/jpeg'}], structuredContent: record},
+    counterpart_print_assess: {content: [{type: 'text', text: JSON.stringify(assessed)}], structuredContent: assessed},
+  });
+  const frames = await readPrintRecordFrames(session, [frameId]);
+  assert.deepEqual(calls[0], {name: 'counterpart_print_record', args: {host: 'octopi.local', type: 'octoprint', frame_format: 'images', frame_ids: [frameId]}});
+  assert.equal(frames.jobId, jobId);
+  assert.equal(frames.artifactSha256, artifact);
+  assert.equal(frames.frames.length, 1, 'only the frames asked for');
+  assert.deepEqual(frames.frames[0].jpeg, jpeg);
+  const physical = await submitPrintAssessment(session, {jobId, artifactSha256: artifact, frameId, imageSha256: sha, visibility: 'clear', footprintVisible: true, deposition: 'absent', attempted: true});
+  assert.deepEqual(calls[1], {name: 'counterpart_print_assess', args: {host: 'octopi.local', type: 'octoprint', job_id: jobId, artifact_sha256: artifact, frame_id: frameId,
+    image_sha256: sha, visibility: 'clear', footprint_visible: true, deposition: 'absent', attempted: true}});
+  assert.equal(physical.status, 'suspect_no_extrusion');
+  const old = sessionWith([tool('counterpart_print_progress')], {});
+  assert.equal(await readPrintRecordFrames(old.session, [frameId]), undefined);
+  assert.equal(await submitPrintAssessment(old.session, {jobId, artifactSha256: artifact, frameId, imageSha256: sha, visibility: 'clear', footprintVisible: true, deposition: 'absent', attempted: true}), undefined);
+  assert.deepEqual(old.calls, []);
 });
 
 test('readiness groups printer states for the printer cards', () => {

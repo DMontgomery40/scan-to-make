@@ -95,7 +95,18 @@ export const PRINT_LOG: Record<string, string> = {
   'print.not-started': "The printer didn't start it.",
   'print.unreachable': 'Lost contact with the printer. Still trying.',
   'print.sent': "Sent. Counterpart can't follow this print.",
+  'print.check': 'Check the print.',
 };
+
+/**
+ * The print's log line for an event. #630: `print.check` and a "done" after it are the printer MCP's own words (its
+ * first problem, given as `reason` for the done); Counterpart rewrites none of them.
+ */
+export function printLogLine(type: string, data?: CounterpartEvent['data'], reason?: string): string | undefined {
+  if (type === 'print.check') return data?.problems?.[0]?.message ?? PRINT_LOG[type];
+  if (type === 'print.done' && reason) return `The printer says it's done. ${reason}`.slice(0, 500);
+  return PRINT_LOG[type];
+}
 
 // ---------------------------------------------------------------------------
 // Event words (PRD §9.1; docs/protocols/events.md "Types, words and levels")
@@ -118,7 +129,7 @@ export const NOTIFY: Record<CounterpartEventType, NotifyLevel> = {
   'print.preparing': 'none', 'print.confirm': 'timeSensitive', 'print.started': 'passive',
   'print.status': 'none', 'print.first-layer': 'passive', 'print.milestone': 'active', 'print.paused': 'timeSensitive',
   'print.resumed': 'none', 'print.done': 'active', 'print.failed': 'timeSensitive', 'print.cancelled': 'passive',
-  'print.not-started': 'timeSensitive', 'print.unreachable': 'passive', 'print.sent': 'passive',
+  'print.not-started': 'timeSensitive', 'print.unreachable': 'passive', 'print.sent': 'passive', 'print.check': 'timeSensitive',
   'project.updated': 'none', 'project.deleted': 'none', 'settings.changed': 'none',
   'mcp.update.started': 'none', 'mcp.update.waiting': 'none', 'mcp.update.done': 'passive', 'mcp.update.failed': 'active',
 };
@@ -164,7 +175,11 @@ export function eventWords(type: CounterpartEventType, data: CounterpartEvent['d
     case 'print.milestone': title = milestoneTitle(t, data?.progress); body = joined(remaining ? `${remaining} left` : undefined, layers, printer); break;
     case 'print.paused': title = `${printer} paused ${t}`; body = problem ?? 'Open Counterpart to resume.'; break;
     case 'print.resumed': title = t; body = `Printing again on ${printer}`; break;
-    case 'print.done': title = `${t} is done`; body = 'Take it off the plate.'; break;
+    // A firmware "finished" isn't a part on the plate (#630): after a print.check, `reason` is the printer MCP's own words.
+    case 'print.done': if (context.reason) { title = `${printer} says ${t} is done`; body = context.reason; }
+      else { title = `${t} is done`; body = 'Take it off the plate.'; } break;
+    // #630: the MCP's camera verdict (physical.status), in the MCP's own words. Never a control: the person looks.
+    case 'print.check': title = `Check ${t} on ${printer}`; body = problem ?? 'Check the print.'; break;
     case 'print.failed': title = `${printer} stopped ${t}`; body = printerStopped(data?.problems?.[0]); break;
     case 'print.cancelled': title = `${t} was cancelled`; body = 'Nothing more will print.'; break;
     // `reason`: the printer service refused it before anything reached the printer, in its own words.
@@ -198,8 +213,8 @@ export interface StatusSource extends TitleSource {
   failure?: string;
   passes?: {stages?: {words: string; endedAtMs?: number}[]; estimate?: {remainingSec: number}; endedAtMs?: number}[];
   print?: {destination?: {name: string}; dispatchedAt?: string; sentVia?: string;
-    live?: {state: string; job?: {progress?: number; remainingSec?: number; layer?: number; stage?: string}};
-    monitor?: {phase: string; endedAt?: string}};
+    live?: {state: string; job?: {progress?: number; remainingSec?: number; layer?: number; stage?: string}; problems?: readonly {code: string; message: string}[]};
+    monitor?: {phase: string; endedAt?: string; checkSent?: boolean; checkMessage?: string}};
 }
 
 const formatDate = (iso: string) => new Intl.DateTimeFormat('en-US', {month: 'short', day: 'numeric'}).format(new Date(iso));
@@ -247,12 +262,18 @@ export function objectStatus(object: StatusSource, updatedAtMs?: number): Object
       if (!object.print?.dispatchedAt || !watching || !live) return {phase: 'preparing', text: 'Getting the print ready', symbol: 'gearshape', tint: 'accent'};
       // The printer has the job but is still heating, cleaning or levelling: "Printing · 3%" would be a lie.
       if (printPreparing(live.state, live.job)) return {phase: 'preparing', text: joined('Getting ready', live.job?.stage).slice(0, 300), symbol: 'gearshape', tint: 'accent'};
+      // #630: after a print.check every layout's line is the printer MCP's own words for it, kept when it was sent.
+      const check = object.print?.monitor?.checkSent ? object.print.monitor.checkMessage : undefined;
+      if (check) return {phase: 'printing', text: check.slice(0, 300), ...(rowDetail(check) ? {detail: rowDetail(check)} : {}), symbol: 'exclamationmark.triangle', tint: 'orange'};
       const progress = live.job?.progress !== undefined ? `${Math.round(live.job.progress)}%` : undefined;
       const left = live.job?.remainingSec !== undefined ? `${duration(live.job.remainingSec)} left` : undefined;
       const paused = live.state === 'paused';
       return {phase: 'printing', text: joined(`${paused ? 'Paused' : 'Printing'} on ${printer}`, progress, paused ? undefined : left).slice(0, 300), symbol: 'printer.fill', tint: 'green'};
     }
     case 'printed': {
+      // #630: the printer said it finished after a print.check: the card keeps the MCP's own words.
+      const check = object.print?.monitor?.checkSent ? object.print.monitor.checkMessage : undefined;
+      if (check) { const text = `The printer says it's done. ${check}`.slice(0, 300); return {phase: 'printed', text, ...(rowDetail(text) ? {detail: rowDetail(text)} : {}), symbol: 'exclamationmark.triangle', tint: 'orange'}; }
       const at = object.print?.monitor?.endedAt ?? object.print?.dispatchedAt ?? (updatedAtMs ? new Date(updatedAtMs).toISOString() : undefined);
       return {phase: 'printed', text: at ? `Printed ${formatDate(at)}` : 'Printed', symbol: 'shippingbox', tint: 'secondary'};
     }

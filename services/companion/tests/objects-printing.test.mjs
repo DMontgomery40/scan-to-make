@@ -536,7 +536,8 @@ test('"printed" means printed: Print leaves the project printing until the print
   assert.equal(done.print.printerStatus.state, 'FINISH');
   await until(() => f.events.some(e => e.type === 'print.done'));
   const types = f.events.map(e => e.type).filter(type => !['print.preparing', 'print.confirm', 'print.status'].includes(type));
-  assert.deepEqual(types, ['print.started', 'print.first-layer', 'print.milestone', 'print.done']);
+  // No camera check here (no model worker): a percentage never says the first layer is down (#630).
+  assert.deepEqual(types, ['print.started', 'print.milestone', 'print.done']);
   const frame = f.events.find(e => e.type === 'print.done').frame;
   assert.deepEqual(await readFile(join(f.service.dir(f.object.id), frame)), JPEG);
   await until(async () => (await f.service.get(f.object.id)).print.events.some(e => e.message === 'Done. Take it off the plate.'));
