@@ -244,3 +244,14 @@ test('review 3: the unicorn shape (all passes failed, a kept model) gives every 
   const empty = await migrateProjectVersions({...object, id: 'none', current: undefined, print: undefined}, join(root, 'none'), {events: []});
   assert.deepEqual([empty.versionsV1, empty.versions.length, empty.prints.length], [true, 0, 0]);
 });
+
+test('review 4: Not printed takes back a hand-set Printed, and an answer the project already had returns the saved design', async t => {
+  const f = await setup(t);
+  await f.store.update(f.id, o => ({...o, state: 'printed'}));
+  const printed = await f.service.setStatus(f.id, 'printed');
+  assert.ok(printed.versions.at(-1).printedAtMs, 'the newest design is printed in the answer itself, not on the next read');
+  const taken = await f.service.setStatus(f.id, 'not-printed');
+  assert.equal(taken.versions.at(-1).printedAtMs, undefined);
+  assert.equal(taken.versions.at(-1).outcome, undefined);
+  assert.equal(objectStatus(taken).phase, 'ready');
+});

@@ -845,13 +845,18 @@ export class ObjectService {
     const target = versionId ? object.versions?.find(v => v.id === versionId) : object.versions?.at(-1);
     if (versionId && !target) throw new InvalidStateError('That design is no longer available.');
     if ((!target || target.id === object.versions?.at(-1)?.id) && (object.state === 'touching-up' || object.state === 'printing')) throw new InvalidStateError('Wait until the current step finishes.');
+    let answered: StmObject | undefined;
     if (target && status !== 'archived') {
-      const version = {...target, outcome: status === 'works' || status === 'needs-changes' ? status : undefined,
+      // "Not printed" takes back a hand-set Printed as well as the answer (review finding 4); a print the monitor saw end
+      // `done` is still on record in `prints` and still counts.
+      const {printedAtMs: _printed, ...rest} = target;
+      const version = {...(status === 'not-printed' ? rest : target), outcome: status === 'works' || status === 'needs-changes' ? status : undefined,
         ...(status === 'printed' || status === 'works' ? {printedAtMs: target.printedAtMs ?? Date.now()} : {})};
-      const updated = await this.#deps.store.update(id, o => ({...o, versions: o.versions?.map(v => v.id === target.id ? version : v)}));
+      if (version.outcome === undefined) delete version.outcome;
+      answered = await this.#deps.store.update(id, o => ({...o, versions: o.versions?.map(v => v.id === target.id ? version : v)}));
       if (target.id !== object.versions?.at(-1)?.id) {
         await this.#emit({id: randomUUID(), type: 'project.updated', projectId: id, data: {keys: ['versions']}});
-        return this.#changed(updated);
+        return this.#changed(answered);
       }
     }
     // Already there (the state itself, not just the label: a sent project marked printed is a real change).
@@ -861,7 +866,13 @@ export class ObjectService {
     const there = {works: object.state === 'confirmed', printed: object.state === 'printed' && clean,
       'needs-changes': object.outcome === 'needs-changes',
       'not-printed': clean && (object.current ? object.state === 'ready' : !['printed', 'confirmed', 'sent'].includes(object.state))}[status];
-    if (there && !(status === 'works' && object.pendingFollowup) && !(object.publishedSelection && ['works', 'printed', 'not-printed'].includes(status))) return object;
+    if (there && !(status === 'works' && object.pendingFollowup) && !(object.publishedSelection && ['works', 'printed', 'not-printed'].includes(status))) {
+      // The project's own status was already this, but the newest design's answer may just have been written: say so,
+      // and answer with the project as it now is (review finding 4), never the copy read before the write.
+      if (!answered) return object;
+      await this.#emit({id: randomUUID(), type: 'project.updated', projectId: id, data: {keys: ['versions']}});
+      return this.#changed(answered);
+    }
     if (object.state === 'touching-up' || object.state === 'printing') throw new InvalidStateError('Wait until the current step finishes.');
     if ((status === 'works' || status === 'printed') && !object.current) throw new InvalidStateError("There's no model yet, so it can't be marked printed.");
     const updated = await this.#deps.store.update(id, o => {
