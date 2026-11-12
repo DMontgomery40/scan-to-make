@@ -31,6 +31,11 @@ const KindSchema = z.object({
   env: z.record(z.string().regex(/^[A-Z][A-Z0-9_]{0,63}$/), z.string().max(256)),
   /** The kind the MCP runs when a .env sets none of its kinds' fixed values (mcp-3d-printer-server 1.2.50+). */
   default: z.boolean().optional(),
+  /**
+   * Whether camera_snapshot reads this kind's camera with only the settings its fields write, so Check asks for a
+   * picture (bambu-printer-mcp 1.1.82+, mcp-3d-printer-server 1.2.63+). Missing: an MCP to update.
+   */
+  cameraSnapshot: z.boolean().optional(),
   fields: z.array(FieldSchema).max(32),
 });
 export type SetupKind = z.infer<typeof KindSchema>;
@@ -86,7 +91,9 @@ export interface SetupOptions {
     /** `obtain`: the MCPs that can fetch it (`printers.obtain`), and the button's words, from the first that declares it. */
     secret?: {label: string; hint?: string; required: boolean; obtain?: {label: string; hint?: string; backends: PrinterBackend[]}};
     /** The address field in the first MCP's words: its hint, and `url` when it also takes a web address (`input: "url"`). */
-    address?: {hint?: string; url?: true}; fields: SetupField[]}[];
+    address?: {hint?: string; url?: true};
+    /** The MCPs whose Check asks for this kind's camera picture (each MCP's own `cameraSnapshot`). */
+    checkCamera: PrinterBackend[]; fields: SetupField[]}[];
   serialModels: Record<string, string>;
   models: Partial<Record<PrinterBackend, {value: string; label: string}[]>>;
   /** The slicer each MCP would run and the settings that choose it. */
@@ -110,6 +117,9 @@ export function setupOptions(byPackage: {package: PrinterBackend; label: string;
       continue;
     }
     if (setup.slicer) options.slicer[pkg] = setup.slicer;
+    // An MCP that doesn't say whether Check can show a camera is one to update; Check then asks only for the status.
+    if (installed && setup.kinds.some(kind => kind.cameraSnapshot === undefined))
+      options.updates.push({package: pkg, message: `Update ${label} in Settings → Printers so Check knows whether it can show the printer’s camera.`});
     for (const kind of setup.kinds) {
       const secret = field(kind, 'secret'), model = field(kind, 'model'), host = field(kind, 'host');
       const listed = options.types.find(item => item.printerType === kind.kind);
@@ -117,8 +127,9 @@ export function setupOptions(byPackage: {package: PrinterBackend; label: string;
       else options.types.push({printerType: kind.kind, label: kind.label, backends: [pkg], serial: !!field(kind, 'serial'),
         ...(secret ? {secret: {label: secret.label, ...(secret.hint ? {hint: secret.hint} : {}), required: secret.required}} : {}),
         ...(host && (host.hint || host.input === 'url') ? {address: {...(host.hint ? {hint: host.hint} : {}), ...(host.input === 'url' ? {url: true as const} : {})}} : {}),
-        fields: kind.fields});
+        checkCamera: [], fields: kind.fields});
       const type = options.types.find(item => item.printerType === kind.kind)!;
+      if (kind.cameraSnapshot === true && !type.checkCamera.includes(pkg)) type.checkCamera.push(pkg);
       if (secret?.obtain && type.secret) {
         type.secret.obtain ??= {label: secret.obtain.label, ...(secret.obtain.hint ? {hint: secret.obtain.hint} : {}), backends: []};
         type.secret.obtain.backends.push(pkg);

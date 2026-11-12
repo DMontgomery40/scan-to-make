@@ -125,9 +125,9 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
         public var bytes: Double
         public init(name: String, bytes: Double) { self.name = name; self.bytes = bytes }
     }
-    /// The project whose scan this one was made from ("Make something else from this scan"), with its title when it was
-    /// made: the page says where its scan came from even after that one is renamed or deleted. A build that doesn't know
-    /// the field ignores it.
+    /// Sealed designs of this project, oldest first (#616): each finished pass that produced a printable model, kept
+    /// beside the others and never overwritten. `prints` are every print attempt, each naming its design; `historyRestored`
+    /// is the plain line the companion wrote when it rebuilt them from this Mac's records. Older builds ignore all three.
     public var versions: [DesignVersion]?
     public var prints: [PrintAttempt]?
     public var historyRestored: String?
@@ -155,6 +155,10 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
         public var monitor: PrintMonitor?
         public var spools: [Spool]?
     }
+    /// What was asked and answered for the project this one was made from (Make something else from this scan, or
+    /// Duplicate), as the companion snapshotted it: the person's words (`you`) and the Mac's replies and questions
+    /// (`app`), in time order. The companion's `fit` and per-item `from` fields are for the worker's brief; this build
+    /// ignores them.
     public var inherited: InheritedHistory?
     public struct InheritedHistory: Codable, Equatable, Sendable {
         public var from: ScanSource
@@ -165,6 +169,9 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
             public var text: String
         }
     }
+    /// The project whose scan this one was made from ("Make something else from this scan"), with its title when it was
+    /// made: the page says where its scan came from even after that one is renamed or deleted. A build that doesn't know
+    /// the field ignores it.
     public var scanFrom: ScanSource?
     public struct ScanSource: Codable, Equatable, Sendable {
         public var id: String

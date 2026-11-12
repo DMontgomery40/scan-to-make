@@ -111,10 +111,16 @@ camera file) and its checked sizes into the new folder, and starts its pass. A `
 the model, as a copy's scan sent on its own does, even when the source has no photos. Nothing is shared, so either project can be deleted without breaking the other. The source is unchanged. The
 new project carries `scanFrom: {id, title}` (the source and its title then) on `object.json` and in every read: a plain
 new field, which an older companion keeps and passes on and every client ignores.
-It also carries `inherited: {from: {id, title}, items: [{at, who: "you"|"app", text}]}`
-(`InheritedHistorySchema`): a snapshot of the source request, sent messages and ended pass summaries,
-ordered by millisecond time. Pending messages and unfinished summaries are excluded. Any inherited
-context already on the source precedes its own conversation. This is read-only context; the worker's
+It also carries `inherited: {from: {id, title}, items: [{at, who: "you"|"app", text, from?}], fit?}`
+(`InheritedHistorySchema`), and so does a Duplicate: a snapshot of the source's conversation as clients show it,
+ordered by millisecond time. The request is what the person typed (never an appended "Fit brief:" block); then
+sent messages (a note sent again before any result is one, as `withNotesOnce` reads it), ended pass summaries,
+and each question the Mac asked (`app`) just before its answer (`you`). A pass that ends on a question records it
+as `question`; for passes saved before Nov 11 the question is read from the answering pass's `Answer to "…"` note,
+or from the project's `ask`. `fit` is how the source's size was settled, measured sizes included, given to the
+worker as the source's, never as the person's words. Pending messages and unfinished summaries are excluded. Items
+the source itself inherited come first, each naming the project it was said in (`from`); the worker's brief puts
+them under that project's name. This is read-only context; the worker's
 brief includes it before the new request, and deleting the source leaves the snapshot intact.
 Apple clients show it before this project's request under “From …”, linking to the source when present,
 or adding “since deleted”. Android and Linux UI follow on a separate branch. Clients derive "also made from this
@@ -216,7 +222,7 @@ Bambu Studio's own verdict on the slice (KAN-223, when the MCP returns `slicer_r
 
 ### `PrinterDestination` (PR 1)
 
-`{id, name, backend, model?, address?, source, origin?, state?, stateCheckedAt?, capabilities?, mcpId?, mcps?}`. `mcps` (the same printer reached through both MCPs) is `[{backend, destinationId}]`, the one in use first; with two entries, Settings → Printers offers the Printer MCP choice (`PUT …/mcp`). `mcpId` (PR 6, `mcp-<16 hex>`) names the MCP install the printer runs; every printer on the same install has the same one (below).
+`{id, name, backend, model?, address?, source, origin?, state?, stateCheckedAt?, capabilities?, mcpId?, mcpLabel?, mcps?}`. `mcpLabel` is the MCP its prints go through, as people know it (`mcp-3D-printer-server`); clients show it as sent. `mcps` (the same printer reached through both MCPs) is `[{backend, destinationId, mcpId?, label?, version?, latestVersion?}]`, the one in use first; with two entries, Settings → Printers offers the Printer MCP choice (`PUT …/mcp`). Each entry names the install that MCP's profile runs (`mcpId`), the MCP's name as people know it (`label`), the version that install runs and the newest published one, so the MCP prints don't go through keeps its own Update row (PRD §8.10; fixture `printer-both-mcps.json`). Older companions send only `backend` and `destinationId`. `mcpId` (PR 6, `mcp-<16 hex>`) names the MCP install the printer runs; every printer on the same install has the same one (below).
 
 - **One printer, one destination.** Destinations are keyed by the Bambu serial when the MCP config has one (`BAMBU_PRINTER_SERIAL` or `BAMBU_SERIAL`), otherwise by the lowercased `host:port`. A printer configured in several clients or in both MCPs appears once.
 - **Which MCP wins.** A Bambu printer uses bambu-printer-mcp; mcp-3D-printer-server is used for a Bambu printer only when no bambu-printer-mcp profile reaches it. Every other printer uses mcp-3D-printer-server. Among profiles that reach the same printer through the same MCP, the Mac app's own `printer-handoff.json` (`source: "current"`) wins, then the first source in this order: Claude Code, Claude Desktop, Cursor, Codemode, Codex.

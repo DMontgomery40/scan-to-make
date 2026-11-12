@@ -6,7 +6,7 @@ import {createRequire} from 'node:module';
 import {pathToFileURL} from 'node:url';
 import {PrinterHandoffRunner} from '@scan-to-make/printer-handoff';
 import {loadPrinterCatalog} from '../dist/objects/printers.js';
-import {SETUP_FIELDS, withSetupMcp, writeSetupFieldsCache} from './support/setup-mcp.mjs';
+import {OLDER_SETUP_FIELDS, SETUP_FIELDS, withSetupMcp, writeSetupFieldsCache} from './support/setup-mcp.mjs';
 import {tempDir} from './support/temp.mjs';
 
 async function fixture(t) {
@@ -400,14 +400,14 @@ test('Add printer: found MCP folders and the printers each MCP finds; Check; Add
   const form = {backend: 'mcp-3d-printer-server', printerType: 'octoprint', host: 'octopi.local.', port: '80', secret: 'octo-key'};
   const {PrinterFormSchema} = await import('../dist/printing/setup.js');
   const a1 = {backend: 'mcp-3d-printer-server', printerType: 'bambu', host: '192.0.2.9', serial: '03900A000000001', model: 'a1', secret: '87654321'};
+  // mcp-3D-printer-server says its camera_snapshot can't read a Bambu camera from these settings (`cameraSnapshot: false`),
+  // so Check asks for the status only, though the tool is there.
   const checked = await setup.check(PrinterFormSchema.parse(a1));
-  assert.deepEqual(checked, {reached: true, camera: 'connected', image: {mimeType: 'image/jpeg', base64: jpeg}});
-  assert.deepEqual(clients.at(-1).calls, ['get_printer_status', 'camera_snapshot']);
+  assert.deepEqual(checked, {reached: true, camera: 'not-supported'});
+  assert.deepEqual(clients.at(-1).calls, ['get_printer_status']);
   assert.deepEqual(clients.at(-1).config.process.env, {MCP_TRANSPORT: 'stdio', PRINTER_HOST: '192.0.2.9', PRINTER_TYPE: 'bambu', BAMBU_SERIAL: '03900A000000001', BAMBU_MODEL: 'a1', BAMBU_TOKEN: '87654321'});
   assert.equal(clients.at(-1).config.process.cwd, join(env.appPrinters, 'profiles'), 'a folder with no .env of its own');
-  cameraFormat = 'jpeg';
-  assert.deepEqual(await setup.check(PrinterFormSchema.parse(a1)), checked, 'both MCP JPEG format names display the camera');
-  // A printer with no camera tool is checked by status alone.
+  // An OctoPrint is checked by status alone too (its MCP's own `cameraSnapshot: false`).
   await setup.check(PrinterFormSchema.parse(form));
   assert.deepEqual(clients.at(-1).calls, ['get_printer_status']);
   await assert.rejects(setup.check(PrinterFormSchema.parse({...a1, backend: 'bambu-printer-mcp'})), /Download bambu-printer-mcp first/);
@@ -461,9 +461,9 @@ test('Add printer: found MCP folders and the printers each MCP finds; Check; Add
   await assert.rejects(setup.check(PrinterFormSchema.parse({...form, printerType: 'makerbot'})), /doesn’t drive that kind of printer/);
   await assert.rejects(setup.check(PrinterFormSchema.parse({...a1, model: 'x2d'})), /doesn’t know that model/);
   await assert.rejects(setup.add(PrinterFormSchema.parse({...a1, slicer: 'cura-classic'})), /doesn’t use that slicer/);
-  // A web address only where the MCP's own host field takes one (`input: "url"`; this MCP version declares none), and
+  // A web address only where the MCP's own host field takes one (`input: "url"`: OctoPrint's, not Klipper's), and
   // never with credentials, a query or a second line.
-  await assert.rejects(setup.check(PrinterFormSchema.parse({...form, host: 'http://evil/x'})), /without http:\/\/ or a path/);
+  await assert.rejects(setup.check(PrinterFormSchema.parse({...form, printerType: 'klipper', host: 'http://evil/x'})), /without http:\/\/ or a path/);
   for (const host of ['http://user:pw@evil/x', 'http://evil/x?PRINTER_HOST=y', 'http://evil/x\nPRINTER_HOST=evil', "http://evil/x'"])
     assert.equal(PrinterFormSchema.safeParse({...form, host}).success, false, host);
   assert.equal(PrinterFormSchema.safeParse({...form, secret: "a'\nPRINTER_HOST=evil"}).success, false);
@@ -530,6 +530,7 @@ test('a found install missing the model its MCP needs: Counterpart fills only BA
   let found = (await setup.discover()).found;
   const p1s = found.find(item => item.folder === clone);
   assert.deepEqual([p1s.name, p1s.model, p1s.missing, p1s.fill], ['P1S', 'p1s', ['BAMBU_MODEL'], {BAMBU_MODEL: 'p1s'}]);
+  assert.equal(p1s.route, undefined, 'no route copied');
   const unknown = found.find(item => item.folder === other);
   assert.deepEqual([unknown.missing, unknown.fill, unknown.model], [['BAMBU_MODEL', 'BAMBU_TOKEN'], {}, undefined], 'a secret is never filled; an unknown serial needs the dropdown');
   // The printer's own announcement (DevModel) outranks the serial.
@@ -557,7 +558,7 @@ test('a found install missing the model its MCP needs: Counterpart fills only BA
   await writeFile(join(clone, '.env'), original);
   await writeFile(profilesPath, JSON.stringify({version: 1, choices: {}, profiles: [{...saved, model: undefined}]}));
   await catalog.reload();
-  assert.deepEqual(catalog.destinations.find(item => item.id === added.id).incomplete, {missing: ['BAMBU_MODEL'], fill: {BAMBU_MODEL: 'p1s'}});
+  assert.deepEqual(catalog.destinations.find(item => item.id === added.id).incomplete, {missing: ['BAMBU_MODEL'], fill: {BAMBU_MODEL: 'p1s'}, modelSetting: 'BAMBU_MODEL'});
   assert.equal(catalog.resolve(added.id).selection?.model, undefined);
   assert.deepEqual(await setup.completeSettings(added.id), {destinationId: added.id, model: 'p1s'});
   assert.equal(await readFile(join(clone, '.env'), 'utf8'), `${original}\nBAMBU_MODEL='p1s'\n`);
@@ -651,7 +652,7 @@ test('an mcp-3D-printer-server Bambu printer with no route gets the authenticate
 
   // The same serial: only the route and session-directory keys, nothing else from that file.
   const candidate = await offered();
-  assert.deepEqual([candidate.missing, candidate.fill], [[], values]);
+  assert.deepEqual([candidate.missing, candidate.fill, candidate.route], [[], values, true], 'the sheet says the route comes from the other MCP by this, not by its variable names');
   assert.ok(!JSON.stringify(candidate).match(/dev-secret-1|cloud-secret-2|55550000/), 'no other key, and never a token');
 
   // Add appends those lines as they are written there (quoting included); every other line and the mode stay.
@@ -668,7 +669,8 @@ test('an mcp-3D-printer-server Bambu printer with no route gets the authenticate
   await writeFile(join(clone, '.env'), original);
   restarted.length = 0;
   await catalog.reload();
-  assert.deepEqual(catalog.destinations.find(item => item.id === added.id).incomplete, {missing: [], fill: values});
+  // Clients name the model's variable and the copied route from these, never from a printer's own variable names.
+  assert.deepEqual(catalog.destinations.find(item => item.id === added.id).incomplete, {missing: [], fill: values, modelSetting: 'BAMBU_MODEL', route: true});
   await setup.completeSettings(added.id);
   assert.equal(await readFile(join(clone, '.env'), 'utf8'), routed);
   assert.deepEqual(restarted, [added.id]);
@@ -818,7 +820,7 @@ test('a printer\'s missing settings show as soon as its MCP\'s fields are read, 
     node: '/usr/local/bin/node', client: withSetupMcp(), folders: async () => [{dir: clone, package: 'mcp-3d-printer-server', version: '1.2.37', hasEnv: true}]});
   assert.equal(catalog.destinations.find(item => item.id === id).incomplete, undefined, 'no MCP fields read yet');
   await setup.discover();
-  assert.deepEqual(catalog.destinations.find(item => item.id === id).incomplete, {missing: ['BAMBU_MODEL'], fill: {BAMBU_MODEL: 'p1s'}});
+  assert.deepEqual(catalog.destinations.find(item => item.id === id).incomplete, {missing: ['BAMBU_MODEL'], fill: {BAMBU_MODEL: 'p1s'}, modelSetting: 'BAMBU_MODEL'});
 });
 
 test('an MCP updated in place is asked again; one slow MCP never makes Find printers miss its deadline (Codex review on #346)', async t => {
@@ -958,23 +960,86 @@ test('Check reads only the chosen MCP\'s fields and answers inside one budget, e
   const started = [];
   let statusStalls = false;
   const stalled = {connect: () => new Promise(() => {}), callTool: () => new Promise(() => {}), close: async () => undefined};
+  const jpeg = Buffer.from([0xff, 0xd8, 1, 2, 0xff, 0xd9]).toString('base64');
+  let cameraFormat = 'image/jpeg';
+  const calls = [];
   const fields = withSetupMcp(config => ({connect: async () => ({server: {name: 'x', version: '1'}, tools: [{name: 'get_printer_status'}, {name: 'camera_snapshot'}]}),
-    callTool: name => statusStalls && name === 'get_printer_status' ? new Promise(() => {})
-      : Promise.resolve({content: [{type: 'text', text: JSON.stringify({connected: true, status: 'idle', model: 'Bambu Lab P1S'})}]}), close: async () => undefined}));
+    callTool: name => { calls.push(name); return statusStalls && name === 'get_printer_status' ? new Promise(() => {})
+      : Promise.resolve({content: [{type: 'text', text: JSON.stringify(name === 'camera_snapshot' ? {format: cameraFormat, base64: jpeg} : {connected: true, status: 'idle', model: 'Bambu Lab P1S'})}]}); },
+    close: async () => undefined}));
   const setup = new PrinterSetup({env, configs: () => catalog.entries(), catalog: () => catalog, profilesPath: join(env.appPrinters, 'profiles.json'), node: '/usr/local/bin/node',
     checkBudgetMs: 3_000, folders: async () => [],
     client: config => { started.push(config.backend); return config.backend === 'mcp-3d-printer-server' ? stalled : fields(config); }});
   const p1s = PrinterFormSchema.parse({backend: 'bambu-printer-mcp', printerType: 'bambu', host: '192.0.2.1', serial: '01P00A123456789', model: 'p1s', secret: '12345678'});
   // No fields read yet, and mcp-3D-printer-server never answers: Check doesn't start it or wait for it.
+  // A P1S on bambu-printer-mcp: its MCP says camera_snapshot reads this kind's camera (`cameraSnapshot: true`), so Check
+  // asks for the picture after the status, as it always has.
   const first = await setup.check(p1s);
-  assert.equal(first.reached, true);
-  assert.equal(first.model, 'p1s', 'the model from the chosen MCP\'s own choices');
+  assert.deepEqual(first, {reached: true, camera: 'connected', image: {mimeType: 'image/jpeg', base64: jpeg}});
+  assert.deepEqual(calls, ['get_printer_status', 'camera_snapshot']);
   assert.ok(!started.includes('mcp-3d-printer-server'), 'the other MCP is never started for this Check');
+  cameraFormat = 'jpeg';
+  assert.deepEqual(await setup.check(p1s), first, 'both MCP JPEG format names display the camera');
   // The printer stops answering: Check still returns inside its budget, as unreached.
   statusStalls = true;
   const t0 = Date.now();
   assert.deepEqual(await setup.check(p1s), {reached: false, camera: 'not-supported'});
   assert.ok(Date.now() - t0 < 3_500, `answered in ${Date.now() - t0} ms, inside its budget`);
+});
+
+test('Check asks for a camera picture only where the chosen MCP says camera_snapshot reads that kind (cameraSnapshot), never by the kind\'s name; an older MCP is one to update', async t => {
+  const {PrinterSetup, PrinterFormSchema} = await import('../dist/printing/setup.js');
+  const {hostEnvironment} = await import('../dist/printing/mcp-install.js');
+  const home = await tempDir('printer-check-camera-');
+  t.after(() => rm(home, {recursive: true, force: true}));
+  const data = join(home, 'Library/Application Support/Scan to Make');
+  const put = async (file, text) => { await mkdir(join(home, file, '..'), {recursive: true}); await writeFile(join(home, file), text); };
+  for (const [dir, pkg] of [['bambu', 'bambu-printer-mcp'], ['generic', 'mcp-3d-printer-server']]) {
+    await put(`Library/Application Support/Scan to Make/printers/${dir}/lib/node_modules/${pkg}/package.json`, JSON.stringify({name: pkg, version: '1.0.0'}));
+    await put(`Library/Application Support/Scan to Make/printers/${dir}/lib/node_modules/${pkg}/dist/index.js`, '');
+  }
+  const env = {...hostEnvironment(data), home};
+  const profilesPath = join(env.appPrinters, 'profiles.json');
+  const catalog = await loadPrinterCatalog({backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true', args: []}}, {homeDirectory: home, sourcePaths: [], profilesPath});
+  const jpeg = Buffer.from([0xff, 0xd8, 1, 2, 0xff, 0xd9]).toString('base64');
+  const calls = [];
+  const printer = config => ({connect: async () => ({server: {name: 'x', version: '1'}, tools: [{name: 'get_printer_status'}, {name: 'camera_snapshot'}]}),
+    callTool: async name => { calls.push([config.backend, name]); return {content: [{type: 'text', text: JSON.stringify(name === 'camera_snapshot' ? {format: 'image/jpeg', base64: jpeg} : {connected: true, status: 'idle'})}]}; },
+    close: async () => undefined});
+  const make = fields => new PrinterSetup({env, configs: () => catalog.entries(), catalog: () => catalog, profilesPath, node: '/usr/local/bin/node', folders: async () => [],
+    client: withSetupMcp(printer, {fields})});
+
+  // Both MCPs drive the Bambu kind; only bambu-printer-mcp says its camera_snapshot reads it from these settings.
+  const current = make(SETUP_FIELDS);
+  const {options} = await current.discover();
+  assert.deepEqual(options.types.find(type => type.printerType === 'bambu').checkCamera, ['bambu-printer-mcp']);
+  assert.deepEqual(options.types.find(type => type.printerType === 'octoprint').checkCamera, []);
+  assert.deepEqual(options.updates, []);
+  const p1s = {backend: 'bambu-printer-mcp', printerType: 'bambu', host: '192.0.2.1', serial: '01P00A123456789', model: 'p1s', secret: '12345678'};
+  calls.length = 0;
+  assert.equal((await current.check(PrinterFormSchema.parse(p1s))).camera, 'connected');
+  assert.deepEqual(calls, [['bambu-printer-mcp', 'get_printer_status'], ['bambu-printer-mcp', 'camera_snapshot']]);
+  calls.length = 0;
+  assert.equal((await current.check(PrinterFormSchema.parse({...p1s, backend: 'mcp-3d-printer-server'}))).camera, 'not-supported');
+  assert.deepEqual(calls, [['mcp-3d-printer-server', 'get_printer_status']]);
+
+  // A kind with another name that declares a serial, a model and cameraSnapshot (a made-up brand, from bambu-printer-mcp's
+  // fields): the same Check, so nothing keys on the kind being called "bambu".
+  const acme = {...SETUP_FIELDS['bambu-printer-mcp'], kinds: SETUP_FIELDS['bambu-printer-mcp'].kinds.map(kind => ({...kind, kind: 'acme', label: 'Acme'}))};
+  const renamed = make({...SETUP_FIELDS, 'bambu-printer-mcp': acme});
+  assert.deepEqual((await renamed.discover()).options.types.find(type => type.printerType === 'acme').checkCamera, ['bambu-printer-mcp']);
+  calls.length = 0;
+  assert.equal((await renamed.check(PrinterFormSchema.parse({...p1s, printerType: 'acme'}))).camera, 'connected');
+  assert.deepEqual(calls.map(call => call[1]), ['get_printer_status', 'camera_snapshot']);
+
+  // MCPs from before cameraSnapshot: Settings says to update them, and Check asks for the status only (no guess by name).
+  const older = make(OLDER_SETUP_FIELDS);
+  assert.deepEqual((await older.discover()).options.updates.map(update => update.message), [
+    'Update bambu-printer-mcp in Settings → Printers so Check knows whether it can show the printer’s camera.',
+    'Update mcp-3D-printer-server in Settings → Printers so Check knows whether it can show the printer’s camera.']);
+  calls.length = 0;
+  assert.deepEqual(await older.check(PrinterFormSchema.parse(p1s)), {reached: true, camera: 'not-supported'});
+  assert.deepEqual(calls, [['bambu-printer-mcp', 'get_printer_status']]);
 });
 
 test('a configured folder is found while the MCPs listen; Add names its printer without starting the other MCP (Codex review on #346)', async t => {

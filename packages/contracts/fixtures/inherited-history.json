@@ -26,7 +26,11 @@
         {
           "at": 1794348000010,
           "who": "you",
-          "text": "A mount for my phone."
+          "text": "A mount for my phone.",
+          "from": {
+            "id": "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a00",
+            "title": "Phone mount"
+          }
         },
         {
           "at": 1794348000020,
@@ -43,7 +47,17 @@
           "who": "app",
           "text": "Made a holder for that case."
         }
-      ]
+      ],
+      "fit": {
+        "sizeSource": "measured",
+        "measured": [
+          {
+            "id": "width",
+            "label": "Width",
+            "mm": 75.1
+          }
+        ]
+      }
     }
   }
 ]

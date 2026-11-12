@@ -63,6 +63,32 @@ class AppState(private val app: Counterpart) {
         val result: com.scantomake.counterpart.api.McpUpdate? = null, val problem: String? = null)
     // Keep the original operation ID when its screen leaves composition or the copy mapping changes.
     val mcpUpdateAttempts = MutableStateFlow<Map<String, McpUpdateAttempt>>(emptyMap())
+    /**
+     * PRD §8.10: an update that hears nothing more from the companion says so, as on the Mac and iPhone. A wait for
+     * Counterpart's own work: the companion waits up to 60 s, then admits the update after one claim and one npm lookup
+     * (~97 s at most before `started`).
+     */
+    var mcpWaitLimitMs = 120_000L
+    /** An update under way: three install steps of up to 10 minutes each plus the MCP's restart. */
+    var mcpStartedLimitMs = 35 * 60_000L
+    /** Installs whose update heard nothing more: their words become [MCP_UNHEARD], until the next word about them. */
+    val mcpUnheard = MutableStateFlow<Set<String>>(emptySet())
+    private val mcpWaits = mutableMapOf<String, Job>()
+
+    /**
+     * Every change of an install's update state (`waiting`, `started`, `done`, …), from an event or an Update reply:
+     * waiting or started starts that clock, anything else (or null) stops it.
+     */
+    fun noteMcpUpdate(mcpId: String, state: String?) {
+        mcpWaits.remove(mcpId)?.cancel()
+        mcpUnheard.update { it - mcpId }
+        val limit = when (state) { "waiting" -> mcpWaitLimitMs; "started" -> mcpStartedLimitMs; else -> return }
+        mcpWaits[mcpId] = scope.launch {
+            delay(limit)
+            mcpWaits.remove(mcpId)
+            mcpUnheard.update { it + mcpId }
+        }
+    }
     /** A project to open, from a notification tap. */
     val route = MutableStateFlow<String?>(null)
     /** A `scantomake://pair` link waiting for the pairing screen. */
@@ -179,6 +205,7 @@ class AppState(private val app: Counterpart) {
         projects.value = emptyList(); loaded.value = false; error.value = null; catalog.value = null; link.value = MacLink.Checking
         capabilities.value = emptySet(); eventsSupported.value = null; sendFailures.value = emptyMap()
         mcpUpdateAttempts.value = emptyMap()
+        mcpWaits.values.forEach { it.cancel() }; mcpWaits.clear(); mcpUnheard.value = emptySet()
         mcpUpdateEvents.value = emptyMap(); mcpCopies.value = null; mcpCopiesProblem.value = null
         known = null; heard.value = emptyMap()
         // A pairing reset shows nothing from before it; a copy for no pairing or another computer goes.
@@ -216,7 +243,7 @@ class AppState(private val app: Counterpart) {
                                 val pid = e.projectId
                                 if (pid != null) { if (e.type == "project.deleted") remove(pid) else reload(pid) }
                                 else if (e.type.startsWith("mcp.update.")) {
-                                    e.data?.mcpId?.let { mcpUpdateEvents.value = mcpUpdateEvents.value + (it to e) }
+                                    e.data?.mcpId?.let { mcpUpdateEvents.value = mcpUpdateEvents.value + (it to e); noteMcpUpdate(it, e.type.removePrefix("mcp.update.")) }
                                     loadPrinters()
                                 }
                             }
@@ -262,6 +289,7 @@ class AppState(private val app: Counterpart) {
     }
 
     companion object {
+        const val MCP_UNHEARD = "Counterpart didn’t say whether this updated. Try Update again."
         const val MAC_NAME_KEY = "CounterpartMacName"
         fun of(context: Context) = (context.applicationContext as Counterpart).state
     }

@@ -651,6 +651,18 @@ struct FixtureTransport: HTTPTransport {
            let data = try? Data(contentsOf: folder.appending(path: "printer-setup-phone.json")),
            let answers = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
             let body = request.httpBody.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
+            // As the companion does (PrinterFormSchema against the MCP's fields): a form carries a value only for a field its
+            // kind declares, and every required one, so these fixtures catch a phone sending another kind's values.
+            if ["check", "add"].contains(String(path.dropFirst("/v1/printers/setup/".count))), let printer = body["printer"] as? [String: Any], printer["folder"] == nil {
+                let types = ((answers["discover"] as? [String: Any])?["options"] as? [String: Any])?["types"] as? [[String: Any]] ?? []
+                let fields = (types.first { $0["printerType"] as? String == printer["printerType"] as? String }?["fields"] as? [[String: Any]]) ?? []
+                let declared = Set(fields.compactMap { $0["name"] as? String })
+                let stray = ["port", "serial", "model"].filter { printer[$0] != nil && !declared.contains($0) }
+                let lacking = fields.filter { $0["required"] as? Bool == true && $0["name"] as? String != "secret" && ($0["name"] as? String).map { (printer[$0] as? String ?? "").isEmpty } == true }
+                guard stray.isEmpty, lacking.isEmpty else {
+                    return json(["error": ["code": "invalid-request", "message": "form fields", "sentence": "The form sent \(stray) and lacks \(lacking.compactMap { $0["label"] as? String })."]], 400)
+                }
+            }
             switch path.dropFirst("/v1/printers/setup/".count) {
             case "discover": return json(answers["discover"] ?? [:])
             case "check":
@@ -705,6 +717,17 @@ struct FixtureTransport: HTTPTransport {
             return json(["settings": settings])
         }
         if path.hasPrefix("/v1/settings/") && method == "POST" { return json(["check": ["state": "checking"]]) }
+        if path.hasPrefix("/v1/printers/mcp/"), method == "POST" {
+            // What the companion was asked, for UI tests to check (one line per request).
+            let log = folder.appending(path: "mcp-update-requests.log")
+            if !FileManager.default.fileExists(atPath: log.path) { FileManager.default.createFile(atPath: log.path, contents: nil) }
+            if let handle = try? FileHandle(forWritingTo: log) {
+                defer { try? handle.close() }
+                let line = path + " " + (String(data: request.httpBody ?? Data(), encoding: .utf8) ?? "") + "\n"
+                _ = try? handle.seekToEnd()
+                try? handle.write(contentsOf: Data(line.utf8))
+            }
+        }
         if completingMove, path.hasPrefix("/v1/printers/mcp/"), method == "POST" { await Fixtures.mcpCopyState.accept() }
         if path.hasPrefix("/v1/printers/mcp/"), method == "POST", FileManager.default.fileExists(atPath: folder.appending(path: "mcp-update-waiting.json").path) { return HTTPReply(status: 200, body: try Data(contentsOf: folder.appending(path: "mcp-update-waiting.json"))) }
         if path.hasPrefix("/v1/printers/mcp/") && method == "POST" { return json(["update": ["mcpId": "mcp-3d", "state": "waiting", "fromVersion": "1.2.9", "toVersion": "1.2.22"]]) }

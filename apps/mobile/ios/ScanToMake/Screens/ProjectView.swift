@@ -47,6 +47,7 @@ struct ProjectView: View {
     @State private var askProblem: String?
     @State private var askText = ""
     @Environment(\.horizontalSizeClass) private var widthClass
+    @Environment(\.dynamicTypeSize) private var typeSize
     /// The size card's fields as they stand (`AskSizesFields` reports them), for the card's other answers.
     @State private var askSizes: AskSizesForm?
     @State private var notice: String?
@@ -56,6 +57,8 @@ struct ProjectView: View {
     @State private var confirming: IdentifiedProject?
     /// What the page measured, for sizing the stage when a card has to be answered (board X80).
     @State private var answerRoom = AnswerRoom()
+    /// The answer card's bottom in the page's content (`pageSpace`), as it sits now.
+    @State private var cardBottom: CGFloat?
     @FocusState private var writing: Bool
     private var object: Project? { store.project(id) }
     /// The Mac isn't answering: the page shows what this phone already had and says so, and Print and Send wait (X100).
@@ -205,6 +208,7 @@ struct ProjectView: View {
         // The page's content ends where the bottom bar begins (lead, Nov 10, as New and first run): Activity's lines never
         // read through or around "Ask for changes…" and Print, on any tab, with the keyboard up too.
         VStack(spacing: 0) {
+        ScrollViewReader { reader in
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 hero(object.showingDesign(viewingDesign), viewingDesign == nil ? words : ProjectWords(object.showingDesign(viewingDesign)), stage: fit.stage)
@@ -315,10 +319,20 @@ struct ProjectView: View {
                 // isn't answering. A print's card handles its own, so Watch the Print still opens (X100).
                 stateCard(object, words).padding(.horizontal, 16)
                     .disabled(away && !(words.phase == .preparing || words.phase == .printing || object.printConfirmation != nil))
+                    .id(Self.answerCard)
                     .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(Self.pageSpace)).maxY.rounded() } action: { bottom in
-                        // Where the card ends below the stage, in the order the card sits now under the title.
+                        // Where the card ends below the stage, in the order the card sits now under the title. Measured once
+                        // per state and text size (review S5): a line or row that appears later as things load does not
+                        // resize the stage under the person. Where it ends now is kept every time: a row that loads after the
+                        // measurement (the picture tabs, Make Something Else) can push it under the bar, and the page then
+                        // scrolls to it (`cardBelow`). The page space is the scroll's content, so scrolling doesn't move it.
+                        cardBottom = bottom
+                        let key = answerKey(store.words(object))
+                        guard answerRoom.belowStage == nil || answerRoom.measuredFor != key else { return }
                         let now = answerFit(store.words(object))
                         answerRoom.belowStage = bottom - now.stage + (now.cardFirst ? answerRoom.request : 0)
+                        answerRoom.measuredFor = key
+                        Self.lastRoom[key] = answerRoom
                     }
                 if fit.cardFirst { requestText(object, words).padding(.horizontal, 20) }
 
@@ -356,6 +370,11 @@ struct ProjectView: View {
                 .padding(.horizontal, 16)
             }
             .coordinateSpace(.named(Self.pageSpace))
+            // At large text sizes even the shortest stage can leave the card under the bar: the page opens scrolled to it.
+            .onChange(of: fit.cardBelow, initial: true) { _, below in
+                if below { withAnimation { reader.scrollTo(Self.answerCard, anchor: .bottom) } }
+            }
+            }
             // The bar is below the scroll now, not over it: only a little room after the last line.
             .padding(.bottom, 24)
             .frame(maxWidth: 820)
@@ -364,7 +383,8 @@ struct ProjectView: View {
         .background(Color.black)
         // The page's height between the bars, where the content's top sits at rest.
         .onScrollGeometryChange(for: CGFloat.self) { ($0.containerSize.height - $0.contentInsets.top - $0.contentInsets.bottom).rounded() } action: { _, height in
-            answerRoom.viewport = height
+            // Not while the keyboard is up: the stage doesn't follow the keyboard in and out (review S5).
+            if !writing || answerRoom.viewport == 0 { answerRoom.viewport = height }
         }
         .scrollEdgeEffectStyle(.soft, for: .all)
         .scrollDismissesKeyboard(.interactively)
@@ -472,9 +492,15 @@ struct ProjectView: View {
     }
 
     static let pageSpace = "project-page"
+    static let answerCard = "answer-card"
     static let fullStage: CGFloat = 380
     /// The stage never gets shorter than this, so the model stays a picture of the part.
     static let stageFloor: CGFloat = 160
+    /// Below this a real picture stops reading as the part (chosen by looking at real parts on the smallest iPhone,
+    /// review S5), so the card moves above the request text before the stage shrinks under it.
+    static let recognisable: CGFloat = 240
+    /// The last settled measurement for each state and text size, so the next page opens at it (no 300-point first frame).
+    @MainActor static var lastRoom: [String: AnswerRoom] = [:]
     /// Air between the card's last line and the bottom bar.
     static let answerMargin: CGFloat = 12
 
@@ -490,14 +516,30 @@ struct ProjectView: View {
         var belowStage: CGFloat?
         /// The request text's height with its spacing; 0 without one.
         var request: CGFloat = 0
+        /// The state and text size `belowStage` was measured for.
+        var measuredFor: String?
     }
 
-    private func answerFit(_ words: ProjectWords) -> (stage: CGFloat, cardFirst: Bool) {
-        guard words.phase == .failed || words.actions.contains(.itWorks) else { return (Self.fullStage, false) }
-        guard let below = answerRoom.belowStage, answerRoom.viewport > 0 else { return (300, false) }
-        let room = answerRoom.viewport - Self.answerMargin - below
-        if room >= Self.stageFloor || answerRoom.request == 0 { return (min(Self.fullStage, max(Self.stageFloor, room)), false) }
-        return (min(Self.fullStage, max(Self.stageFloor, room + answerRoom.request)), true)
+    private func answerKey(_ words: ProjectWords) -> String { "\(words.phase)#\(typeSize)#\(String(describing: widthClass))" }
+
+    private func answerFit(_ words: ProjectWords) -> (stage: CGFloat, cardFirst: Bool, cardBelow: Bool) {
+        guard words.phase == .failed || words.actions.contains(.itWorks) else { return (Self.fullStage, false, false) }
+        #if DEBUG
+        // `-CounterpartStageHeight <points>`: a fixed stage, for choosing `recognisable` from real pictures.
+        let forced = CGFloat(UserDefaults.standard.double(forKey: "CounterpartStageHeight"))
+        if forced > 0 { return (forced, false, false) }
+        #endif
+        let room0 = answerRoom.belowStage == nil ? Self.lastRoom[answerKey(words)] : answerRoom
+        guard let room0, let below = room0.belowStage, room0.viewport > 0 else { return (300, false, false) }
+        let room = room0.viewport - Self.answerMargin - below
+        // The card as it sits now, after anything that loaded since the measurement: under the bar, the page scrolls to it.
+        let under = (cardBottom ?? 0) > room0.viewport - Self.answerMargin
+        // The card moves above the request before the stage would drop below a recognisable picture (review S5).
+        if room >= Self.recognisable || room0.request == 0 {
+            return (min(Self.fullStage, max(Self.stageFloor, room)), false, room < Self.stageFloor || under)
+        }
+        let moved = room + room0.request
+        return (min(Self.fullStage, max(Self.stageFloor, moved)), true, moved < Self.stageFloor || under)
     }
 
     // MARK: Hero
@@ -934,16 +976,27 @@ struct ProjectView: View {
                     if canPrint && !writing {
                         // The page's main action never truncates ("Print Ano…", lead review Nov 10): it keeps its whole
                         // label and the ask field gives way.
+                        // On a phone's width a plain Print Another was as large as the card's own answer and read as
+                        // the first thing to press (captures, Nov 10). There, when Print is not the page's main
+                        // action, it is the printer symbol alone, named for VoiceOver by what it would print.
+                        let quiet = widthClass == .compact && !words.page.printIsMain
+                        let name = words.page.printWords ?? "Print"
                         Button { openPrint(object.id) } label: {
-                            Label(words.page.printWords ?? "Print", systemImage: "printer.fill").fontWeight(.semibold).lineLimit(1)
-                                .fixedSize().padding(.horizontal, 8).frame(height: 36)
+                            if quiet {
+                                Image(systemName: "printer.fill").frame(width: 36, height: 36)
+                            } else {
+                                Label(name, systemImage: "printer.fill").fontWeight(.semibold).lineLimit(1)
+                                    .fixedSize().padding(.horizontal, 8).frame(height: 36)
+                            }
                         }
                         .mainAction(words.page.printIsMain)
                         .disabled(away)
+                        .buttonBorderShape(quiet ? .circle : .capsule)
                         .controlSize(.large)
                         .fixedSize()
                         .layoutPriority(1)
                         .keyboardShortcut("p", modifiers: .command)
+                        .accessibilityLabel(name)
                         .accessibilityIdentifier("print")
                     }
                 }

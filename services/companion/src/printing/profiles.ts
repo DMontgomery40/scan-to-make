@@ -93,7 +93,7 @@ export async function findBambuRoute(serial: string | undefined, envPaths: strin
  */
 export function settingsGap(backend: string, env: Record<string, string | undefined>, kind: SetupKind | undefined,
   options: {model?: string; route?: RouteSource} = {}):
-  {missing: string[]; fill: Record<string, string>; lines: Record<string, string>} {
+  {missing: string[]; fill: Record<string, string>; lines: Record<string, string>; modelSetting?: string; route: boolean} {
   const value = (names: string[]) => names.map(name => env[name]?.trim()).find(item => !!item);
   const missing = kind ? requiredOf(kind).filter(item => !value(item.names)).map(item => item.env) : [];
   const fill: Record<string, string> = {}, lines: Record<string, string> = {};
@@ -119,7 +119,8 @@ export function settingsGap(backend: string, env: Record<string, string | undefi
       lines.BAMBU_NETWORK_CONFIG_DIR = options.route.lines.BAMBU_NETWORK_CONFIG_DIR;
     } else { missing.push('BAMBU_NETWORK_CONFIG_DIR'); }
   }
-  return {missing, fill, lines};
+  // The model's variable by the kind's own fields, and whether Add copies another MCP's route: what a client says about the gap.
+  return {missing, fill, lines, ...(modelField ? {modelSetting: modelField.env} : {}), route: ROUTE_KEYS.some(key => fill[key] !== undefined)};
 }
 
 export const EMPTY_PROFILES: SavedProfiles = {version: 1, profiles: [], choices: {}};

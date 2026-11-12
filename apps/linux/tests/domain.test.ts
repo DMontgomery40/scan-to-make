@@ -46,6 +46,9 @@ import {
   obtainControl,
   obtainValue,
   addressField,
+  folderModel,
+  keepFields,
+  typeSerial,
   canSelectPlate,
   printNeedsCheck,
   AUTO_UPDATE_LABEL,
@@ -642,6 +645,72 @@ test("Add a printer's address offers a web address only where the MCP's field ta
   assert.doesNotMatch(addressField(undefined, "octoprint").placeholder, /https:/);
 });
 
+// Add a printer's options as the companion builds them from the MCPs' own counterpart_setup_fields (bambu-printer-mcp
+// 1.1.82's Bambu kind; mcp-3d-printer-server's OctoPrint), plus a made-up kind with the same roles under other names.
+const setupOptions = () => {
+  const model = (env: string) => ({ name: "model", env, label: "Model", required: true, choices: [{ value: "p1s", label: "P1S" }, { value: "a1", label: "A1" }] });
+  return {
+    types: [
+      { printerType: "bambu", label: "Bambu Lab", backends: ["bambu-printer-mcp", "mcp-3d-printer-server"], serial: true,
+        fields: [{ name: "host", env: "PRINTER_HOST", label: "Address", required: true }, { name: "serial", env: "BAMBU_SERIAL", label: "Serial number", required: true },
+          model("BAMBU_MODEL"), { name: "secret", env: "BAMBU_TOKEN", label: "Access code", required: true }] },
+      { printerType: "octoprint", label: "OctoPrint", backends: ["mcp-3d-printer-server"], serial: false,
+        fields: [{ name: "host", env: "PRINTER_HOST", label: "Address", required: true }, { name: "port", env: "PRINTER_PORT", label: "Port", required: false },
+          { name: "secret", env: "API_KEY", label: "API key", required: true }] },
+      { printerType: "acme", label: "Acme", backends: ["mcp-3d-printer-server"], serial: true,
+        fields: [{ name: "host", env: "PRINTER_HOST", label: "Address", required: true }, { name: "serial", env: "ACME_SN", label: "Serial", required: true }, model("ACME_KIND")] },
+    ],
+    models: { "bambu-printer-mcp": [{ value: "p1s", label: "P1S" }, { value: "a1", label: "A1" }], "mcp-3d-printer-server": [{ value: "p1s", label: "P1S" }, { value: "a1", label: "A1" }] },
+    serialModels: { "01P": "p1s", "039": "a1" },
+  };
+};
+
+test("Add a printer: a found folder whose model nobody could tell asks for it, by its MCP's own model variable (Muse audit F2)", () => {
+  const options = setupOptions();
+  // David's mcp-3D-printer-server clone for a P1S whose serial names no model: the person chooses, and that goes to Add.
+  assert.deepEqual(folderModel({ printerType: "bambu", missing: ["BAMBU_MODEL", "BAMBU_TOKEN"], fill: {} }, options), { setting: "BAMBU_MODEL", needed: true, filled: undefined });
+  // A model Counterpart could tell is filled, and nothing is asked.
+  assert.deepEqual(folderModel({ printerType: "bambu", missing: ["BAMBU_MODEL"], fill: { BAMBU_MODEL: "p1s" } }, options), { setting: "BAMBU_MODEL", needed: false, filled: "p1s" });
+  // The variable is whatever the kind's model field says, never a name the app knows.
+  assert.deepEqual(folderModel({ printerType: "acme", missing: ["ACME_KIND"] }, options), { setting: "ACME_KIND", needed: true, filled: undefined });
+  assert.equal(folderModel({ printerType: "acme", missing: ["BAMBU_MODEL"] }, options).needed, false);
+  // A kind without a model field, or no fields from the MCPs yet, never asks.
+  assert.deepEqual(folderModel({ printerType: "octoprint", missing: ["API_KEY"] }, options), { setting: undefined, needed: false, filled: undefined });
+  assert.equal(folderModel({ printerType: "bambu", missing: ["BAMBU_MODEL"] }, undefined).needed, false);
+});
+
+test("Add a printer: a typed serial names the model unless the person chose one, and a corrected serial picks again (Muse audit F7)", () => {
+  const options = setupOptions();
+  const form = { backend: "bambu-printer-mcp", printerType: "bambu", host: "192.0.2.1" };
+  // Typing a P1S serial fills its model, as inferred.
+  let typed = typeSerial(form, "01P00A123456789", options, false);
+  assert.deepEqual([typed.form.model, typed.inferred], ["p1s", true]);
+  // A corrected serial picks again; one that names nothing clears the model it had picked.
+  typed = typeSerial(typed.form, "03900A000000001", options, typed.inferred);
+  assert.deepEqual([typed.form.model, typed.inferred], ["a1", true]);
+  typed = typeSerial(typed.form, "ZZZ00A", options, typed.inferred);
+  assert.deepEqual([typed.form.model, typed.inferred], ["", false]);
+  // A model the person chose is never replaced by a serial, on any keystroke.
+  const chosen = { ...form, model: "a1" };
+  for (const serial of ["0", "01", "01P", "01P00A123456789"]) {
+    typed = typeSerial(chosen, serial, options, false);
+    assert.deepEqual([typed.form.model, typed.form.serial, typed.inferred], ["a1", serial, false]);
+  }
+  // A model the MCP doesn't list for this backend is never filled.
+  assert.equal(typeSerial({ ...form, backend: "other" }, "01P00A", options, false).form.model, undefined);
+});
+
+test("Add a printer sends only what the chosen kind's MCP reads: a port for OctoPrint, a serial and model for a Bambu", () => {
+  const options = setupOptions();
+  const typedEverything = { backend: "mcp-3d-printer-server", host: "192.0.2.1", port: "80", serial: "01P00A", model: "p1s", secret: "k" };
+  assert.deepEqual(keepFields({ ...typedEverything, printerType: "octoprint" }, options),
+    { backend: "mcp-3d-printer-server", printerType: "octoprint", host: "192.0.2.1", port: "80", secret: "k" });
+  assert.deepEqual(keepFields({ ...typedEverything, printerType: "bambu" }, options),
+    { backend: "mcp-3d-printer-server", printerType: "bambu", host: "192.0.2.1", serial: "01P00A", model: "p1s", secret: "k" });
+  assert.deepEqual(keepFields({ ...typedEverything, printerType: "acme" }, options).model, "p1s", "any kind that declares a model keeps it");
+  assert.deepEqual(keepFields({ ...typedEverything, printerType: "bambu" }, undefined), { ...typedEverything, printerType: "bambu" }, "unknown fields: kept");
+});
+
 test("while the printer MCP sends the file, a project shows the companion's percentage", () => {
   // counterpart/1 upload progress, as the companion writes it to Project.progress (Mac, iPhone, iPad and Android show the same).
   assert.equal(words({ id: "x", state: "printing", progress: "Sending to the printer… 62%" } as unknown as Project), "Sending to the printer… 62%");
@@ -663,7 +732,7 @@ test("all three shared limit reasons survive project words with projects present
     // The pass's own line is the companion's words too, never the wire status ("capped").
     assert.equal(passHeading(row.expected.passes.at(-1), 0), `Pass 1 · ${reasons[row.name]}`);
     assert.equal(passHeading({}, 1), "Pass 2 · Working", "a running pass");
-    assert.equal(words(row.expected), `${reasons[row.name]}. Try again or review the saved checkpoint.`);
+    assert.equal(words(row.expected), `${reasons[row.name]}. Trying again carries on from where it stopped.`);
     assert.equal(row.expected.canRetryCleanup, true);
   }
 });
@@ -962,4 +1031,41 @@ test("a fit made from a kept scan sends how its size is settled, starting on Use
   // A copy, or a fit with no words yet, sends no fit.
   assert.deepEqual(makeFromScanParams(id, "copy", "", choice), { id, kind: "copy" });
   assert.equal(makeFromScanParams(id, "fit", "  ", choice).fit, undefined);
+});
+
+// PRD §8.10: an update the companion said waits or started, whose finishing event never came (a restart), says so
+// instead of "waiting" forever; any word about that install first stops its clock. The Mac's and phones' clocks.
+// The useWorkspace wiring of the sentence has no component harness here and is untested.
+test("a wait or a start that never hears back says so, and any other word stops its clock", async () => {
+  const { mcpPhase, mcpWaitClock, MCP_UNHEARD, MCP_WAIT_LIMIT_MS, MCP_STARTED_LIMIT_MS, mcpUpdateNotice } = await import("../src/domain.ts");
+  assert.equal(MCP_WAIT_LIMIT_MS, 120_000);
+  assert.equal(MCP_STARTED_LIMIT_MS, 35 * 60_000);
+  assert.equal(MCP_UNHEARD, "Counterpart didn’t say whether this updated. Try Update again.");
+  const reply = JSON.parse(readFileSync(new URL("../../../packages/contracts/fixtures/mcp-update-waiting.json", import.meta.url), "utf8"));
+  assert.equal(mcpPhase(reply), "waiting", "Update's answer: waiting");
+  assert.equal(mcpUpdateNotice(reply), "Updates as soon as Counterpart finishes its work on this printer.");
+  assert.equal(mcpPhase({ type: "mcp.update.waiting" }), "waiting");
+  assert.equal(mcpPhase({ type: "mcp.update.started" }), "started");
+  assert.equal(mcpPhase({ update: { state: "started" } }), "started");
+  assert.equal(mcpPhase({ type: "mcp.update.done" }), undefined);
+  assert.equal(mcpPhase({ update: { state: "current" } }), undefined);
+  // Download (printers.installMcp) answers in the same shape, and Settings passes its phase like Update and Move.
+  assert.equal(mcpPhase({ update: { state: "started", found: "Installing bambu-printer-mcp…" } } as { update: { state: string } }), "started");
+  const settings = readFileSync(new URL("../src/Settings.tsx", import.meta.url), "utf8");
+  const download = settings.slice(settings.indexOf('"printers.installMcp"'));
+  assert.match(download.slice(0, download.indexOf("await refresh()")), /mcpPhase\(r\)/, "Download starts the wait clock");
+  const expired: string[] = [];
+  const clock = mcpWaitClock((id) => expired.push(id), { waiting: 30, started: 60 });
+  clock.note(reply.update.mcpId, "waiting");
+  clock.note("stuck", "started");
+  clock.note("heard", "waiting");
+  clock.note("heard", undefined);
+  clock.note("finished", "started");
+  clock.note("finished", undefined);
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  assert.deepEqual(expired, [reply.update.mcpId, "stuck"]);
+  clock.note("stopped", "started");
+  clock.stop();
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.deepEqual(expired, [reply.update.mcpId, "stuck"], "stopping clears every clock");
 });

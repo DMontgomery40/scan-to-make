@@ -51,14 +51,18 @@ public struct PrinterSetupOptions: Decodable, Sendable, Equatable {
         public let printerType: String
         public let label: String
         public let backends: [String]
-        /// It needs a serial number and a model (Bambu Lab).
+        /// Its MCP reads a serial number (it declares a `serial` field).
         public let serial: Bool
         public let secret: Secret?
         /// The address field in the MCP's words; `url` when it also takes a web address (https://…, a sub-path).
         public let address: Address?
         /// Every setting the MCP reads for this kind, in its words (its first MCP's list); nil from an older companion.
         public let fields: [Field]?
+        /// The MCPs whose Check asks for this kind's camera picture (each MCP says so in `counterpart_setup_fields`); nil from an older companion.
+        public let checkCamera: [String]?
         public func field(_ name: String) -> Field? { fields?.first { $0.name == name } }
+        /// Whether Check asks this MCP for a camera picture of a printer of this kind.
+        public func checksCamera(_ backend: String) -> Bool { checkCamera?.contains(backend) == true }
         public var id: String { printerType }
     }
     public struct Address: Decodable, Sendable, Equatable {
@@ -106,8 +110,8 @@ public struct PrinterCandidate: Decodable, Sendable, Equatable, Identifiable {
     /// A folder whose `.env` lacks settings its MCP needs (names only), and what Add fills (only the model).
     public let missing: [String]?
     public let fill: [String: String]?
-    /// Its MCP needs a model Counterpart couldn't tell: the sheet asks.
-    public var needsModel: Bool { missing?.contains("BAMBU_MODEL") == true && fill?["BAMBU_MODEL"] == nil }
+    /// Add also copies another MCP's authenticated route for this printer (lines in `fill`).
+    public let route: Bool?
 }
 
 public extension PrinterCandidate {
@@ -125,6 +129,27 @@ public extension PrinterCandidate {
 }
 
 public extension PrinterForm {
+    /// The form for a kind: values for fields its MCP doesn't declare (port, serial, model) are dropped, so they are never
+    /// sent. Kept as they are when the kind's fields are unknown.
+    mutating func keepFields(of type: PrinterSetupOptions.PrinterType?) {
+        guard let type, type.fields != nil else { return }
+        if type.field("port") == nil { port = nil }
+        if type.field("serial") == nil { serial = "" }
+        if type.field("model") == nil { model = nil }
+    }
+    /// What the kind's MCP requires that the form lacks (its required address, serial and model fields; the secret is the sheet's).
+    func lacks(_ type: PrinterSetupOptions.PrinterType?) -> [PrinterSetupOptions.Field] {
+        guard let fields = type?.fields else { return [] }
+        return fields.filter { field in
+            guard field.required else { return false }
+            switch field.name {
+            case "host": return host.trimmingCharacters(in: .whitespaces).isEmpty
+            case "serial": return serial.trimmingCharacters(in: .whitespaces).isEmpty
+            case "model": return model == nil
+            default: return false
+            }
+        }
+    }
     /// Types the serial number. The serial names the model (the MCP's own table) unless the person chose one, so a
     /// corrected serial picks again. `inferred` says whether the current model came from discovery or the serial; the
     /// result says whether the model now does.
@@ -210,8 +235,9 @@ public struct ObtainStep: Decodable, Sendable, Equatable {
 
 public struct PrinterForm: Sendable, Equatable, Encodable {
     public var folder: String?
-    public var backend = "bambu-printer-mcp"
-    public var printerType = "bambu"
+    /// The MCP and the kind it drives, from the MCPs' own list; the sheet sets both before anything is sent.
+    public var backend = ""
+    public var printerType = ""
     public var host = ""
     public var port: String?
     public var serial = ""
@@ -233,11 +259,11 @@ public struct PrinterForm: Sendable, Equatable, Encodable {
         }
         try c.encode(backend, forKey: .backend); try c.encode(printerType, forKey: .printerType)
         try c.encode(host.trimmingCharacters(in: .whitespaces), forKey: .host)
+        // Each value the form holds; `keepFields(of:)` drops what the chosen kind's MCP doesn't read.
         if let port, !port.isEmpty { try c.encode(port, forKey: .port) }
-        if printerType == "bambu" {
-            try c.encode(serial.trimmingCharacters(in: .whitespaces), forKey: .serial)
-            try c.encodeIfPresent(model, forKey: .model)
-        }
+        let serial = serial.trimmingCharacters(in: .whitespaces)
+        if !serial.isEmpty { try c.encode(serial, forKey: .serial) }
+        try c.encodeIfPresent(model, forKey: .model)
         if !secret.isEmpty { try c.encode(secret, forKey: .secret) }
         if let name, !name.isEmpty { try c.encode(name, forKey: .name) }
         if let slicer, !slicer.isEmpty { try c.encode(slicer, forKey: .slicer) }

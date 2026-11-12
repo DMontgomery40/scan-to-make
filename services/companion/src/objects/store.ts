@@ -57,6 +57,12 @@ export interface ObjectPass {
   startedAtMs: number;
   endedAtMs?: number;
   note?: string;
+  /**
+   * The question this pass ended on, as the person was asked it. The project's `ask` holds only the latest question,
+   * so this is how an earlier one stays with its answer (a made-from-another project's `inherited` history). Passes
+   * saved before Nov 11 have none; `inheritHistory` recovers it from the answering pass's note.
+   */
+  question?: string;
   /** How it ended (`PassEnd`); absent while it runs. Closed only by `endPass`. */
   status?: PassStatus;
   summary?: string;
@@ -140,6 +146,11 @@ export interface StmObject {
   prints?: import('./versions.js').PrintAttempt[];
   versionsV1?: boolean;
   historyRestored?: string;
+  /**
+   * What was asked and answered for the project this one was made from (Make something else from this scan, or
+   * Duplicate), snapshotted when it was made (`inheritHistory`): every later pass's worker reads it, and deleting or
+   * changing the source never changes it. David, Nov 11: "you're basically 'forking' the project".
+   */
   inherited?: import('@scan-to-make/contracts/counterpart').InheritedHistory;
   /**
    * The project's picture (PRD §5.1): the object alone on the stage, drawn by the companion (`pictures/…png`), and

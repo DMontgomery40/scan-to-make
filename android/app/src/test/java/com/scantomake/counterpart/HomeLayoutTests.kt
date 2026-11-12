@@ -156,7 +156,7 @@ class HomeLayoutTests {
         compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText(title))
         // Home names a stopped project twice: its Needs you card (which already says why it stopped) and its tile.
         compose.onAllNodesWithText(title, substring = true).onFirst().performClick()
-        compose.onNodeWithText("Stopped after 10 minutes without worker activity. Try again or review the saved checkpoint.").performScrollTo().assertExists()
+        compose.onNodeWithText("Stopped after 10 minutes without worker activity. Trying again carries on from where it stopped.").performScrollTo().assertExists()
         compose.onNodeWithText("Try Again").performScrollTo().assertIsEnabled()
     }
 
@@ -681,7 +681,28 @@ class HomeLayoutTests {
 
     @Test fun printerSoftwareRetainsWaitingMoveWhenAnotherUpdateStarts() = printerSoftwareMove(false, secondUpdate = true)
 
-    private fun printerSoftwareMove(lostReply: Boolean, navigateHome: Boolean = false, secondUpdate: Boolean = false) {
+    /**
+     * PRD §8.10: the Move asked the companion for that install, which answered "waiting", and its finishing event never
+     * came (a companion restart). After the clock runs out the row says so, not "waiting" forever, and the Move stays pressable.
+     */
+    @Test fun printerSoftwareMoveThatNeverHearsBackSaysSo() = printerSoftwareMove(false, neverHears = true)
+
+    /** PRD §8.10: the clocks the companion's own bounds give (the Mac's and iPhone's), and an update under way that never finishes. */
+    @Test fun anMcpUpdateUnderWayThatNeverFinishesSaysSoOnItsOwnClock() {
+        org.junit.Assert.assertEquals(120_000L, state.mcpWaitLimitMs)
+        org.junit.Assert.assertEquals(35 * 60_000L, state.mcpStartedLimitMs)
+        state.mcpStartedLimitMs = 1_000
+        state.noteMcpUpdate("mcp-000000000000000a", "started")
+        state.noteMcpUpdate("mcp-000000000000000b", "started")
+        state.noteMcpUpdate("mcp-000000000000000b", "done")
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(1_500))
+        org.junit.Assert.assertEquals(setOf("mcp-000000000000000a"), state.mcpUnheard.value)
+        state.noteMcpUpdate("mcp-000000000000000a", "started")
+        org.junit.Assert.assertEquals("a new word clears it", emptySet<String>(), state.mcpUnheard.value)
+    }
+
+    private fun printerSoftwareMove(lostReply: Boolean, navigateHome: Boolean = false, secondUpdate: Boolean = false, neverHears: Boolean = false) {
+        if (neverHears) state.mcpWaitLimitMs = 1_000
         val pkg = WireJson.decodeFromString<com.scantomake.counterpart.api.McpPackageCopies>(contractFixture("mcp-profile-copies.json").readText())
         app.pairingStore.save(v2Record(), false)
         val transport = FakeTransport { request, _ ->
@@ -725,6 +746,13 @@ class HomeLayoutTests {
             }
         } else {
             compose.waitUntil(5_000) { compose.onAllNodes(hasText("Updates as soon as Counterpart finishes its work on this printer.")).fetchSemanticsNodes().isNotEmpty() }
+        }
+        if (neverHears) {
+            org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(state.mcpWaitLimitMs + 500))
+            org.junit.Assert.assertEquals("Counterpart didn’t say whether this updated. Try Update again.", AppState.MCP_UNHEARD)
+            compose.waitUntil(5_000) { compose.onAllNodes(hasText(AppState.MCP_UNHEARD)).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText("Updates as soon as Counterpart finishes its work on this printer.").assertDoesNotExist()
+            compose.onNodeWithText("Move Bambu Lab P1S (mcp-3D-printer-server, your copy at /home/ada/mcp-3D-printer-server) to Counterpart’s updated copy").assertIsEnabled()
         }
         if (secondUpdate) {
             compose.onNodeWithText("Update Counterpart’s copy").performScrollTo().performClick()
@@ -849,6 +877,9 @@ class HomeLayoutTests {
     @Test fun addAPrinterApprovalFromTheMcpFillsTheKey() {
         val transport = addPrinterFixture()
         compose.onNodeWithTag("add-printer-found-bonjour:octopi.local:80").performClick()
+        // OctoPrint's own fields: a port, and no serial number or model.
+        compose.onNodeWithTag("add-printer-port").assertTextContains("80")
+        org.junit.Assert.assertTrue(compose.onAllNodes(hasTestTag("add-printer-serial")).fetchSemanticsNodes().isEmpty())
         compose.onNodeWithTag("add-printer-add").performScrollTo().assertIsNotEnabled()
         compose.onNodeWithText("Approve in OctoPrint").performScrollTo().performClick()
         compose.waitUntil(5_000) { compose.onAllNodes(hasText("OctoPrint approved Counterpart.")).fetchSemanticsNodes().isNotEmpty() }
@@ -860,6 +891,9 @@ class HomeLayoutTests {
         assertEquals("0b6b8a52-6f1e-4c5a-9d43-4c1c3f6a2e10", (body["session"] as JsonPrimitive).content)
         val added = WireJson.parseToJsonElement(String(transport.calls.last { it.request.url.endsWith("/setup/add") }.request.body!!)).jsonObject["printer"]!!.jsonObject
         assertEquals("OCTO-KEY-FROM-APPROVAL", (added["secret"] as JsonPrimitive).content)
+        // Exactly what OctoPrint's MCP reads: no serial number or model goes with it.
+        assertEquals(mapOf("backend" to "mcp-3d-printer-server", "printerType" to "octoprint", "host" to "octopi.local", "port" to "80",
+            "secret" to "OCTO-KEY-FROM-APPROVAL", "name" to "OctoPi"), added.mapValues { (it.value as JsonPrimitive).content })
     }
 
     /** Home with a project, then Printers → Add a Printer, answered from packages/contracts/fixtures/printer-setup-phone.json. */

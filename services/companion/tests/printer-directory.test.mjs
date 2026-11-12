@@ -229,3 +229,22 @@ test('a config that names a model still shows what the MCP reports; an MCP that 
   await new Promise(resolve => setTimeout(resolve, 20));
   assert.equal(directory.list().destinations[0].name, 'Your printer');
 });
+
+// Nov 6, David: "now i only see one to update and missing the other one". A P1S set up in both MCPs is one printer; each
+// MCP it is set up in carries its own install, name and versions, so Settings' row for the MCP prints don't go through
+// still has its Update (packages/contracts/fixtures/printer-both-mcps.json, which the Mac's row test reads too).
+test('PRD §8.10: each MCP a printer is set up in names its install, label and versions', async () => {
+  const {readFile} = await import('node:fs/promises');
+  const expected = JSON.parse(await readFile(new URL('../../../packages/contracts/fixtures/printer-both-mcps.json', import.meta.url), 'utf8'));
+  const both = {...catalog, destinations: [{id: 'current', name: 'Bambu Lab P1S', backend: 'bambu-printer-mcp', source: 'current', origin: 'printer-handoff',
+    mcps: [{backend: 'bambu-printer-mcp', destinationId: 'current'}, {backend: 'mcp-3d-printer-server', destinationId: 'counterpart-a07c6f7d'}]}]};
+  const directory = new PrinterDirectory(both, () => undefined);
+  const installs = {current: ['mcp-812bcaf2d1ff2948', '1.1.73'], 'counterpart-a07c6f7d': ['mcp-3a2f0c9e5b7d1e44', '1.2.56']};
+  directory.useVersions({mcpId: id => installs[id]?.[0], version: id => installs[id]?.[1],
+    latestVersion: pkg => ({'bambu-printer-mcp': '1.1.78', 'mcp-3d-printer-server': '1.2.58'})[pkg]});
+  assert.deepEqual(JSON.parse(JSON.stringify(directory.list())), expected);
+  // A companion's updater without `version` (or none at all) still lists both MCPs.
+  directory.useVersions({mcpId: () => undefined, latestVersion: () => undefined});
+  assert.deepEqual(directory.list().destinations[0].mcps, [{backend: 'bambu-printer-mcp', destinationId: 'current', label: 'bambu-printer-mcp'},
+    {backend: 'mcp-3d-printer-server', destinationId: 'counterpart-a07c6f7d', label: 'mcp-3D-printer-server'}]);
+});
