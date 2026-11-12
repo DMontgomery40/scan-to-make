@@ -1531,7 +1531,9 @@ final class LayoutParityUITests: XCTestCase {
             if id == "gallery-together" || id.hasPrefix("gallery-plate-") { XCTAssertFalse(ar.exists, "no AR on \(id)") }
         }
         result.tap()
-        XCTAssertTrue(ar.waitForExistence(timeout: 30), "the part's model came, so its AR chip is there")
+        XCTAssertTrue(ar.waitForExistence(timeout: 30), "the part's AR chip is there")
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "ready"), object: ar)
+        XCTAssertEqual(XCTWaiter().wait(for: [ready], timeout: 30), .completed, "the part's model came, so AR opens: \(String(describing: ar.value))")
         ar.tap()
         // A device opens Quick Look; a simulator without a previewer must keep a visible retry.
         #if targetEnvironment(simulator)
@@ -1548,6 +1550,27 @@ final class LayoutParityUITests: XCTestCase {
         #if !targetEnvironment(simulator)
         XCTAssertNotEqual(ar.exists ? ar.value as? String : nil, "failed")
         #endif
+    }
+
+    /// #606: on a slow link the part's AR chip is there while its model comes, saying so, and becomes AR once it is here.
+    func testThePartsARChipSaysItIsComingWhileTheModelDownloads() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try Self.boxSTL().write(to: folder.appendingPathComponent("mic.stl"))
+        let app = XCUIApplication()
+        app.launchArguments = ["-CounterpartFixtures", folder.path, "-CounterpartFixtureSet", "ar-stage", "-CounterpartScreen", "printed",
+                               "-CounterpartSlowModel", "12"]
+        app.launch()
+        XCTAssertTrue(app.buttons["gallery-result"].waitForExistence(timeout: 20))
+        app.buttons["gallery-result"].tap()
+        let ar = app.buttons["gallery-ar"]
+        XCTAssertTrue(ar.waitForExistence(timeout: 8), "the AR chip is there while the model comes")
+        XCTAssertEqual(ar.value as? String, "loading")
+        XCTAssertFalse(ar.isEnabled, "nothing to open yet")
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot()); shot.name = "ar-chip-loading"; shot.lifetime = .keepAlways; add(shot)
+        let arrived = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "ready"), object: ar)
+        XCTAssertEqual(XCTWaiter().wait(for: [arrived], timeout: 40), .completed, "AR once the model is here: \(String(describing: ar.value))")
     }
 
     /// #606, David, Nov 11: "you can't rotate the thing and zoom in on the 3d thing anymore". On the iPhone and the iPad a

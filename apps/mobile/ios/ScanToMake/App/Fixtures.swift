@@ -711,6 +711,9 @@ struct FixtureTransport: HTTPTransport {
         // `-CounterpartSlowScan <seconds>`: a scan file takes that long to come (a busy Mac over Wi-Fi), for pictures.
         let slow = UserDefaults.standard.double(forKey: "CounterpartSlowScan")
         if path.contains("/scan/"), slow > 0 { try await Task.sleep(for: .seconds(slow)) }
+        // `-CounterpartSlowModel <seconds>`: the part's model takes that long to come (#606: the AR chip says it is coming).
+        let slowModel = UserDefaults.standard.double(forKey: "CounterpartSlowModel")
+        if path.hasSuffix("/model.stl"), slowModel > 0 { try await Task.sleep(for: .seconds(slowModel)) }
         // `-CounterpartSlowPictures <seconds>`: the Mac's pictures take that long too (review F4 on #525).
         let slowPictures = UserDefaults.standard.double(forKey: "CounterpartSlowPictures")
         // Renders too (a stage's still can be either): the stage stays "loading" for as long as a test looks, then the
