@@ -367,7 +367,9 @@ test('a check that fails on the way (the session reconnecting) is tried again, s
   const now = m => {
     const observed = new Set(m.observations.map(o => o.frame_id));
     const pending = [first, later].find(f => !observed.has(f.id));
-    return {physical: {...m.verdict(), ...(pending ? {assessment: {...assessmentFor(pending), layer: pending.layer, expectedHeightMm: pending.expectedHeightMm}} : {})}};
+    const verdict = m.verdict();
+    return {physical: {...verdict, ...(pending ? {assessment: {...assessmentFor(pending), layer: pending.layer, expectedHeightMm: pending.expectedHeightMm}} : {})},
+      problems: verdict.status === 'suspect_no_extrusion' ? [{code: 'physical-no-extrusion', severity: 'error', message: 'Possible extrusion failure.'}] : []};
   };
   const judge = async ({prompt}) => /layer 1,/.test(prompt) ? {visibility: 'clear', footprintVisible: true, deposition: 'unknown'} : EMPTY_PLATE;
   const clock = {t: T0, now() { return this.t; }, async sleep(ms) { this.t += ms; }};
@@ -388,4 +390,108 @@ test('after the printer says it finished, the card keeps saying the camera showe
   assert.deepEqual([status.phase, status.tint], ['printed', 'orange']);
   assert.equal(status.text, `The printer says it's done. ${shared.line}`);
   assert.match(objectStatus({...shared.printedProject, print: {...shared.printedProject.print, monitor: {...shared.printedProject.print.monitor, checkSent: undefined}}}).text, /^Printed /);
+});
+
+// ---------------------------------------------------------------------------
+// Review of #745 (Muse, Nov 12): the warning survives once raised, a skipped check never starves later ones, and a
+// crossed read never sends the check without the MCP's words.
+
+const MCP_WORDS = 'Possible extrusion failure: the expected print area appeared empty. Check the print.';
+const SUSPECT = {code: 'physical-no-extrusion', severity: 'error', message: MCP_WORDS};
+/** The monitor with a scripted camera check: `results` are what each check call resolves to, in order. */
+function scripted({reports, results = []}) {
+  const clock = {t: T0, now() { return this.t; }, async sleep(ms) { this.t += ms; }};
+  const events = [], saves = [], kept = new Map(), asked = [];
+  const queue = [...reports], answers = [...results];
+  const target = {projectId: randomUUID(), printId: randomUUID(), destinationId: 'current', printerName: 'Bambu Lab P1S', jobName: JOB, dispatchedAtMs: T0};
+  const monitor = new PrintMonitorRunner(target, {clock, milestones: () => [50],
+    read: async () => ({observedAt: new Date(clock.t).toISOString(), problems: [], source: 'counterpart', ...queue.shift()}),
+    frame: async id => `prints/${target.printId}/frames/${id}.jpg`,
+    keepFrame: async (id, jpeg) => { kept.set(id, jpeg); return `prints/${target.printId}/frames/${id}.jpg`; },
+    check: async assessment => { asked.push(assessment.frameId); return answers.length ? answers.shift() : undefined; },
+    save: async (m, live) => { saves.push({m, live}); }, end: async () => {}, emit: async d => { events.push(d); }});
+  const signal = new AbortController().signal;
+  return {events, saves, kept, asked, monitor, target, types: () => events.map(e => e.type),
+    async steps(n) { for (let i = 0; i < n; i++) { await monitor.step(signal); await monitor.checked(); clock.t += 10_000; } }};
+}
+const asking = frame => ({required: true, frameId: frame.id, referenceFrameIds: [], layer: frame.layer, expectedHeightMm: frame.expectedHeightMm, expectedFootprintMm: FOOTPRINT});
+
+test('review 1: after the check, nothing more is judged, and the card and the done keep the MCP\'s words even when a later report drops them', async () => {
+  const later = savedFrame(EMPTY, {role: 'periodic', layer: 21, expectedHeightMm: 4.2});
+  const h = scripted({reports: [
+    running(11, {physical: {status: 'suspect_no_extrusion', evidence: [], assessment: asking(later)}, problems: [SUSPECT]}),
+    // The MCP's verdict falls back to unknown (a later observation, or a version without the sticky verdict).
+    running(21, {physical: {status: 'unknown', evidence: [], assessment: asking(later)}, problems: []}),
+    running(30, {physical: {status: 'unknown', evidence: []}, problems: []}),
+    {state: 'finished', job: {name: JOB, progress: 100, layer: 265, totalLayers: 265}, physical: {status: 'unknown', evidence: []}, problems: []},
+  ]});
+  await h.steps(4);
+  assert.deepEqual(h.asked, [], 'no observation after the check could take the verdict back');
+  assert.equal(h.types().filter(t => t === 'print.check').length, 1);
+  const printing = h.saves.findLast(s => s.live?.state === 'printing');
+  assert.equal(printing.m.checkMessage, MCP_WORDS);
+  const print = {dispatchedAt: new Date(T0).toISOString(), destination: {name: 'Bambu Lab P1S'}, monitor: printing.m, live: printing.live};
+  assert.deepEqual([objectStatus({state: 'printing', print}).text, objectStatus({state: 'printing', print}).tint], [MCP_WORDS, 'orange'], 'the line survives a report without it');
+  const done = h.events.find(e => e.type === 'print.done');
+  assert.equal(done.detail.reason, MCP_WORDS);
+  assert.deepEqual(eventWords('print.done', done.data, {title: 'Forester', printer: 'Bambu Lab P1S', reason: done.detail.reason}).body, MCP_WORDS);
+  const ended = h.saves.at(-1).m;
+  assert.equal(objectStatus({state: 'printed', print: {...print, monitor: ended}}).text, `The printer says it's done. ${MCP_WORDS}`);
+});
+
+test('review 3: a check that resolves without an observation never uses the frame up; no worker is not a try, and later checkpoints still come', async () => {
+  const first = savedFrame(PRINTING);
+  const present = {frameId: first.id, firstLayer: true, deposition: 'present', jpeg: PRINTING};
+  // Nothing could be judged once (a stale record, a changed frame), then it could.
+  const once = scripted({reports: [1, 2, 3, 4].map(l => running(l, {physical: {status: 'unknown', evidence: [], assessment: asking(first)}})), results: [undefined, present]});
+  await once.steps(4);
+  assert.deepEqual(once.asked, [first.id, first.id]);
+  assert.equal(once.types().filter(t => t === 'print.first-layer').length, 1);
+  // AI off, then Claude Code chosen mid-print: every read re-evaluates, and tries are never spent on it.
+  const later = scripted({reports: [1, 2, 3, 4, 5, 6, 7].map(l => running(l, {physical: {status: 'unknown', evidence: [], assessment: asking(first)}})),
+    results: ['no-worker', 'no-worker', 'no-worker', 'no-worker', 'no-worker', present]});
+  await later.steps(7);
+  assert.equal(later.asked.length, 6);
+  assert.equal(later.types().filter(t => t === 'print.first-layer').length, 1);
+  // A frame that can never be judged is tried a bounded number of times, and the next checkpoint still gets its look.
+  const next = savedFrame(EMPTY, {role: 'periodic', layer: 11});
+  const stuck = scripted({reports: [1, 2, 3, 4, 5].map(l => running(l, {physical: {status: 'unknown', evidence: [], assessment: asking(first)}}))
+    .concat([running(11, {physical: {status: 'unknown', evidence: [], assessment: asking(next)}})])});
+  await stuck.steps(6);
+  assert.deepEqual(stuck.asked, [first.id, first.id, first.id, next.id]);
+});
+
+test('review 4: a read that crossed the submit sends nothing yet; the check goes out once, from the report with the MCP\'s verdict and words', async () => {
+  const frame = savedFrame(EMPTY);
+  const outcome = {frameId: frame.id, firstLayer: true, deposition: 'absent', jpeg: EMPTY, physical: {status: 'suspect_no_extrusion', evidence: [frame.id]}};
+  const h = scripted({results: [outcome], reports: [
+    running(1, {physical: {status: 'unknown', evidence: [], assessment: asking(frame)}}),
+    running(2, {physical: {status: 'unknown', evidence: []}}),                         // generated before the submit landed
+    running(3, {physical: {status: 'suspect_no_extrusion', evidence: [frame.id]}}),    // the verdict, no words yet
+    running(4, {physical: {status: 'suspect_no_extrusion', evidence: [frame.id]}, problems: [SUSPECT]}),
+    running(5, {physical: {status: 'suspect_no_extrusion', evidence: [frame.id]}, problems: [SUSPECT]}),
+  ]});
+  await h.steps(3);
+  assert.equal(h.types().includes('print.check'), false, 'never "Check the print." with no words');
+  await h.steps(2);
+  const checks = h.events.filter(e => e.type === 'print.check');
+  assert.equal(checks.length, 1);
+  assert.equal(eventWords('print.check', checks[0].data, {title: 'Forester', printer: 'Bambu Lab P1S'}).body, MCP_WORDS);
+  assert.deepEqual(h.kept.get(checks[0].id), EMPTY, 'with the judged frame');
+});
+
+test('review minors: an MCP without counterpart_print_assess gets no judgement; uppercase hashes match; only a preparation frame is a reference', async () => {
+  const never = async () => { throw new Error('the worker must not run'); };
+  const frame = savedFrame(EMPTY);
+  const noAssess = fakeMcp({frames: [frame], tools: ['counterpart_print_record']});
+  assert.equal(await checkPrintFrame(noAssess.session, assessmentFor(frame), never, new AbortController().signal), undefined);
+  const upper = savedFrame(EMPTY, {sha256: sha(EMPTY).toUpperCase()});
+  const a = fakeMcp({frames: [upper]});
+  assert.equal((await checkPrintFrame(a.session, assessmentFor(upper), scriptedJudge({[sha(EMPTY)]: EMPTY_PLATE}).judge, new AbortController().signal)).deposition, 'absent');
+  const notBaseline = savedFrame(PRINTING, {role: 'periodic', layer: 11}), current = savedFrame(EMPTY);
+  const b = fakeMcp({frames: [notBaseline, current]});
+  const {judge, seen} = scriptedJudge({[sha(EMPTY)]: EMPTY_PLATE});
+  await checkPrintFrame(b.session, assessmentFor(current, [notBaseline]), judge, new AbortController().signal);
+  assert.equal(seen[0].referenceFile, false);
+  assert.equal(b.observations[0].reference_frame_id, undefined, 'the observation is kept, the reference left out');
 });
