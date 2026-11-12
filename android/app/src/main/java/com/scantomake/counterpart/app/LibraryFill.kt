@@ -30,6 +30,11 @@ class LibraryFill(private val app: Counterpart, private val scope: CoroutineScop
     private var last: Pair<List<Project>, Boolean>? = null
     private val opened = mutableSetOf<String>()
 
+    /** Whether the link is metered now; tests replace it. */
+    internal var meteredNow: () -> Boolean = { metered() }
+    /** Bumped by Clear: a download queued before it doesn't start after it (review of #741, P2). */
+    @Volatile private var generation = 0
+
     private fun metered(): Boolean {
         val connectivity = app.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return true
         val caps = connectivity.getNetworkCapabilities(connectivity.activeNetwork) ?: return true
@@ -61,17 +66,29 @@ class LibraryFill(private val app: Counterpart, private val scope: CoroutineScop
         if (opened.add(id)) last?.let { fill(it.first, it.second) }
     }
 
-    fun clear() { library?.clear(); usage.value = 0 }
+    /** Settings → Clear. What was queued is released too, so the next list queues those files again (review of #741, P2). */
+    fun clear() {
+        generation++
+        synchronized(inFlight) { inFlight.clear() }
+        library?.clear(); usage.value = 0
+    }
+
+    /** Files queued or in flight (tests). */
+    internal val pending: Set<String> get() = synchronized(inFlight) { inFlight.toSet() }
 
     /** The list loaded or changed; `fromComputer` when it came from the computer now, so a missing project is deleted. */
     fun fill(projects: List<Project>, fromComputer: Boolean) {
         last = projects to fromComputer
         val library = library ?: return
-        if (!library.isActive || projects.isEmpty()) return
+        if (!library.isActive) return
+        val gen = generation
         scope.launch(Dispatchers.IO) {
+            // The computer's whole list is the truth even when it is empty: every project was deleted, so every file goes
+            // (review of #741, P1). A saved list never prunes.
             if (fromComputer) library.prune(projects.map { it.id }.toSet())
+            if (projects.isEmpty()) return@launch
             val everOpened = opened + projects.filter { library.lastOpened(it.id) != null }.map { it.id }
-            val metered = metered()
+            val metered = meteredNow()
             val wants = LibraryPlan.wants(projects, everOpened, library.keep)
                 .filter { LibraryPlan.fetches(it, library.keep, metered) }
                 .filter { library.file(it.project.id, it.name, it.project.mediaVersion) == null && !library.isTooLarge(it.project.id, it.name, it.project.mediaVersion) }
@@ -79,7 +96,13 @@ class LibraryFill(private val app: Counterpart, private val scope: CoroutineScop
             if (wants.isEmpty()) return@launch
             wants.map { want ->
                 launch { lane.withPermit {
-                    try { runCatching { app.companion.download(want.project, want.name) } }
+                    try {
+                        // The link now, not when it was queued (review of #741, P2): a model waits once the phone is on a
+                        // metered link; and nothing queued before a Clear starts after it.
+                        if (gen == generation && LibraryPlan.fetches(want, library.keep, meteredNow())) {
+                            runCatching { app.companion.download(want.project, want.name) }
+                        }
+                    }
                     finally { synchronized(inFlight) { inFlight.remove("${want.project.id}#${want.name}#${want.project.mediaVersion}") } }
                 } }
             }.forEach { it.join() }
