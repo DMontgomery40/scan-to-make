@@ -19,7 +19,7 @@ import {filamentProposalUnavailable, plateFilamentsUnavailable, ownSettingsUnava
 import type {RuntimeSettings} from '../runtime-settings.js';
 import type {CompanionSettingsStore} from '../settings.js';
 import type {CompanionSettingsPatch} from '@scan-to-make/contracts/counterpart';
-import {PRINT_LOG, printEndFailure, printLogLine, projectTitle, sizeText} from '../events/words.js';
+import {PRINT_LOG, printEndFailure, printLogLine, printedOut, projectTitle, sizeText} from '../events/words.js';
 import {PassTimings, STAGE_DEFAULT_SEC, passEstimate, stageWords, type PassKind, type PassStage, type StageId} from '../touchup/stages.js';
 import type {DesignEngine} from '../touchup/invocation.js';
 import {copyDesign, isCodeDesign, type CodeDesign, type DesignSource} from '../touchup/code-engine.js';
@@ -3630,7 +3630,7 @@ export class ObjectService {
     const saving = updated.passes.find(p => p.startedAtMs === startedAtMs)?.stages?.find(item => item.id === 'saving');
     if (saving?.endedAtMs !== undefined) void this.#deps.passTimings?.record(kind, result.engine ?? 'blender', 'saving', (saving.endedAtMs - saving.startedAtMs) / 1000).catch(() => undefined);
     const size = sizeText(updated.current?.sizeMm);
-    const printedBefore = changed && (updated.versions ?? []).slice(0, -1).some(v => v.printedAtMs !== undefined || updated.prints?.some(p => p.versionId === v.id && p.monitor?.endState === 'done'));
+    const printedBefore = changed && (updated.versions ?? []).slice(0, -1).some(v => v.printedAtMs !== undefined || updated.prints?.some(p => p.versionId === v.id && printedOut(p)));
     if (state === 'ready') await this.#emit({id: randomUUID(), type: 'pass.ready', projectId: id, ...(size || printedBefore ? {detail: {...(size ? {size} : {}), ...(printedBefore ? {printedBefore} : {})}} : {})});
     else if (state === 'needs-closeup') await this.#emit({id: randomUUID(), type: 'pass.ask', projectId: id, ...(ask ? {data: {askId: ask.id}} : {}),
       detail: {question: ask?.question ?? `Can you take a close-up of ${result.closeup ?? 'a part of the object'}?`}});

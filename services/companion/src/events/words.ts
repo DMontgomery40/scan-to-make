@@ -245,13 +245,19 @@ export function rowDetail(text: string | undefined, reason = false): string | un
   return `${cut.slice(0, cut.lastIndexOf(' ') > 40 ? cut.lastIndexOf(' ') : cut.length).replace(/[\s,;:·-]+$/, '')}…`;
 }
 
+/**
+ * A print that physically came out: ended done with nothing from the camera against it. A done after the camera check
+ * (#630) said nothing was coming out is only the printer's word, never a print of its design (train 11-12b review).
+ */
+export const printedOut = (p: {monitor?: {endState?: string; checkSent?: boolean}}) => p.monitor?.endState === 'done' && p.monitor?.checkSent !== true;
+
 /** The §4 line for a project, with its symbol and colour. */
 export function objectStatus(object: StatusSource, updatedAtMs?: number): ObjectStatus {
   // #616: the newest design is unprinted and unanswered while an earlier one was printed. Both are true, so the line says
   // both. Every other case keeps today's words (a one-design project reads exactly as before; Done stays Done).
   const latest = object.versions?.at(-1);
   if (latest && object.versions!.length > 1 && !latest.outcome && !['new', 'touching-up', 'needs-closeup', 'printing', 'failed', 'sent', 'confirmed', 'printed'].includes(object.state)) {
-    const printed = (version: typeof latest) => version.printedAtMs ?? object.prints?.filter(p => p.versionId === version.id && p.monitor?.endState === 'done').map(p => p.monitor?.endedAt ? Date.parse(p.monitor.endedAt) : p.startedAtMs).filter(Number.isFinite).sort((a,b) => b-a)[0];
+    const printed = (version: typeof latest) => version.printedAtMs ?? object.prints?.filter(p => p.versionId === version.id && printedOut(p)).map(p => p.monitor?.endedAt ? Date.parse(p.monitor.endedAt) : p.startedAtMs).filter(Number.isFinite).sort((a,b) => b-a)[0];
     const earlier = printed(latest) === undefined ? object.versions!.slice(0,-1).map(printed).filter((n): n is number => n !== undefined).sort((a,b) => b-a)[0] : undefined;
     if (earlier !== undefined) {
       const when = formatDate(new Date(earlier).toISOString());
@@ -267,7 +273,7 @@ export function objectStatus(object: StatusSource, updatedAtMs?: number): Object
       const stage = pass?.stages?.filter(item => item.endedAtMs === undefined).at(-1)?.words ?? object.progress;
       const minutes = pass?.estimate ? Math.max(1, Math.round(pass.estimate.remainingSec / 60)) : undefined;
       const doing = joined(stage, minutes ? `about ${minutes} min` : undefined);
-      const previousPrinted = object.versions?.some(v => v.printedAtMs !== undefined || object.prints?.some(p => p.versionId === v.id && p.monitor?.endState === 'done'));
+      const previousPrinted = object.versions?.some(v => v.printedAtMs !== undefined || object.prints?.some(p => p.versionId === v.id && printedOut(p)));
       if (previousPrinted) return {phase: 'working', text: 'Making your changes · the one on your desk is unchanged', detail: rowDetail(doing) ?? 'The printed design is unchanged', symbol: 'wand.and.sparkles', tint: 'blue'};
       return {phase: 'working', text: joined('Your Mac is working', stage, minutes ? `about ${minutes} min` : undefined).slice(0, 300), ...(rowDetail(doing) ? {detail: rowDetail(doing)} : {}), symbol: 'wand.and.sparkles', tint: 'blue'};
     }

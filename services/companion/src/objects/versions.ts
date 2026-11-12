@@ -2,6 +2,7 @@ import {createHash} from 'node:crypto';
 import {cp, mkdir, readFile, readdir, rename, rm, stat, statfs} from 'node:fs/promises';
 import {basename, dirname, join, relative, resolve} from 'node:path';
 import type {StmObject} from './store.js';
+import {printedOut} from '../events/words.js';
 
 export interface DesignVersion {
   id: string;
@@ -106,7 +107,7 @@ export function retainAttempts(before: StmObject, next: StmObject): StmObject {
 }
 
 export function printedAt(version: DesignVersion, prints: readonly PrintAttempt[] = []): number | undefined {
-  const times = prints.filter(p => p.versionId === version.id && p.monitor?.endState === 'done')
+  const times = prints.filter(p => p.versionId === version.id && printedOut(p))
     .map(p => p.monitor?.endedAt ? Date.parse(p.monitor.endedAt) : p.startedAtMs).filter(Number.isFinite);
   return version.printedAtMs ?? (times.length ? Math.max(...times) : undefined);
 }
@@ -262,5 +263,9 @@ async function migrateOnce(object: StmObject, dir: string, options: {events?: Hi
   const latest = versions.at(-1);
   const answer = object.outcome ?? (object.state === 'confirmed' ? 'works' : undefined);
   if (latest && answer && !latest.outcome) latest.outcome = answer;
+  // A project marked Printed by hand, with no print of its newest design on record, keeps that on the design, as the
+  // status setter records it (printedAtMs), never as a made-up print attempt (train 11-12b review, Codex P2).
+  if (latest && object.state === 'printed' && latest.printedAtMs === undefined && printedAt(latest, attempts) === undefined)
+    latest.printedAtMs = object.updatedAtMs;
   return {...migrated, versionsV1: true, ...(versions.length > 1 ? {historyRestored: restoredWords} : {})};
 }
