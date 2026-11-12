@@ -1188,3 +1188,6 @@ hr {
 .inherited .bubble { opacity: 0.72; }
 .inherited > .link, .inherited > .muted { display: block; margin: 0 0 10px; }
 .inherited hr { border: 0; border-top: 1px solid #e0e6db; margin: 14px 0; }
+/* A card that waits while an earlier design is on the stage (#616): a plain wrapper, its controls disabled natively. */
+fieldset.waits { border: 0; margin: 0; padding: 0; min-width: 0; }
+fieldset.waits:disabled { opacity: 0.6; }

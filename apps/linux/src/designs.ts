@@ -174,3 +174,11 @@ export function inheritedConversation(p: Project, projects: Project[]) {
 export function designAnswer(p: Pick<Project, "id">, versionId: string, status: "works" | "needs-changes") {
   return { id: p.id, status, versionId };
 }
+
+/** What the page says while an earlier design is on the stage and the newest's actions wait. */
+export const NEWEST_WAITS = "Show the newest design to print it, answer for it or ask for changes.";
+/** The earlier design on the stage, if `viewing` names one that is not the newest; else undefined (the newest is shown). */
+export function earlierOnStage(p: Project, viewing: string | undefined): DesignVersion | undefined {
+  if (!viewing || viewing === p.versions?.at(-1)?.id) return undefined;
+  return p.versions?.find((v) => v.id === viewing);
+}

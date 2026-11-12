@@ -27,7 +27,7 @@ import {
   scanLineage,
 } from "./domain";
 import { Picture, Stage } from "./Stage";
-import { designAnswer, designHistory, designDate, designThumbnail, inheritedConversation, sealedLine, showingDesign, viewingLine } from "./designs";
+import { NEWEST_WAITS, earlierOnStage, designAnswer, designHistory, designDate, designThumbnail, inheritedConversation, sealedLine, showingDesign, viewingLine } from "./designs";
 import { Question } from "./Question";
 import { PrintSheet } from "./PrintSheet";
 import { ReconstructionReviewCard } from "./ReconstructionReview";
@@ -452,7 +452,15 @@ function InheritedHistoryView({ project, projects, onOpen }: { project: Project;
     </div>
   );
 }
-export function ProjectView({
+/** The project page; which design is on the stage is its own state (#616: undefined is the newest). */
+export function ProjectView(props: Omit<Parameters<typeof ProjectPage>[0], "viewing" | "onView">) {
+  const [viewing, setViewing] = useState<string>();
+  useEffect(() => setViewing(undefined), [props.project.id]);
+  return <ProjectPage {...props} viewing={viewing} onView={setViewing} />;
+}
+export function ProjectPage({
+  viewing,
+  onView: setViewing,
   project: p,
   printers,
   apply,
@@ -469,6 +477,9 @@ export function ProjectView({
   onOpenProject?: (id: string) => void;
   /** New, holding this project's scan: "Make something else from this scan". */
   onMakeFromScan?: (p: Project) => void;
+  /** The earlier design on the stage (#616); undefined is the newest. */
+  viewing?: string;
+  onView: (id: string | undefined) => void;
   /** The companion's capabilities (`status.get`): what it keeps decides what the page offers. */
   capabilities?: Record<string, unknown>;
   project: Project;
@@ -479,12 +490,12 @@ export function ProjectView({
   changes: ReturnType<typeof useChangeQueue>;
 }) {
   const [tab, setTab] = useState("Request");
-  // An earlier design on the stage (#616); undefined is the newest. Print and Ask for changes wait for the newest.
-  const [viewing, setViewing] = useState<string>();
-  useEffect(() => setViewing(undefined), [p.id]);
-  const earlier = viewing ? p.versions?.find((v) => v.id === viewing) : undefined;
+  // An earlier design on the stage (#616): every send and answer for the newest waits until it is shown again, as the
+  // Mac's `blocked` does. The design rows' own It works / Needs changes, and the running print's controls, stay live.
+  const earlier = earlierOnStage(p, viewing);
   const shown = earlier ? showingDesign(p, earlier.id) : p;
-  const waitNewest = earlier ? "Show the newest design to print it or ask for changes." : undefined;
+  const waitNewest = earlier ? NEWEST_WAITS : undefined;
+  const waits = !!earlier;
   const [note, setNote] = useState("");
   const [attached, setAttached] = useState<string[]>([]);
   const [print, setPrint] = useState(false);
@@ -590,6 +601,7 @@ export function ProjectView({
             </section>
           )}
           {p.reconstructionReview && (
+            <fieldset className="waits" disabled={waits} title={waitNewest} data-testid="review-wait">
             <ReconstructionReviewCard
               key={p.reconstructionReview.id}
               project={p}
@@ -597,6 +609,7 @@ export function ProjectView({
               mutate={mutate}
               apply={apply}
             />
+            </fieldset>
           )}
           {shown.current?.summary && (
             <p className="result-summary">{shown.current.summary}</p>
@@ -612,6 +625,7 @@ export function ProjectView({
             </div>
           )}
           {p.plates && p.plates.length > 0 && (
+            <fieldset className="waits" disabled={waits} title={waitNewest} data-testid="plates-wait">
             <section className="plates">
               <h3>
                 {p.plates.filter((x) => x.status === "printed").length} of{" "}
@@ -672,6 +686,7 @@ export function ProjectView({
                 Add original files…
               </Action>
             </section>
+            </fieldset>
           )}
           <footer className="project-bar">
             <button
@@ -730,6 +745,7 @@ export function ProjectView({
           )}
           {p.failure && <p className="error">{p.failure}</p>}
           {!p.reconstructionReview && p.ask?.status === "open" && (
+            <fieldset className="waits" disabled={waits} title={waitNewest} data-testid="ask-wait">
             <AskCard
               key={p.ask.id}
               project={p}
@@ -737,6 +753,7 @@ export function ProjectView({
               mutate={mutate}
               apply={apply}
             />
+            </fieldset>
           )}{" "}
           {tab === "Request" && (
             <>
@@ -818,6 +835,7 @@ export function ProjectView({
                 <div className="notice">
                   <p>Saved for your review: {p.pendingFollowup}</p>
                   <Action
+                    disabled={waits}
                     run={() =>
                       mutate("objects.correct", {
                         id: p.id,
@@ -917,7 +935,7 @@ export function ProjectView({
                           Discard
                         </Action>
                         {q.state === "uncertain" && (
-                          <Action run={() => changes.retry(q.id)}>
+                          <Action disabled={waits} run={() => changes.retry(q.id)}>
                             I checked the conversation; retry
                           </Action>
                         )}
