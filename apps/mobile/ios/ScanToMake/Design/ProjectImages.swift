@@ -174,27 +174,43 @@ struct StagePicture: View {
 
     /// `decoding`: the phone has this picture and is decoding it now (a few milliseconds): the bare stage, never a
     /// spinner or "coming from your Mac" for something it already has (#720).
-    fileprivate enum Shows { case shown(UIImage), loading(UIImage?), decoding, waiting, notAvailable(String, retry: Bool) }
+    enum Shows { case shown(UIImage), loading(UIImage?), decoding, waiting, notAvailable(String, retry: Bool) }
     private var shows: Shows {
+        guard case .picture(let path) = still else {
+            return Self.decide(still: still, key: key, load: load, memory: nil, kept: nil, earlier: nil, libraryHas: false,
+                               missing: modelMissing.map { ($0.line, $0.retry != nil) }, unavailableLine: unavailableLine)
+        }
+        return Self.decide(still: still, key: key, load: load, memory: ImageMemory.shared.image(key), kept: kept,
+                           earlier: ImageMemory.shared.anySize(project, path),
+                           libraryHas: app.companion.library.latest(project: project.id, name: path) != nil,
+                           missing: modelMissing.map { ($0.line, $0.retry != nil) }, unavailableLine: unavailableLine)
+    }
+
+    /// What the stage shows for `key`, from what this stage and the phone have (pure, so a gallery switch is unit-tested).
+    /// Only pictures of this key count: `kept` is this stage's own kept copy and is used only when it is this key's,
+    /// never another gallery entry's (review of #741, P1: after a plate switch the stage kept the previous plate's
+    /// picture). `earlier` is the same path at another size or version (`ImageMemory.anySize`).
+    static func decide(still: Project.Still, key: String, load: PictureLoad<UIImage>, memory: UIImage?,
+                       kept: (key: String, image: UIImage)?, earlier: UIImage?, libraryHas: Bool,
+                       missing: (line: String, retry: Bool)?, unavailableLine: String) -> Shows {
         switch still {
         case .waiting: return .waiting
         // No picture can be had; with the model missing too the gallery's line says both, and Try Again tries the model.
-        case .notAvailable: return .notAvailable(modelMissing?.line ?? unavailableLine, retry: modelMissing?.retry != nil)
-        case .picture(let path):
+        case .notAvailable: return .notAvailable(missing?.line ?? unavailableLine, retry: missing?.retry == true)
+        case .picture:
             if load.key == key, let image = load.picture { return .shown(image) }
-            if let image = ImageMemory.shared.image(key) { return .shown(image) }
+            if let memory { return .shown(memory) }
             // The phone's own copy is a picture shown, not a wait: no spinner over it, and never "didn't come".
             if let kept, kept.key == key { return .shown(kept.image) }
-            // An earlier copy of this picture (another size, an earlier version the phone keeps): shown while the current
-            // one comes, and kept on screen if it doesn't.
-            let earlier = ImageMemory.shared.anySize(project, path) ?? kept?.image
+            // An earlier copy of this same picture (another size, an earlier version): shown while the current one comes,
+            // and kept on screen if it doesn't.
             if load.key == key, load.failed {
                 if let earlier { return .shown(earlier) }
-                return .notAvailable(modelMissing?.line ?? "The picture didn’t come from your Mac.", retry: true)
+                return .notAvailable(missing?.line ?? "The picture didn’t come from your Mac.", retry: true)
             }
             if let earlier { return .loading(earlier) }
             // Kept but not yet decoded: drawn from the phone in a moment, whatever the Mac does.
-            if app.companion.library.latest(project: project.id, name: path) != nil { return .decoding }
+            if libraryHas { return .decoding }
             return .loading(nil)
         }
     }
