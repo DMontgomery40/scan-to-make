@@ -68,7 +68,7 @@ data class ProjectGallery(val entries: List<Entry>) {
                 val render = project.pictures["part"] ?: current.renders.firstOrNull()?.let(::renderPath) ?: plates.firstOrNull()?.thumbnail ?: ""
                 return listOf(PrintablePart("result", label, Drawing.Picture(render), Colour.Own, current.sizeMm))
             }
-            return listOf(PrintablePart("result", label, Drawing.Model("model.stl"), spoolColour(project)?.let { Colour.Spool(it) } ?: Colour.Neutral, current.sizeMm))
+            return listOf(PrintablePart("result", label, Drawing.Model(if (current.model.startsWith("versions/")) versionMesh(current.model) else "model.stl"), spoolColour(project)?.let { Colour.Spool(it) } ?: Colour.Neutral, current.sizeMm))
         }
 
         /** The one spool the result prints in: the last print's spools, else the colour the printer reported printing it. */
@@ -87,7 +87,12 @@ data class ProjectGallery(val entries: List<Entry>) {
         fun scanPhotos(project: Project): List<String> =
             if (project.photos.isEmpty()) project.capture.orEmpty().map { "capture/$it" } else project.photos.map { "photos/$it" }
 
-        fun renderPath(render: String) = "renders/${render.substringAfterLast('/')}"
+        /** A sealed design's mesh (#616): its STL, or for a multi-part design the merged STL sealed beside its 3MF. */
+        fun versionMesh(model: String): String =
+            if (!model.lowercase(Locale.ROOT).endsWith(".3mf")) model else (model.split("/").dropLast(1) + "model.stl").joinToString("/")
+
+        /** A render's project path; a sealed design's renders keep their own folder (`versions/<id>/renders/…`). */
+        fun renderPath(render: String) = if (render.startsWith("versions/")) render else "renders/${render.substringAfterLast('/')}"
 
         fun hex(text: String): String? {
             val digits = text.trim().removePrefix("#")

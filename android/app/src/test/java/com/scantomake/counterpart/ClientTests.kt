@@ -224,6 +224,28 @@ class CompanionClientTests {
         } finally { dir.deleteRecursively() }
     }
 
+    /** #616 (#743): an earlier design's thumbnail and model come from `versions/<id>/…`, as CounterpartKit's
+     *  `testASealedDesignsFilesDownloadAndNothingElseUnderVersions`: the allowlist and the scope table both know it, and
+     *  nothing else under versions is fetched. Its It works / Needs changes names the design. */
+    @Test fun aSealedDesignsFilesDownloadAndNothingElseUnderVersions() = runBlocking {
+        val fake = FakeTransport { request, _ -> if (request.method == "PATCH") json(200, mapOf("object" to null)) else HttpReply(200, "png".toByteArray()) }
+        val companion = client(fake)
+        val project = Project.decode(parseObject("""{"id":"$id","createdAtMs":1,"updatedAtMs":2,"state":"ready","photos":[],"passes":[]}""")!!)!!
+        val version = "2d67e062-42b7-4d91-ab77-212a490a5a65"
+        for (path in listOf("versions/$version/renders/0-1_overview.png", "versions/$version/touched.stl", "versions/$version/pictures/part-9080508a.png")) {
+            assertEquals(path, "png", companion.download(project, path).readText())
+        }
+        assertTrue(fake.calls.any { it.request.url.endsWith("/v1/objects/$id/versions/$version/renders/0-1_overview.png") })
+        assertEquals("projects:read", CompanionClient.scope("GET", "/v1/objects/$id/versions/$version/touched.stl"))
+        assertEquals("projects:read", CompanionClient.scope("GET", "/v1/objects/$id/versions/$version/renders/front.png"))
+        for (refused in listOf("versions/$version/../object.json", "versions/$version/design/inputs/scan.obj", "versions/not-a-design/touched.stl")) {
+            try { companion.download(project, refused); fail(refused) } catch (_: CompanionException) {}
+        }
+        companion.setStatus(id, com.scantomake.counterpart.api.ProjectStatus.Works, versionId = version)
+        val patch = fake.calls.last { it.request.method == "PATCH" }
+        assertEquals("""{"status":"works","versionId":"$version"}""", String(patch.request.body!!))
+    }
+
     @Test fun scopes() {
         assertEquals("projects:read", CompanionClient.scope("GET", "/v1/objects"))
         assertEquals("generation:health", CompanionClient.scope("GET", "/healthz"))
