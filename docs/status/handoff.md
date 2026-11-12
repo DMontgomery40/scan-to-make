@@ -6,7 +6,31 @@ Updated in place; git history keeps the rest. This is the only handoff: no dated
 
 **What is running and owed this hour is the pinned issue [#610](https://github.com/DMontgomery40/scan-to-make/issues/610), which the lead updates at every wake. Read it first.**
 
-## Now (2026-11-12, 17:15Z): what the night delivered, and what needs David
+## Now (2026-11-12, 21:45Z): afternoon — #769 fixed, MCP release 4, Mac on train 12d
+
+Lead: Claude Opus 5.5 (high), T3 thread "Recover Work and Stabilize Counterpart" on agents-173. Live list: pinned [#610](https://github.com/DMontgomery40/scan-to-make/issues/610). The section below (17:15Z) is the night's record; this one says what changed since.
+
+**Installed**
+- **Mac: build 202611122043 from main `6d128aa4`** (trains 12a–12d), 20:46Z. The first status after the restart answered in 10 ms, so #751 is closed with that proof. All 22 projects, 38 designs and 38 print attempts are kept. Report: [#771](https://github.com/DMontgomery40/scan-to-make/pull/771).
+- **iPhone (17:19Z) and iPad (12:2xZ): 202611121212 (trains 12a–12c).**
+  - 202611122043 is signed and waiting. Both devices were off the Mac's network from 20:4xZ (devicectl `tunnelState: unavailable`).
+  - The LaunchAgent `com.scantomake.install-when-reachable-202611122043` (gui/501) checks every 5 minutes. It installs on each device as soon as that device is reachable, then copies the phone's media trace into `~/scan-to-make-work/769-after-install/`. It stops at 2026-11-13 18:00Z. Log: `~/scan-to-make-work/install-when-reachable-202611122043/watcher.log`.
+- **MCPs in the app: bambu-printer-mcp 1.1.94, mcp-3D-printer-server 1.2.76** (release 4, about 19:20Z). The code engine writes and edits multi-part, multi-colour 3MF projects, plate parts and colours are reported, and the 3MF tools are ported to mcp-3D. #642, #643 and #645 are closed. Report: `~/scan-to-make-work/mcp-release-4-2026-11-12/REPORT.md` on the Mac.
+
+**#769 (P0, David 17:26Z): "Already printed items no longer have explore in 3D or AR, some do actually but some don't"**
+- **Cause, from his phone's media trace:** the project page read its model once, from a one-shot task on a pushed page whose on-screen instance never ran it. Train 12a's on-device library made that first read come back empty. Wall holder, AirPods hanger, BAG CLIP and others never got a model URL.
+- **Also broken:**
+  - an earlier design never got AR, because the chip accepted only `model.stl` while sealed designs are `touched.*`;
+  - pass-made multi-part 3MFs showed only a still. The picture-only rule was an agent's own departure in #451; no David quote asked for it.
+- **Fix:** #770, train 12d. The page reads its model from the store, `Entry.arMesh` gives any part's own mesh AR, the companion lists `mergedMesh` while the file exists, and `PreparedAR` makes Share and AR use only the model on the stage. It covers every layout.
+- **Why the gate missed it:** the fixtures named every sealed design `model.stl`. They now use David's names.
+- **Still open:** the page-race cause has no failing simulator test, so #769 closes on the phone's trace after install. Wall holder, AirPods hanger or BAG CLIP must show `page.model-published file=true` and `stage.begin url=true`.
+
+**Filed today:** #772 (a flaky AR deadline test under load), #773 (the kept iPhone capture simulator is claimed by a dead Nov 11 session; capture with `--fresh-simulator` until it's fixed).
+
+**Needs David's hands:** the P1S nozzle and extruder, then one test print (#605). Opening a project or two on the phone once it has the new build (#769, #617, #606). One look at a changed project (#616, #622).
+
+## Before that (2026-11-12, 17:15Z): what the night delivered, and what needs David
 
 Lead: Claude Opus 5.5 (high), T3 thread "Recover Work and Stabilize Counterpart" on agents-173. Live list: pinned issue [#610](https://github.com/DMontgomery40/scan-to-make/issues/610). David, ~08:15Z: "finish everything outstanding by morning, except what needs a physical print."
 
