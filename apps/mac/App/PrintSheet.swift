@@ -70,6 +70,12 @@ struct PrintSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Print \(words.title)").font(.title2.bold())
+            // #788: a draft prints, but the sheet says what wasn't checked before anything is sent.
+            if object.current?.draft != nil {
+                Label { Text(Project.DesignDraft.printNote).fixedSize(horizontal: false, vertical: true) } icon: { Image(systemName: "exclamationmark.triangle") }
+                    .font(.callout).foregroundStyle(.orange)
+                    .accessibilityIdentifier("print-draft-note")
+            }
             if (object.plates?.count ?? 0) > 1 {
                 ProjectPlatePicker(project: object, busy: model.working.contains(object.id)) { plate in
                     Task { await model.selectPlate(object.id, plate: plate) }

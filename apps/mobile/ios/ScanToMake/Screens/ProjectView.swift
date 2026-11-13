@@ -260,6 +260,8 @@ struct ProjectView: View {
                 }
                 .padding(.horizontal, 20)
 
+                draftNote(object)
+
                 if (object.plates?.count ?? 0) > 1 {
                     ProjectPlatesView(project: object, busy: working || away, thumbnail: { plate in
                         ProjectImage(project: object, path: plate.thumbnail, maxPixelSize: 400, contentMode: .fit)
@@ -513,6 +515,14 @@ struct ProjectView: View {
     // MARK: Answering a card
 
     /// The request under the title: what the person asked for, in their own words.
+    /// #788: the design on the stage is a draft: one plain line and the printer MCP's reasons as given, never as a
+    /// finished design. Print and Ask for changes stay where they are.
+    @ViewBuilder private func draftNote(_ object: Project) -> some View {
+        if let draft = object.showingDesign(viewingDesign).current?.draft {
+            DraftDesignNote(draft: draft).padding(.horizontal, 20)
+        }
+    }
+
     @ViewBuilder private func requestText(_ object: Project, _ words: ProjectWords) -> some View {
         if let request = object.instructions, !request.isEmpty, request != words.title {
             Text(request).font(.body).foregroundStyle(.secondary).textSelection(.enabled)
@@ -1722,3 +1732,4 @@ private struct AskSizeNumber: View {
             }
     }
 }
+

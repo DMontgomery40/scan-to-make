@@ -142,6 +142,8 @@ struct ProjectDetail: View {
                         Spacer()
                     }
                 }
+                // #788: the design on the stage is a draft: the plain line and the printer MCP's reasons as given.
+                if let draft = stageObject.current?.draft { DraftDesignNote(draft: draft) }
                 if let line = model.notAnsweringLine {
                     Label(line, systemImage: "exclamationmark.triangle").font(.callout).foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
