@@ -657,6 +657,37 @@ test('a code design is kept as the project\'s design source, a change starts fro
   await assert.rejects(readFile(join(dir, 'current', 'design', 'touched.py')), {code: 'ENOENT'});
 });
 
+// #788: a code pass with no final run keeps its last valid run as a draft. The project is ready (Print and Ask for
+// changes stay), but its line, its design and its notification say it isn't finished, with the MCP's reasons as given.
+test('#788: a draft design is kept with its reasons, never presented as finished, and the next finished pass clears it', async t => {
+  const {eventWords} = await import('../dist/events/words.js');
+  const reasons = ['Model the dash as world:dash in use(): a solid slab where it really is, touching the part where it is taped, so the tape mount can be checked.'];
+  const f = await setup(t, [
+    {engine: 'code', result: {summary: 'A dash mount for the phone.', draft: {reasons}}},
+    {engine: 'code', stl: STL.replaceAll('x', 'y'), result: {summary: 'Now with the dash modelled.'}},
+  ]);
+  const object = await f.service.create('A phone mount for the dash', 'fit');
+  await f.service.start(object.id);
+  const draft = await f.service.settled(object.id);
+  assert.equal(draft.state, 'ready', 'Print and Ask for changes stay available');
+  assert.deepEqual(draft.current.draft, {reasons});
+  assert.deepEqual(draft.versions.at(-1).result.draft, {reasons}, 'the sealed design is a draft too');
+  const shown = publicObject(draft);
+  assert.deepEqual(shown.current.draft, {reasons});
+  assert.equal(shown.status.text, "Not finished: the design engine couldn't check everything");
+  assert.equal(shown.status.phase, 'ready');
+  const ready = f.events.findLast(event => event.type === 'pass.ready');
+  assert.equal(ready.detail.draft, true);
+  const words = eventWords('pass.ready', undefined, {title: 'Dash mount', size: '60 × 45 × 22 mm', draft: true});
+  assert.equal(words.title, 'Dash mount: not finished');
+  assert.equal(words.body, "Not finished: the design engine couldn't check everything");
+  await f.service.correct(object.id, 'Model the dash');
+  const finished = await f.service.settled(object.id);
+  assert.equal(finished.current.draft, undefined, 'a finished design is no draft');
+  assert.equal(finished.versions.at(-2).result.draft?.reasons?.[0], reasons[0], 'the earlier draft stays a draft');
+  assert.match(publicObject(finished).status.text, /^Ready to print/);
+});
+
 test('a size question is its own kind: numbers on the wire, numbers back, and the worker is told which were measured and which accepted', async t => {
   const asked = [{label: 'width at the pink stripe', mm: 64, from: 'scan'}, {label: 'width at the waist', mm: 53, from: 'estimate'},
     {label: 'height to the cap tip', mm: 107, from: 'published', product: 'MiO 1.62 oz bottle', reference: 'the maker\'s product page'},

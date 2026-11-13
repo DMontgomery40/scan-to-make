@@ -1,4 +1,5 @@
 import type {CounterpartEvent, CounterpartEventType, NotifyLevel, ObjectStatus} from '@scan-to-make/contracts/counterpart';
+import {DRAFT_LINE} from '@scan-to-make/contracts/counterpart';
 
 /**
  * Every sentence Counterpart shows about a project's progress comes from here
@@ -124,6 +125,8 @@ export interface WordsContext {
   reason?: string;
   /** pass.ready: an earlier design of this project was printed, and it is unchanged (#616). */
   printedBefore?: boolean;
+  /** pass.ready: the design is a draft the design engine couldn't check everything on (#788). */
+  draft?: boolean;
 }
 
 export const NOTIFY: Record<CounterpartEventType, NotifyLevel> = {
@@ -165,8 +168,10 @@ export function eventWords(type: CounterpartEventType, data: CounterpartEvent['d
     case 'pass.started': title = `Your Mac is working on ${t}`; body = minutes ? `About ${minutes} min. You can put your phone down.` : "You can put your phone down. We'll let you know when it's ready."; break;
     case 'pass.stage': title = t; body = joined(data?.stage, minutes ? `about ${minutes} min` : undefined) || 'Working on it'; break;
     // A new design of something already printed names the new one and never implies the printed one went away (#616).
-    case 'pass.ready': title = context.printedBefore ? `Your new ${t} design is ready` : `${t} is ready to print`;
-      body = context.printedBefore ? joined('The printed one is unchanged', context.size) : context.size ?? 'Ready to print'; break;
+    // #788: a draft is never announced as finished.
+    case 'pass.ready': title = context.draft ? `${t}: not finished` : context.printedBefore ? `Your new ${t} design is ready` : `${t} is ready to print`;
+      body = context.draft ? joined(DRAFT_LINE, context.printedBefore ? 'the printed one is unchanged' : undefined)
+        : context.printedBefore ? joined('The printed one is unchanged', context.size) : context.size ?? 'Ready to print'; break;
     case 'pass.ask': title = `${t}: ${context.question ?? 'can you take a close-up?'}`; body = 'Take a photo, choose one, or let your Mac make its best guess.'; break;
     case 'pass.failed': title = `${t} didn't finish`; body = context.reason ?? 'Something went wrong on your Mac. Try again.'; break;
     case 'print.preparing': title = `Getting ${t} ready`; body = data?.stage ?? 'Preparing the print'; break;
@@ -215,7 +220,7 @@ export interface StatusSource extends TitleSource {
   progress?: string;
   question?: {closeup?: string};
   ask?: {question: string; status: string};
-  current?: {sizeMm?: readonly number[]};
+  current?: {sizeMm?: readonly number[]; draft?: object};
   failure?: string;
   passes?: {stages?: {words: string; endedAtMs?: number}[]; estimate?: {remainingSec: number}; endedAtMs?: number}[];
   print?: {destination?: {name: string}; dispatchedAt?: string; sentVia?: string;
@@ -251,8 +256,11 @@ export function rowDetail(text: string | undefined, reason = false): string | un
  */
 export const printedOut = (p: {monitor?: {endState?: string; checkSent?: boolean}}) => p.monitor?.endState === 'done' && p.monitor?.checkSent !== true;
 
+
 /** The §4 line for a project, with its symbol and colour. */
 export function objectStatus(object: StatusSource, updatedAtMs?: number): ObjectStatus {
+  // #788: a draft is never presented as finished, also when an earlier design was printed.
+  if (object.state === 'ready' && object.current?.draft) return {phase: 'ready', text: DRAFT_LINE, symbol: 'exclamationmark.triangle', tint: 'orange'};
   // #616: the newest design is unprinted and unanswered while an earlier one was printed. Both are true, so the line says
   // both. Every other case keeps today's words (a one-design project reads exactly as before; Done stays Done).
   const latest = object.versions?.at(-1);

@@ -1,0 +1,117 @@
+{
+  "valid": true,
+  "units": "mm",
+  "bounds_mm": [
+    [
+      -30,
+      -57.5,
+      0
+    ],
+    [
+      116.2,
+      65,
+      23.8
+    ]
+  ],
+  "size_mm": [
+    146.2,
+    122.5,
+    23.8
+  ],
+  "volume_mm3": 45992.1,
+  "step_volume_mm3": 45993.26,
+  "solid_count": 2,
+  "mesh_components": 2,
+  "checks": {
+    "watertight": true,
+    "winding_consistent": true,
+    "positive_volume": true,
+    "manifold": true,
+    "step_valid": true,
+    "stl_step_bounds_agree": true
+  },
+  "renders": {
+    "front": "@RUN@/phone_mount.renders/front.png",
+    "back": "@RUN@/phone_mount.renders/back.png",
+    "left": "@RUN@/phone_mount.renders/left.png",
+    "right": "@RUN@/phone_mount.renders/right.png",
+    "top": "@RUN@/phone_mount.renders/top.png",
+    "bottom": "@RUN@/phone_mount.renders/bottom.png",
+    "perspective": "@RUN@/phone_mount.renders/perspective.png",
+    "contact": "@RUN@/phone_mount.renders/contact.png",
+    "use": "@RUN@/phone_mount.renders/use.png"
+  },
+  "purpose": {
+    "declared": true,
+    "for": "holds my phone on the Forester's dash so I can see the map",
+    "modelled_on": "a dash phone mount with an adhesive pad",
+    "classes": [
+      "holder",
+      "mount",
+      "vehicle"
+    ],
+    "user": [
+      0,
+      -450,
+      350
+    ],
+    "material": "PETG",
+    "jolt_g": 1.5,
+    "press_n": 10,
+    "requirements": [
+      {
+        "requirement": "holds phone",
+        "status": "pass",
+        "says": "held:phone sits on the part (0.00 mm)"
+      },
+      {
+        "requirement": "mounts dash",
+        "status": "not_modelled",
+        "says": "use() has no world:dash body",
+        "fix": "Model the dash as world:dash in use(): a solid slab where it really is, touching the part where it is taped, so the tape mount can be checked"
+      },
+      {
+        "requirement": "faces user (phone)",
+        "status": "fail",
+        "angle_deg": 41.3,
+        "says": "phone's exposed face is 41 deg off the line to the user's eye (allowed 25)",
+        "fix": "Turn the phone toward the user: its face is 41 deg off the line to their eye (allowed 25). Aim it the way the bought products do, with a joint or an angled base, and show it aimed in use()"
+      },
+      {
+        "requirement": "reach (phone)",
+        "status": "fail",
+        "distance_mm": 812,
+        "says": "phone is 812 mm from the user (allowed 700)",
+        "fix": "Bring the phone within reach: it is 812 mm from the user (allowed 700)"
+      }
+    ],
+    "loads": [],
+    "not_checked": [
+      "tape stress: no world:dash in use(), so the tape patch could not be measured"
+    ],
+    "blocked": [
+      "Model the dash as world:dash in use(): a solid slab where it really is, touching the part where it is taped, so the tape mount can be checked.",
+      "Turn the phone toward the user: its face is 41 deg off the line to their eye (allowed 25). Aim it the way the bought products do, with a joint or an angled base, and show it aimed in use().",
+      "Bring the phone within reach: it is 812 mm from the user (allowed 700)."
+    ],
+    "ready": false
+  },
+  "ready": false,
+  "next": "Read renders.perspective before the next cad_run or any other change: say what it shows is wrong against what you are making (the bought product you named, or the object in the photos), then fix that. Not ready yet, so final: true would be refused. To make it ready: Model the dash as world:dash in use(): a solid slab where it really is, touching the part where it is taped, so the tape mount can be checked. Turn the phone toward the user: its face is 41 deg off the line to their eye (allowed 25). Aim it the way the bought products do, with a joint or an angled base, and show it aimed in use(). Bring the phone within reach: it is 812 mm from the user (allowed 700).",
+  "status": "completed",
+  "final": false,
+  "completed_at": "2026-11-12T19:12:01.102Z",
+  "lineage_id": "3dcf734b085b3b9e7294cf26d7c65623c9be5f777664aaeaa51e666bf1ba34a4",
+  "result_manifest": "@RUN@/cad-result.json",
+  "script": "@RUN@/phone_mount.py",
+  "parameters": "@RUN@/phone_mount.parameters.json",
+  "inputs": {},
+  "input_manifest": "@RUN@/phone_mount.inputs.json",
+  "input_hashes": {},
+  "snapshot_bytes_added": 0,
+  "snapshot_bytes_reused": 0,
+  "queue_wait_ms": 7,
+  "stl": "@RUN@/phone_mount.stl",
+  "step": "@RUN@/phone_mount.step",
+  "seconds": 9.51
+}

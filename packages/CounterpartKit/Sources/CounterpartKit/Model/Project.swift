@@ -501,12 +501,15 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
         /// The merged mesh beside a multi-part design's 3MF (`current/model.stl`, `versions/<id>/model.stl`), listed by the Mac
         /// only while that file is there (#769, review of #770). Absent: no mesh to turn, so the design is its picture.
         public var mergedMesh: String?
+        /// #788: a draft, never a finished design: the design engine's last valid run of a pass that ended with no run it
+        /// let the designer make final, with the printer MCP's own reasons (none from an MCP before engine round 4).
+        public var draft: DesignDraft?
         public init(model: String, renders: [String], sizeMm: [Double]? = nil, summary: String? = nil, changes: [Change]? = nil, ownSettings: Bool? = nil,
-                    filaments: [DeclaredFilament]? = nil, seats: [Seat]? = nil, mergedMesh: String? = nil) {
+                    filaments: [DeclaredFilament]? = nil, seats: [Seat]? = nil, mergedMesh: String? = nil, draft: DesignDraft? = nil) {
             self.model = model; self.renders = renders; self.sizeMm = sizeMm; self.summary = summary; self.changes = changes; self.ownSettings = ownSettings
-            self.filaments = filaments; self.seats = seats; self.mergedMesh = mergedMesh
+            self.filaments = filaments; self.seats = seats; self.mergedMesh = mergedMesh; self.draft = draft
         }
-        private enum CodingKeys: String, CodingKey { case model, renders, sizeMm, summary, changes, engine, ownSettings, filaments, seats, mergedMesh }
+        private enum CodingKeys: String, CodingKey { case model, renders, sizeMm, summary, changes, engine, ownSettings, filaments, seats, mergedMesh, draft }
         /// A malformed optional (say, `changes`) is left out; the model and renders still show.
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -520,6 +523,39 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
             filaments = (try? c.decodeIfPresent([DeclaredFilament].self, forKey: .filaments)) ?? nil
             seats = (try? c.decodeIfPresent([Seat].self, forKey: .seats)) ?? nil
             mergedMesh = (try? c.decodeIfPresent(String.self, forKey: .mergedMesh)) ?? nil
+            draft = (try? c.decodeIfPresent(DesignDraft.self, forKey: .draft)) ?? nil
+        }
+    }
+
+    /// #788: why a design is a draft, in the printer MCP's own words (`final_refused`, or its failing purpose
+    /// requirements), shown as given and never interpreted. Empty from an MCP before engine round 4.
+    public struct DesignDraft: Codable, Equatable, Sendable {
+        public var reasons: [String]
+        /// The one plain line every layout shows for a draft design (contracts `DRAFT_LINE`).
+        public static let line = "Not finished: the design engine couldn't check everything"
+        /// What Print's confirmation adds for a draft design (contracts `DRAFT_PRINT_NOTE`).
+        public static let printNote = "This part wasn't fully checked: the design engine couldn't check everything."
+        /// More reasons than this are collapsed behind "Show all".
+        public static let collapseAfter = 2
+        public init(reasons: [String] = []) { self.reasons = reasons }
+        private enum CodingKeys: String, CodingKey { case reasons }
+        /// Reasons that aren't words are left out; the draft stays a draft.
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            let listed = (try? c.decodeIfPresent([LenientString].self, forKey: .reasons)) ?? nil
+            reasons = (listed ?? []).compactMap(\.value).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        }
+        public func encode(to encoder: Encoder) throws {
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            if !reasons.isEmpty { try c.encode(reasons, forKey: .reasons) }
+        }
+        /// The reasons the page shows: all of them when expanded or when there are only a few, else the first ones.
+        public func shown(expanded: Bool) -> [String] { expanded || reasons.count <= Self.collapseAfter ? reasons : Array(reasons.prefix(Self.collapseAfter)) }
+        /// Whether the page offers "Show all" (more than `collapseAfter` reasons).
+        public var collapses: Bool { reasons.count > Self.collapseAfter }
+        private struct LenientString: Decodable {
+            let value: String?
+            init(from decoder: Decoder) throws { value = try? decoder.singleValueContainer().decode(String.self) }
         }
     }
 
