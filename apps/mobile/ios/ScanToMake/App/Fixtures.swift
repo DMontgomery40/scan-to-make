@@ -634,7 +634,7 @@ enum Fixtures {
     static var catalog: [String: Any] { Fixtures.set == "no-printers" ? ["defaultDestinationId": "current", "destinations": [[String: Any]]()] : [
         "defaultDestinationId": "current",
         "destinations": [
-            ["id": "current", "name": "P1S", "backend": p1sBackend, "model": "Bambu Lab P1S", "source": "current", "state": "ready",
+            ["id": "current", "name": "P1S", "backend": p1sBackend, "model": "p1s", "source": "current", "state": "ready",
              "mcps": [["backend": p1sBackend, "destinationId": "current"], ["backend": p1sBackend == "bambu-printer-mcp" ? "mcp-3d-printer-server" : "bambu-printer-mcp", "destinationId": "current"]],
              "capabilities": ["progress": true, "layers": true, "camera": "bambu-tcp", "filaments": "ams", "pause": true, "resume": true, "cancel": true,
                               "quality": true, "strength": true, "multiColour": false, "copies": true, "layerPauses": true, "missing": [],

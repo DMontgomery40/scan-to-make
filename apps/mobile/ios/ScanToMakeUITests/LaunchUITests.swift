@@ -53,7 +53,8 @@ final class ProjectScreensUITests: XCTestCase {
         for answer in [camera, photos, guess] { XCTAssertFalse(answer.frame.intersects(new), "\(answer.label) is under New") }
         XCTAssertEqual(camera.frame.minY, photos.frame.minY, accuracy: 2, "Camera and Photos share one row")
         // The Mac's real name and what its printer is doing, never "0 printers ready" while one prints.
-        XCTAssertTrue(app.staticTexts["Mac mini connected · Bambu Lab P1S printing"].exists)
+        // The printer as it is listed (its name, never the config's model code "p1s"), as the Mac says it (#766).
+        XCTAssertTrue(app.staticTexts["Mac mini connected · P1S printing"].exists)
     }
 
     func testSearchExplainsHiddenProjectsAndShowAllRestoresThem() {
@@ -1492,7 +1493,7 @@ final class LayoutParityUITests: XCTestCase {
         if regular {
             let status = app.staticTexts["projects-status"]
             XCTAssertTrue(status.label.contains("Mac mini connected"), status.label)
-            XCTAssertTrue(status.label.contains("Bambu Lab P1S printing"), status.label)
+            XCTAssertTrue(status.label.contains("P1S printing"), status.label)
             XCTAssertTrue(app.staticTexts["Needs you"].exists)
             XCTAssertFalse(app.staticTexts["Other"].exists, "the failed project belongs to Needs you")
         }

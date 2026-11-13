@@ -113,7 +113,8 @@ export function printerSummary(printers: Printer[], projects: Project[]) {
       : "Printers",
     status:
       printing.length === 1
-        ? `${printing[0].model ?? printing[0].name} printing`
+        ? // The listed name (the person's, else what the MCP calls it), as the Mac says it: `model` is a config code (#766).
+          `${printing[0].name} printing`
         : printing.length > 1
           ? `${printing.length} printers printing`
           : `${ready} ${ready === 1 ? "printer" : "printers"} ready`,
