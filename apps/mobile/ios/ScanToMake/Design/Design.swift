@@ -172,12 +172,24 @@ enum ColourName {
 /// observed, so remembering a key never redraws anything.
 @MainActor final class BodyKick {
     private var last: String?
-    /// True once for each new `key` (the caller records or starts its work then); false for the key it last saw.
+    /// The work for `last` ended failed (`failed`): the next appear may start it again (review of #777).
+    private var lastFailed = false
+    /// True once for each new `key` (the caller records or starts its work then); false for the key it last saw, also
+    /// after it failed, so a failure that redraws `body` never starts it again in a loop.
     func claim(_ key: String) -> Bool {
         guard key != last else { return false }
-        last = key
+        last = key; lastFailed = false
         return true
     }
+    /// For an appear (`.task`): true for a new key, and for the last one when its work failed, as `.task` did before
+    /// #769 on leaving and coming back. False while it runs or after it worked: a second start would cancel a good load.
+    func claimOnAppear(_ key: String) -> Bool {
+        guard key != last || lastFailed else { return false }
+        last = key; lastFailed = false
+        return true
+    }
+    /// The work started for `key` ended failed (a busy or cancelled load, a still that couldn't be drawn).
+    func failed(_ key: String) { if key == last { lastFailed = true } }
     /// Runs `action` on the next main-actor turn, never inside `body`, when `key` is new to this view.
     func on(_ key: String, _ action: @escaping @MainActor () -> Void) {
         guard claim(key) else { return }

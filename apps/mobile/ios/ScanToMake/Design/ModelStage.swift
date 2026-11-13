@@ -108,7 +108,8 @@ struct ModelStage: View {
             }, isEnabled: interactive)
         // Once per key, never again on a re-appear: a second start for the same model cancels the load in flight, which then
         // returns nothing and would mark a good model failed.
-        .task(id: startKey) { if starts.claim(startKey) { start() } }
+        // A load that ended failed starts again on the next appear (`claimOnAppear`), as `.task` did before #769.
+        .task(id: startKey) { if starts.claimOnAppear(startKey) { start() } }
         .task(id: lastTouch) {
             guard live else { return }
             do { try await Task.sleep(for: .seconds(Self.idle)) } catch { return }
@@ -124,8 +125,9 @@ struct ModelStage: View {
     /// its model changes, so a stage whose `.task` never runs still says what it had.
     private func traceURL() {
         guard urlTrace.claim("\(url != nil)#\(identity)") else { return }
-        var fields = ["stage": instance, "identity": tag(identity), "url": String(url != nil), "job": String(loadJob != nil),
-                      "wanted": String(wantedIdentity == identity)]
+        // Before this pass's start (deferred to the next main-actor turn): the previous state. `stage.begin` is the load.
+        var fields = ["stage": instance, "identity": tag(identity), "url": String(url != nil), "jobBefore": String(loadJob != nil),
+                      "wantedBefore": String(wantedIdentity == identity)]
         if let traceOwner { fields["gallery"] = traceOwner }
         MediaTrace.record("stage.url", fields)
     }
@@ -148,6 +150,7 @@ struct ModelStage: View {
         // stage.begin, then mesh.cancelled and stage.cancelled 20 ms later, nothing after). It runs to the end and
         // publishes while this stage still wants the same model; a newer model's load replaces it.
         loadJob?.cancel()
+        let key = startKey, starts = starts
         let (tint, twoTone, object, seats, yaw, pitch, fit, interactive, hasPlaceholder) = (self.tint, self.twoTone, self.object, self.seats, self.yaw, self.pitch, self.fit, self.interactive, self.placeholder != nil)
         let stillWanted = { [self] in wantedIdentity == wanted }
         let job = Task { @MainActor in
@@ -156,7 +159,7 @@ struct ModelStage: View {
                 defer { MediaTrace.record(stillWanted() ? "stage.end" : "stage.superseded", ["scene": "active"]) }
                 let loaded = await Self.load(url, tint: tint, twoTone: twoTone, object: object, seats: seats)
                 guard stillWanted() else { return }
-                guard let entity = loaded else { failed = true; undrawable?(); return }
+                guard let entity = loaded else { failed = true; starts.failed(key); undrawable?(); return }
                 meshReady = true
                 let e = entity.visualBounds(relativeTo: nil).extents
                 measured?([Double(e.x), Double(e.z), Double(e.y)].map { ($0 * 10_000).rounded() / 10 })
@@ -169,7 +172,7 @@ struct ModelStage: View {
                 if let image { poster = image; posterIdentity = wanted; drawn?() }
                 // The model loaded, so it turns live; the Mac's picture stays until then (#606). Only a stage with no other
                 // picture that never turns (the starters') says it couldn't be shown.
-                if image == nil, !hasPlaceholder, !interactive { failed = true; undrawable?() }
+                if image == nil, !hasPlaceholder, !interactive { failed = true; starts.failed(key); undrawable?() }
                 MediaTrace.record("stage.published", ["picture": String(image != nil), "stage": instance])
             }
         }
