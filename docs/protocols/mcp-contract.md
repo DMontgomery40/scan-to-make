@@ -75,7 +75,7 @@ Keys of the `z.object` schemas in `services/printer-handoff/src/counterpart.ts`.
 
 | Names |
 |---|
-| `contract` `server` `name` `version` `printer` `kind` `model` `serial` `host` `id` `capabilities` `progress` `layers` `camera` `cameraStream` `filaments` `pause` `resume` `cancel` `print3mf` `gcode` `slicing` `supports` `copies` `orient` `controls` `route` `mode` `choices` `options` `label` `available` `reason` `type` `url` `savedTo` |
+| `contract` `server` `name` `version` `printer` `kind` `model` `displayName` `serial` `host` `id` `capabilities` `progress` `layers` `camera` `cameraStream` `filaments` `pause` `resume` `cancel` `print3mf` `gcode` `slicing` `supports` `copies` `orient` `controls` `route` `mode` `choices` `options` `label` `available` `reason` `type` `url` `savedTo` |
 | `observedAt` `state` `job` `elapsedSec` `remainingSec` `layer` `totalLayers` `stage` `temps` `nozzle` `bed` `chamber` `actual` `target` `activeFilament` `slot` `material` `color` `problems` `code` `severity` `message` |
 | `physical` `status` `evidence` `assessment` `required` `frameId` `referenceFrameIds` `expectedHeightMm` `expectedFootprintMm` `record` `dispatch` `sha256` `frames` `role` `imageContentIndex` |
 

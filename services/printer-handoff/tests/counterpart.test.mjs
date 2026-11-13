@@ -92,6 +92,30 @@ test('reports come from counterpart_print_progress when present and are validate
   assert.equal(await readPrinterInfo(old.session), undefined);
 });
 
+// #766: both MCPs return printer.displayName in counterpart/1 (bambu-printer-mcp 1.1.93, mcp-3D-printer-server 1.2.75), the
+// model with its maker as the MCP names it. It is kept as given; an install without it, or one this version can't read, still
+// gives its printer info, capabilities and all.
+test('#766: counterpart_printer_info keeps printer.displayName as the MCP gives it, and never needs it', async () => {
+  const info = {contract: 'counterpart/1', server: {name: 'bambu-printer-mcp', version: '1.1.94'},
+    printer: {kind: 'bambu', model: 'P1S', displayName: 'Bambu Lab P1S', serial: '01P00A000000000', host: '192.0.2.1'},
+    capabilities: {progress: true, layers: true, camera: 'bambu-tcp', filaments: 'ams', pause: true, resume: true, cancel: true, print3mf: true, gcode: true}};
+  const read = async printer => {
+    const {session} = sessionWith([tool('counterpart_printer_info')], {counterpart_printer_info: json({...info, printer})});
+    await session.connect();
+    return readPrinterInfo(session);
+  };
+  assert.equal((await read(info.printer)).printer.displayName, 'Bambu Lab P1S');
+  const {displayName: _displayName, ...older} = info.printer;
+  const withoutIt = await read(older);
+  assert.equal(withoutIt.printer.model, 'P1S');
+  assert.equal('displayName' in withoutIt.printer, false);
+  for (const unreadable of [42, '', 'x'.repeat(121)]) {
+    const kept = await read({...info.printer, displayName: unreadable});
+    assert.equal(kept?.capabilities.camera, 'bambu-tcp', `a displayName of ${JSON.stringify(unreadable).slice(0, 12)} costs nothing else`);
+    assert.equal(kept.printer.displayName, undefined);
+  }
+});
+
 test('#630: progress.physical is forwarded (verdict, evidence, the frame to judge); a physical field this version cannot read never costs the report', async () => {
   const frameId = '5468cf4d-81d5-46ab-b8db-2e3342938a53';
   const physical = {status: 'unknown', evidence: [], limitations: ['Firmware completion is separate from physical success.'],

@@ -163,8 +163,9 @@ test("printer summary keeps the attention badge and active print with projects p
   const printers = [
     {
       id: "p1",
-      name: "P1S",
-      model: "Bambu Lab P1S",
+      name: "Bambu Lab P1S",
+      // The companion's model is the printer's config code; the name is what to show (#766).
+      model: "p1s",
       backend: "",
       state: "ready",
     },

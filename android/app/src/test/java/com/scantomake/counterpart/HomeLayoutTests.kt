@@ -634,7 +634,7 @@ class HomeLayoutTests {
         state.projects.value = listOf(requireNotNull(Project.decode(WireJson.parseToJsonElement(
             """{"id":"clip","title":"Cable clip","state":"printing","createdAtMs":0,"updatedAtMs":0,"photos":[],"passes":[],"print":{"destinationId":"p1","monitor":{"phase":"watching"}}}"""
         ).jsonObject)))
-        state.catalog.value = PrinterCatalog(listOf(PrinterDestination("p1", "P1S", model = "Bambu Lab P1S", state = "ready"),
+        state.catalog.value = PrinterCatalog(listOf(PrinterDestination("p1", "Bambu Lab P1S", model = "p1s", state = "ready"),
             PrinterDestination("p2", "Desk", state = "offline")))
         state.macName.value = "Mac mini"
         state.link.value = com.scantomake.counterpart.api.MacLink.Connected
