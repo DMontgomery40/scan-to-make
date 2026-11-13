@@ -615,7 +615,7 @@ export function ProjectPage({
             />
             </fieldset>
           )}
-          {shown.current?.draft && <DraftNote draft={shown.current.draft} />}
+          {shown.current?.draft && <DraftNote draft={shown.current.draft} line={words(shown) !== DRAFT_LINE} />}
           {shown.current?.summary && (
             <p className="result-summary">{shown.current.summary}</p>
           )}
@@ -1291,12 +1291,13 @@ function ProjectSettings({
 }
 
 /** #788: a design that isn't finished: the plain line, then the printer MCP's reasons word for word (two, then Show all). */
-function DraftNote({ draft }: { draft: { reasons?: string[] } }) {
+function DraftNote({ draft, line }: { draft: { reasons?: string[] }; line: boolean }) {
   const [expanded, setExpanded] = useState(false);
   const all = draftReasons(draft, true), shown = draftReasons(draft, expanded);
   return (
     <section className="notice draft-design" data-testid="draft-design">
-      <strong>{DRAFT_LINE}</strong>
+      {/* The page's status line already says it when the companion wrote it: one line, not two. */}
+      {line && <strong>{DRAFT_LINE}</strong>}
       {shown.length > 0 && (
         <ul>
           {shown.map((reason, i) => (

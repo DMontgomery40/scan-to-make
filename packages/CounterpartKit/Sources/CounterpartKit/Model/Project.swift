@@ -535,6 +535,10 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
         public static let line = "Not finished: the design engine couldn't check everything"
         /// What Print's confirmation adds for a draft design (contracts `DRAFT_PRINT_NOTE`).
         public static let printNote = "This part wasn't fully checked: the design engine couldn't check everything."
+        /// The status capsule's words on a draft's page, where a ready design's would say it is ready.
+        public static let capsule = "Not finished"
+        /// The capsule's words for `project`'s design on the stage: `capsule` for a ready draft, else nil (the phase's own).
+        public static func capsule(_ project: Project, phase: ProjectPhase) -> String? { phase == .ready && project.current?.draft != nil ? capsule : nil }
         /// More reasons than this are collapsed behind "Show all".
         public static let collapseAfter = 2
         public init(reasons: [String] = []) { self.reasons = reasons }

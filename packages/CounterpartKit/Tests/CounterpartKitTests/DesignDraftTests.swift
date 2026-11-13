@@ -30,6 +30,7 @@ final class DesignDraftTests: XCTestCase {
         XCTAssertEqual(words.phase, .ready, "Print and Ask for changes stay")
         XCTAssertEqual(words.line, Project.DesignDraft.line, "never presented as finished")
         XCTAssertTrue(words.actions.contains(.correct))
+        XCTAssertEqual(Project.DesignDraft.capsule(project, phase: words.phase), "Not finished", "the page's capsule never says ready")
         XCTAssertEqual(try JSONDecoder().decode(Project.self, from: JSONEncoder().encode(project)).current?.draft, draft)
     }
 
@@ -45,6 +46,7 @@ final class DesignDraftTests: XCTestCase {
     func testAFinishedDesignIsNoDraftAndBadReasonsAreLeftOut() throws {
         let (finished, _) = try project("finished")
         XCTAssertNil(finished.current?.draft)
+        XCTAssertNil(Project.DesignDraft.capsule(finished, phase: .ready), "a finished design keeps its phase's own words")
         XCTAssertTrue(ProjectWords(finished).line.hasPrefix("Ready to print"))
         let odd = try JSONDecoder().decode(Project.DesignDraft.self, from: Data(#"{"reasons": ["Model the desk.", 3, "  ", null]}"#.utf8))
         XCTAssertEqual(odd.reasons, ["Model the desk."])

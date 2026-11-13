@@ -231,7 +231,8 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
                     label = entry?.label ?: if (photo != null) "Your photo" else words.title,
                     unavailableLine = when { entry == null -> "Nothing to show yet."; entry.kind == ProjectGallery.Kind.Plate -> "No picture of this plate came with the file."; else -> "Your computer couldn't draw a picture of this." },
                     modifier = Modifier.fillMaxSize())
-                StatusCapsule(shownWords.phase, modifier = Modifier.padding(12.dp))
+                StatusCapsule(shownWords.phase, text = if (shownWords.phase == ProjectPhase.Ready && shown.current?.draft != null) Project.Draft.CAPSULE else null,
+                    modifier = Modifier.padding(12.dp).testTag("status-capsule"))
                 entry?.sizeText()?.let { Text(it, Modifier.align(Alignment.BottomStart).padding(12.dp).clip(RoundedCornerShape(50)).background(Color.Black.copy(alpha = 0.55f)).padding(8.dp, 4.dp), fontSize = 12.sp) }
                 // On the picture, with the same dark backing as the size and status chips, so it reads on either stage.
                 if (version == null && entry?.kind == ProjectGallery.Kind.Part && project.canLocate) Text("See It Together",

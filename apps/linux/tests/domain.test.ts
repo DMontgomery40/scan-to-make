@@ -1462,6 +1462,7 @@ test("project-draft.json: a draft says it isn't finished, with the engine's reas
   assert.deepEqual(draftReasons(round4.project.current!.draft!, false), round4.reasons.slice(0, 2));
   assert.deepEqual(draftReasons(round4.project.current!.draft!, true), round4.reasons);
   const html = pageOf(round4.project, undefined, projects);
+  assert.equal(html.split(draftDoc.line.replaceAll("'", "&#x27;")).length - 1, 1, "one plain line, not two");
   for (const reason of round4.reasons.slice(0, 2)) assert.ok(html.includes(reason.replaceAll("'", "&#x27;")), reason);
   assert.ok(!html.includes(round4.reasons[2]!.replaceAll("'", "&#x27;")), "the third is behind Show all");
   assert.match(html, /Show all 3/);

@@ -153,6 +153,8 @@ data class Project(
             /** What Print's sheet adds for a draft design (contracts `DRAFT_PRINT_NOTE`). */
             const val PRINT_NOTE = "This part wasn't fully checked: the design engine couldn't check everything."
             const val COLLAPSE_AFTER = 2
+            /** The status capsule's words on a ready draft's page. */
+            const val CAPSULE = "Not finished"
         }
     }
     /** The scan turned about the fixed X, then Y, then Z axes (`rotationDeg`), then moved (`translationMm`), into the part's frame. */

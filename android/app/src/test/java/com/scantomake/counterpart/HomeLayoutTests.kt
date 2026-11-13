@@ -322,6 +322,7 @@ class HomeLayoutTests {
         state.loaded.value = true
         compose.setContent { WithApp { com.scantomake.counterpart.ui.ProjectScreen(id, back = {}, print = {}, printing = {}, scan = {}) } }
         compose.onNodeWithTag("draft-design-line").performScrollTo().assertTextContains(doc["line"]!!.jsonPrimitive.content, substring = true)
+        compose.onNodeWithTag("status-capsule").assertTextContains("Not finished")
         compose.onAllNodesWithTag("draft-design-reason").assertCountEquals(2)
         compose.onNodeWithText(reasons[0], substring = true).assertExists()
         compose.onNodeWithTag("draft-design-more").performScrollTo().assertTextContains("Show all 3").performClick()
