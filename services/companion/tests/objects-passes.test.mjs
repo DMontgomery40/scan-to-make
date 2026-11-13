@@ -688,6 +688,22 @@ test('#788: a draft design is kept with its reasons, never presented as finished
   assert.match(publicObject(finished).status.text, /^Ready to print/);
 });
 
+test('#788: a pass that changes nothing on a draft leaves it a draft', async t => {
+  const reasons = ['Model the desk as world:desk in use().'];
+  const f = await setup(t, [
+    {engine: 'code', result: {summary: 'A hook.', draft: {reasons}}},
+    {engine: 'blender', status: 'unchanged', result: {summary: 'Nothing needed changing.'}},
+  ]);
+  const object = await f.service.create('A hook for under the desk', 'fit');
+  await f.service.start(object.id);
+  await f.service.settled(object.id);
+  await f.service.correct(object.id, 'Smooth it');
+  const after = await f.service.settled(object.id);
+  assert.equal(after.state, 'ready');
+  assert.deepEqual(after.current.draft, {reasons}, 'the model is still the draft');
+  assert.equal(publicObject(after).status.text, "Not finished: the design engine couldn't check everything");
+});
+
 test('a size question is its own kind: numbers on the wire, numbers back, and the worker is told which were measured and which accepted', async t => {
   const asked = [{label: 'width at the pink stripe', mm: 64, from: 'scan'}, {label: 'width at the waist', mm: 53, from: 'estimate'},
     {label: 'height to the cap tip', mm: 107, from: 'published', product: 'MiO 1.62 oz bottle', reference: 'the maker\'s product page'},

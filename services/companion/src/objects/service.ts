@@ -3590,8 +3590,10 @@ export class ObjectService {
         ...(result.parts && result.partColours?.length ? {filaments: result.partColours} : {}),
         ...(result.changes?.length ? {changes: result.changes} : {}), ...(result.supports ? {supports: result.supports} : {}), engine, ...(design ? {design} : {}),
         ...(seats?.length ? {seats} : {}),
-        // #788: the MCP's reasons, as given (made safe to show by the runner).
-        ...(result.draft && result.status === 'done' ? {draft: result.draft.reasons?.length ? {reasons: result.draft.reasons} : {}} : {})};
+        // #788: the MCP's reasons, as given (made safe to show by the runner). A pass that changed nothing leaves the model,
+        // and so its draft, as it was.
+        ...(result.draft && result.status === 'done' ? {draft: result.draft.reasons?.length ? {reasons: result.draft.reasons} : {}}
+          : result.status === 'unchanged' && before.current?.draft ? {draft: before.current.draft} : {})};
     }
     const ask = result.status === 'needs_closeup' ? await this.#ask(id, result) : undefined;
     const state: StmObject['state'] = result.status === 'needs_closeup' ? 'needs-closeup'

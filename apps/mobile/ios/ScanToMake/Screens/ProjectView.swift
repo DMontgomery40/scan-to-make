@@ -230,18 +230,21 @@ struct ProjectView: View {
                         // The status is one tap away: the capsule opens the same choices as ••• → Status.
                         // An earlier design on the stage shows its own state; the project's status menu waits for the newest (#616).
                         if viewingDesign != nil {
-                            StatusCapsule(phase: ProjectWords(object.showingDesign(viewingDesign)).phase,
-                                          text: Project.DesignDraft.capsule(object.showingDesign(viewingDesign), phase: ProjectWords(object.showingDesign(viewingDesign)).phase))
+                            let shownPhase = ProjectWords(object.showingDesign(viewingDesign)).phase
+                            let draftWords = Project.DesignDraft.capsule(object.showingDesign(viewingDesign), phase: shownPhase)
+                            StatusCapsule(phase: shownPhase, text: draftWords, symbol: draftWords == nil ? nil : Project.DesignDraft.symbol)
                         } else if store.projectSettings {
                             Menu { statusChoices(object, words, inline: true) } label: {
-                                HStack(spacing: 4) { StatusCapsule(phase: words.phase, text: Project.DesignDraft.capsule(object, phase: words.phase)); Image(systemName: "chevron.down").font(.caption2.weight(.bold)).foregroundStyle(.secondary) }
+                                HStack(spacing: 4) { StatusCapsule(phase: words.phase, text: Project.DesignDraft.capsule(object, phase: words.phase),
+                                              symbol: Project.DesignDraft.capsule(object, phase: words.phase) == nil ? nil : Project.DesignDraft.symbol); Image(systemName: "chevron.down").font(.caption2.weight(.bold)).foregroundStyle(.secondary) }
                             }
                             .disabled(away)
                         .accessibilityIdentifier("status-menu")
                             .accessibilityLabel("Status, \(words.phase.label)")
                             .accessibilityHint("Changes the project's status")
                         } else {
-                            StatusCapsule(phase: words.phase, text: Project.DesignDraft.capsule(object, phase: words.phase))
+                            StatusCapsule(phase: words.phase, text: Project.DesignDraft.capsule(object, phase: words.phase),
+                                              symbol: Project.DesignDraft.capsule(object, phase: words.phase) == nil ? nil : Project.DesignDraft.symbol)
                         }
                         Spacer()
                         Text(Format.when(object.updatedAt)).font(.caption).foregroundStyle(.secondary)
