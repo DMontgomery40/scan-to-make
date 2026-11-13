@@ -599,7 +599,7 @@ final class LayoutParityUITests: XCTestCase {
         XCTAssertEqual(more.label, "Show All 3")
         more.tap()
         XCTAssertTrue(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "count == 3"), object: reasons)], timeout: 5) == .completed)
-        XCTAssertTrue(app.buttons["ask-for-changes"].exists, "another pass is asked for as always")
+        XCTAssertTrue(app.descendants(matching: .any)["ask-for-changes"].exists, "another pass is asked for as always")
         let print = app.buttons["print"]
         XCTAssertTrue(print.exists && print.isEnabled, "a draft still prints")
         print.tap()

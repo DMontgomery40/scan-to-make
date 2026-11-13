@@ -256,7 +256,6 @@ export function rowDetail(text: string | undefined, reason = false): string | un
  */
 export const printedOut = (p: {monitor?: {endState?: string; checkSent?: boolean}}) => p.monitor?.endState === 'done' && p.monitor?.checkSent !== true;
 
-
 /** The §4 line for a project, with its symbol and colour. */
 export function objectStatus(object: StatusSource, updatedAtMs?: number): ObjectStatus {
   // #788: a draft is never presented as finished, also when an earlier design was printed.
