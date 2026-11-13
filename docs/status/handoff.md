@@ -6,7 +6,45 @@ Updated in place; git history keeps the rest. This is the only handoff: no dated
 
 **What is running and owed this hour is the pinned issue [#610](https://github.com/DMontgomery40/scan-to-make/issues/610), which the lead updates at every wake. Read it first.**
 
-## Now (2026-11-12, 21:45Z): afternoon — #769 fixed, MCP release 4, Mac on train 12d
+## Now (2026-11-13, 03:30Z): evening — train 12e (#769 second fix, Printer software, printer names)
+
+Lead: Claude Opus 5.5 (high), T3 thread "Recover Work and Stabilize Counterpart" on agents-173. Live list: pinned [#610](https://github.com/DMontgomery40/scan-to-make/issues/610). The sections below are the afternoon's and the night's record.
+
+**Train 2026-11-13a (12e), [#782](https://github.com/DMontgomery40/scan-to-make/pull/782), merged at 03:17Z: main `bd47cc02`.** Each PR had one review and one follow-up.
+- **#777 (#769, P0).** David's phone trace after #770 showed the model URL did reach the stage, but on a pushed page the stage instance on screen never ran its `.task`. So `stage.begin` never ran: the instance SwiftUI keeps appears and disappears in the same millisecond, the one shown never starts.
+  - The gallery reads the page model from the store itself.
+  - The stage starts its load from its body as well as from `.task`, once per model, through `BodyKick` in `Design.swift`.
+  - A failed load is released, so the next appear tries again; the body pass never retries.
+  - New trace events: `gallery.url`, `stage.url` (with `jobBefore`/`wantedBefore`, logged before the deferred start), and `stage.live`.
+  - The UI test is behaviour coverage only: it would pass on main in the simulator. #769 closes only on the phone's trace showing `stage.begin` then `stage.published` under the on-screen stage, on a printed item that failed.
+- **#776 (#775, David 21:4xZ: "messy af looking, double entries, confusing wording, awkwared workflow").** Settings → Printer software is one row per MCP on all five layouts:
+  - the name with its version;
+  - "Up to date", or "<v> available" with one Update button;
+  - "Used by" listing each printer once, counting only printers with a profile on Counterpart's copy;
+  - only when a printer runs another copy, "<printer> (also) runs your own copy (x)" with "Use Counterpart's".
+  - The companion sends `usedBy`, `available` and `upToDate`, and an older companion still renders. A Mac with only a hand-built copy keeps its Update button (#320).
+- **#779 (#766).** An unnamed printer shows the name its MCP gives in `printer.displayName` ("Bambu Lab P1S"), trimmed; a name the person chose stays. On iPhone/iPad, Android and Linux, "… printing" used the printer's config code ("p1s") and now uses its name.
+- **Lead's fix where #776 and #779 meet (4d870265).** The conductor found that "Used by" read the catalog's raw name, so an unnamed P1S would still say "Used by Your printer". The two PRs' tests never met. `PrinterSetupDeps.nameOf` now asks the printer directory, as the printer list and print snapshots do; the fix is pinned in `mcp-updates.test.mjs`.
+- **Gate:**
+  - 17/17 jobs at e3856764, with iPhone UI 111 run, 3 skipped, 0 failed. The fit number-pad test (`LaunchUITests.swift:1313`), which had failed on main, passed.
+  - Companion at 4d870265: 1,277/0 on Node 22 and 24.
+  - Bad-day captures (iPhone slow/refusing/away, iPad away; 25 frames each): 0 flagged, the same as 12d. Two iPad frames are better: Guitar pick and Scan Nov 9 draw the model the iPad kept.
+  - The printed Pink box shows Explore in 3D, AR and its size chip, and the three Printer software screens are clean.
+  - Frames: `~/scan-to-make-work/gate-train-13a/` on the Mac.
+- **Install:** delegated at 03:18Z, iPhone, then Mac, then iPad. The 202611122043 watcher is replaced by one for the new build. The new watcher copies the phone's media trace every 15 minutes for 3 hours, for #769 and #617.
+
+**What counts as done**
+- **#769:** the phone's trace, as above.
+- **#775:** David looking at Settings → Printer software once. The Mac's `printers.mcps` read proves the data, not the screen.
+- **#766:** the read-only `printers.mcps` and printer-list read on his Mac showing "Bambu Lab P1S".
+- All three carry needs-device-verify until then.
+
+**Filed tonight**
+- #778: no way to retry when npm hasn't answered.
+- #780: the config code "p1s" still shows next to the printer's name in some Settings rows.
+- #781: a printer named like a generated name ("Printer 2") is renamed. Record a "chosen by the person" flag instead of guessing from the spelling.
+
+## Before that (2026-11-12, 21:45Z): afternoon — #769 fixed, MCP release 4, Mac on train 12d
 
 Lead: Claude Opus 5.5 (high), T3 thread "Recover Work and Stabilize Counterpart" on agents-173. Live list: pinned [#610](https://github.com/DMontgomery40/scan-to-make/issues/610). The section below (17:15Z) is the night's record; this one says what changed since.
 
