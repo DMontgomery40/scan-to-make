@@ -990,6 +990,14 @@ dialog::backdrop {
   display: block;
   margin: 7px 0 14px;
 }
+/* #775: name and version on one line; the status and its one Update on the next. */
+.package .row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 4px 0;
+}
 .printer-row h3 {
   margin: 0;
 }

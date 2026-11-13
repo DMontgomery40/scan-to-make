@@ -86,6 +86,7 @@ import CounterpartKit
     private(set) var mcpUpdates: [String: MCPUpdateProgress] = [:]
     /// A wait (120 s) or an update under way (35 min) that hears nothing more says so and offers Update again (the Mac's clock, CounterpartKit).
     @ObservationIgnored let mcpWaits = MCPUpdateWaits()
+    /// Each Use Counterpart’s pressed this session, by install, with its package: how it ended stays on that MCP's row (#775).
     var attemptedMcpMoves: [String: String] = [:]
     /// What each printer last reported loaded, from a print sheet (the Mac reports spools per project).
     var spools: [String: [PrinterFilament]] = [:]
@@ -162,7 +163,8 @@ import CounterpartKit
         let printing = catalog.destinations.filter { destination in
             destination.state == "printing" || (self.printing(on: destination.id).map { words($0).phase == .printing } ?? false)
         }
-        if printing.count == 1 { return "\(connection) · \(printing[0].model ?? printing[0].name) printing" }
+        // The listed name (the person's, else what the MCP calls it), as the Mac says it: `model` is a config code (#766).
+        if printing.count == 1 { return "\(connection) · \(printing[0].name) printing" }
         if printing.count > 1 { return "\(connection) · \(printing.count) printers printing" }
         let count = catalog.destinations.count
         let ready = catalog.destinations.filter { $0.isReady == true }.count

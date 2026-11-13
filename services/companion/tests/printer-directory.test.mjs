@@ -230,6 +230,35 @@ test('a config that names a model still shows what the MCP reports; an MCP that 
   assert.equal(directory.list().destinations[0].name, 'Your printer');
 });
 
+// #766: both MCPs now say the model with its maker (printer.displayName, "Bambu Lab P1S"). A printer nobody named shows that,
+// exactly as given; a name the person chose stays; an MCP without it keeps showing its model as before.
+test('#766: a printer nobody named shows the display name its MCP gives; a chosen name stays; without one, the model', async () => {
+  const p1s = {...INFO, server: {name: 'bambu-printer-mcp', version: '1.1.94'}, printer: {kind: 'bambu', host: '192.0.2.1', model: 'P1S', displayName: 'Bambu Lab P1S'}};
+  assert.deepEqual(await listedName(named('Your printer'), p1s), {before: 'Your printer', after: 'Bambu Lab P1S'});
+  for (const legacy of ['Bambu printer', 'Configured printer', 'Printer at 192.0.2.1', 'Printer 2']) assert.equal((await listedName(named(legacy), p1s)).after, 'Bambu Lab P1S', legacy);
+  assert.equal((await listedName(named('Garage printer'), p1s)).after, 'Garage printer');
+  // Whatever the MCP's words, they are shown as given: the companion knows no makers.
+  const generic = {...INFO, server: {name: 'mcp-3D-printer-server', version: '1.2.76'}, printer: {kind: 'prusa', host: '192.0.2.1', model: 'MK4S', displayName: 'Original Prusa MK4S'}};
+  assert.equal((await listedName(named('Your printer', 'mcp-3d-printer-server'), generic)).after, 'Original Prusa MK4S');
+  // An MCP without displayName: its model, as before.
+  const {displayName: _displayName, ...modelOnly} = p1s.printer;
+  assert.equal((await listedName(named('Your printer'), {...p1s, printer: modelOnly})).after, 'P1S');
+  // A display name and no model is still a name to show.
+  const {model: _model, ...nameOnly} = p1s.printer;
+  assert.equal((await listedName(named('Your printer'), {...p1s, printer: nameOnly})).after, 'Bambu Lab P1S');
+});
+
+test('#766: nameOf, which project snapshots and event words read, gives the same display name the list shows', async () => {
+  const p1s = {...INFO, printer: {kind: 'bambu', host: '192.0.2.1', model: 'P1S', displayName: 'Bambu Lab P1S'}};
+  const d = destination({tools: [...CONTRACT], status: () => progress('idle'), info: p1s});
+  const directory = new PrinterDirectory(named('Your printer'), id => id === 'current' ? d.session : undefined, {now: () => 1_000_000});
+  d.set(directory);
+  await directory.refresh('current');
+  await until(() => directory.capabilities('current')?.contract);
+  assert.equal(directory.nameOf('current'), 'Bambu Lab P1S');
+  assert.equal(directory.nameOf('current'), directory.list().destinations[0].name);
+});
+
 // Nov 6, David: "now i only see one to update and missing the other one". A P1S set up in both MCPs is one printer; each
 // MCP it is set up in carries its own install, name and versions, so Settings' row for the MCP prints don't go through
 // still has its Update (packages/contracts/fixtures/printer-both-mcps.json, which the Mac's row test reads too).

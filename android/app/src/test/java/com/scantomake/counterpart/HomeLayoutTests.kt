@@ -634,7 +634,7 @@ class HomeLayoutTests {
         state.projects.value = listOf(requireNotNull(Project.decode(WireJson.parseToJsonElement(
             """{"id":"clip","title":"Cable clip","state":"printing","createdAtMs":0,"updatedAtMs":0,"photos":[],"passes":[],"print":{"destinationId":"p1","monitor":{"phase":"watching"}}}"""
         ).jsonObject)))
-        state.catalog.value = PrinterCatalog(listOf(PrinterDestination("p1", "P1S", model = "Bambu Lab P1S", state = "ready"),
+        state.catalog.value = PrinterCatalog(listOf(PrinterDestination("p1", "Bambu Lab P1S", model = "p1s", state = "ready"),
             PrinterDestination("p2", "Desk", state = "offline")))
         state.macName.value = "Mac mini"
         state.link.value = com.scantomake.counterpart.api.MacLink.Connected
@@ -897,14 +897,18 @@ class HomeLayoutTests {
         org.junit.Assert.assertEquals("a new word clears it", emptySet<String>(), state.mcpUnheard.value)
     }
 
+    private val USE_COUNTERPARTS = "Use Counterpart’s mcp-3D-printer-server for Bambu Lab P1S instead of your own copy (1.2.25)"
+
     private fun printerSoftwareMove(lostReply: Boolean, navigateHome: Boolean = false, secondUpdate: Boolean = false, neverHears: Boolean = false) {
         if (neverHears) state.mcpWaitLimitMs = 1_000
+        // #775: Update shows only when a newer version is published, so the second update has one to install.
         val pkg = WireJson.decodeFromString<com.scantomake.counterpart.api.McpPackageCopies>(contractFixture("mcp-profile-copies.json").readText())
+            .let { if (secondUpdate) it.copy(available = "1.2.50") else it }
         app.pairingStore.save(v2Record(), false)
         val transport = FakeTransport { request, _ ->
             when {
                 request.url.endsWith("/healthz") -> json(200, mapOf("status" to "ok", "capabilities" to mapOf("mcpCopies" to true, "mcpUpdates" to true)))
-                request.url.endsWith("/mcps") -> HttpReply(200, ("{\"packages\":[" + contractFixture("mcp-profile-copies.json").readText() + "]}").toByteArray())
+                request.url.endsWith("/mcps") -> HttpReply(200, ("{\"packages\":[" + WireJson.encodeToString(com.scantomake.counterpart.api.McpPackageCopies.serializer(), pkg) + "]}").toByteArray())
                 request.url.endsWith("/update") -> if (lostReply) throw TransportException("network") else HttpReply(200, contractFixture("mcp-update-waiting.json").readBytes())
                 else -> json(404, mapOf("error" to "not-found"))
             }
@@ -926,10 +930,13 @@ class HomeLayoutTests {
         compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("Existing project"))
         compose.onNodeWithText("Existing project").assertExists()
         compose.onNodeWithContentDescription("Printers").performClick()
-        compose.onNodeWithText("Counterpart’s copy 1.2.45").assertExists()
-        compose.onNodeWithText("Bambu Lab P1S uses your copy at /home/ada/mcp-3D-printer-server (1.2.25).").assertExists()
-        compose.onNodeWithText("Move Bambu Lab P1S (mcp-3D-printer-server, your copy at /home/ada/mcp-3D-printer-server) to Counterpart’s updated copy").assertExists()
-        compose.onNodeWithText("Move Bambu Lab P1S (mcp-3D-printer-server, your copy at /home/ada/mcp-3D-printer-server) to Counterpart’s updated copy").performScrollTo().performClick()
+        // #775: one quiet row: the version beside the name, the printer once, and one plain line for its own copy.
+        compose.onNodeWithText("1.2.45").assertExists()
+        compose.onNodeWithText("No printer uses it yet").assertExists()
+        compose.onNodeWithText("Bambu Lab P1S runs your own copy (1.2.25)").assertExists()
+        compose.onNodeWithText("Counterpart’s copy", substring = true).assertDoesNotExist()
+        compose.onNodeWithContentDescription(USE_COUNTERPARTS).assertExists()
+        compose.onNodeWithContentDescription(USE_COUNTERPARTS).performScrollTo().performClick()
         if (lostReply) {
             val error = "Your computer isn't answering. Check it's on and awake, then try again."
             compose.waitUntil(5_000) { compose.onAllNodes(hasText(error)).fetchSemanticsNodes().isNotEmpty() }
@@ -948,10 +955,10 @@ class HomeLayoutTests {
             org.junit.Assert.assertEquals("Counterpart didn’t say whether this updated. Try Update again.", AppState.MCP_UNHEARD)
             compose.waitUntil(5_000) { compose.onAllNodes(hasText(AppState.MCP_UNHEARD)).fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithText("Updates as soon as Counterpart finishes its work on this printer.").assertDoesNotExist()
-            compose.onNodeWithText("Move Bambu Lab P1S (mcp-3D-printer-server, your copy at /home/ada/mcp-3D-printer-server) to Counterpart’s updated copy").assertIsEnabled()
+            compose.onNodeWithContentDescription(USE_COUNTERPARTS).assertIsEnabled()
         }
         if (secondUpdate) {
-            compose.onNodeWithText("Update Counterpart’s copy").performScrollTo().performClick()
+            compose.onNodeWithContentDescription("Update mcp-3D-printer-server").performScrollTo().performClick()
             compose.waitUntil(5_000) { transport.calls.count { it.request.url.endsWith("/update") } == 2 }
             val done = WireJson.parseToJsonElement(contractFixture("mcp-copy-update-events.json").readText()).jsonArray
                 .map { requireNotNull(CounterpartEvent.decode(it.jsonObject)) }.first { it.type.endsWith("done") }
@@ -1020,7 +1027,7 @@ class HomeLayoutTests {
         compose.onNodeWithContentDescription("Printers").performClick()
         compose.waitUntil(5_000) { compose.onAllNodes(hasTestTag("auto-update-mcps")).fetchSemanticsNodes().isNotEmpty() }
         compose.onAllNodes(hasTestTag("auto-update-mcps")).assertCountEquals(1)
-        compose.onNodeWithText("Counterpart’s copy 1.2.45").assertExists()
+        compose.onNodeWithText("No printer uses it yet").assertExists()
         val switch = compose.onNodeWithTag("auto-update-mcps")
         switch.performScrollTo().assertIsOn().assertTextContains("Keep printer software up to date")
         compose.onNodeWithText(com.scantomake.counterpart.ui.AUTO_UPDATE_MCPS_WORDS).assertExists()
@@ -1033,7 +1040,7 @@ class HomeLayoutTests {
         compose.onNodeWithContentDescription("Back").performClick()
         sendsKey = false
         compose.onNodeWithContentDescription("Printers").performClick()
-        compose.onNodeWithText("Counterpart’s copy 1.2.45").assertExists()
+        compose.onNodeWithText("No printer uses it yet").assertExists()
         compose.waitUntil(5_000) { reads == 2 }
         compose.waitForIdle()
         compose.onAllNodes(hasTestTag("auto-update-mcps")).assertCountEquals(0)
@@ -1134,15 +1141,21 @@ class HomeLayoutTests {
         val titles = packages.flatMap { it.moves.map { move -> move.title } }
         org.junit.Assert.assertEquals(2, titles.toSet().size)
         for (pkg in packages) org.junit.Assert.assertEquals(pkg.uses.filter { it.canMove }.map { it.mcpId }, pkg.moveIds)
-        for ((pkg, title) in packages.zip(titles)) {
-            // Each Move sits in its MCP's group, under that MCP's heading.
+        val labels = packages.flatMap { it.row().others.map { other -> other.label } }
+        org.junit.Assert.assertEquals("two P1S buttons never read the same", 2, labels.toSet().size)
+        for (pkg in packages) {
+            // #775: each Use Counterpart’s sits in its MCP's group, under that MCP's heading, with its one plain line.
+            val group = hasAnyAncestor(hasTestTag("mcp-package-${pkg.`package`}"))
             compose.onNode(hasTestTag("mcp-package-${pkg.`package`}")).performScrollTo()
-            compose.onNode(hasText(title) and hasAnyAncestor(hasTestTag("mcp-package-${pkg.`package`}"))).assertExists()
-            compose.onNode(hasText(pkg.label) and isHeading() and hasAnyAncestor(hasTestTag("mcp-package-${pkg.`package`}"))).assertExists()
-            compose.onNode(hasContentDescription("Update Counterpart’s copy of ${pkg.label}") and hasAnyAncestor(hasTestTag("mcp-package-${pkg.`package`}"))).assertExists()
+            val other = pkg.row().others.single()
+            compose.onNode(hasText(other.words) and group).assertExists()
+            compose.onNode(hasContentDescription(other.label) and group).assertExists()
+            compose.onNode(hasText(pkg.label) and isHeading() and group).assertExists()
+            compose.onNode(hasText("Up to date") and group).assertExists()
+            compose.onNode(hasContentDescription("Update ${pkg.label}") and group).assertDoesNotExist()
         }
-        compose.onNodeWithText(packages[0].uses[0].words).assertExists()
-        org.junit.Assert.assertTrue(packages[0].uses[0].words.contains("older than Counterpart’s copy (1.1.69)"))
+        compose.onNodeWithText("Bambu Lab P1S runs an earlier copy (1.1.65)").assertExists()
+        compose.onAllNodes(hasText("No printer uses it yet")).assertCountEquals(2)
     }
 
     /** #357's deferred Codex P2: an update or Move started on another client shows here without a tap on this phone. */

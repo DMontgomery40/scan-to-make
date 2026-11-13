@@ -99,7 +99,8 @@ fun HomeScreen(open: (String, Boolean) -> Unit, newProject: (String?) -> Unit, p
     }
     val ready = catalog?.destinations.orEmpty().count { it.state == "ready" }
     val subtitle = connection + when {
-        printing.size == 1 -> " · ${printing[0].model ?: printing[0].name} printing"
+        // The listed name (the person's, else what the MCP calls it), as the Mac says it: `model` is a config code (#766).
+        printing.size == 1 -> " · ${printing[0].name} printing"
         printing.size > 1 -> " · ${printing.size} printers printing"
         ready > 0 -> " · $ready ${if (ready == 1) "printer" else "printers"} ready"
         else -> ""

@@ -64,7 +64,7 @@ export class PrinterDirectory {
   readonly catalog: PrinterCatalog;
   readonly #session: (destinationId: string) => PrinterSession | undefined;
   readonly #capabilities = new Map<string, PrinterCapabilities>();
-  /** The model each printer's MCP reported in `counterpart_printer_info`. */
+  /** The name each printer's MCP gave in `counterpart_printer_info`: its `displayName`, else its model (#766). */
   readonly #models = new Map<string, string>();
   /** The tool list each destination's session connected with, for reading its printer info again. */
   readonly #catalogs = new Map<string, PrinterToolCatalog>();
@@ -118,12 +118,14 @@ export class PrinterDirectory {
     const info = await readPrinterInfo(session, {failFast: true}).catch(() => undefined);
     if (info && this.#catalogs.get(destinationId) === catalog) {
       this.#capabilities.set(destinationId, detectCapabilities(session.config, catalog, info));
-      if (info.printer.model) this.#models.set(destinationId, info.printer.model);
+      // The MCP's display name (the model with its maker, #766), else its model, as before.
+      const reported = info.printer.displayName ?? info.printer.model;
+      if (reported) this.#models.set(destinationId, reported);
     }
   }
 
   /**
-   * A printer nobody named is shown by the model its MCP reports, not "Your printer" (first look U9). A name the
+   * A printer nobody named is shown by the name its MCP gives, not "Your printer" (first look U9, #766). A name the
    * person gave, or one already made from a known model, stays.
    */
   #named(destination: PrinterDestination): Pick<PrinterDestination, 'name'> {
@@ -131,8 +133,8 @@ export class PrinterDirectory {
     const unnamed = isGeneratedName(destination.name);
     // Also when its config names a model: what the MCP reports is what's shown, not the config's code ("p1s").
     if (!reported || !unnamed) return {name: destination.name};
-    // The MCP's own display name, exactly as it says it ("A1 Mini", "H2D Pro"): no brand added, nothing reformatted, no
-    // branching on which MCP it is (AGENTS.md, "The app staples onto the MCPs"). A brand in the name is the MCPs' to add.
+    // The MCP's own display name, exactly as it says it ("Bambu Lab P1S"; an older install's model, "A1 Mini"): no brand
+    // added, nothing reformatted, no branching on which MCP it is (AGENTS.md, "The app staples onto the MCPs").
     return {name: reported};
   }
 

@@ -212,20 +212,36 @@ fun McpCopiesPanel(printerId: String, state: AppState) {
         }
     }
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        // #775 (David, Nov 12: "messy af looking, double entries, confusing wording"): one quiet row per MCP, the same words
+        // as the iPhone, iPad, Mac and Linux (`McpPackageCopies.row`).
+        fun running(id: String): Boolean {
+            if (id in unheard) return false
+            if (busy == id) return true
+            val attempt = attempts[id]
+            val state = events[id]?.takeIf { attempt == null || it.seq > attempt.eventFloor }?.type?.removePrefix("mcp.update.") ?: attempt?.result?.state
+            return state == "started" || state == "waiting"
+        }
         packages?.filter { pkg -> pkg.uses.any { it.printerId == printerId } }?.forEach { pkg ->
-          // One group per MCP: TalkBack reads its heading first, and its Move and Update buttons stay inside it.
+          val row = pkg.row(printerId)
+          // One group per MCP: TalkBack reads its heading first, and its Use Counterpart’s and Update buttons stay inside it.
           Column(Modifier.fillMaxWidth().testTag("mcp-package-${pkg.`package`}").semantics { isTraversalGroup = true },
               verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(pkg.label, fontSize = 14.sp, modifier = Modifier.semantics { heading() })
-            pkg.appCopy?.let { Text("Counterpart’s copy ${it.version ?: "version unknown"}", fontSize = 12.sp) }
-            pkg.uses.filter { it.printerId == printerId }.forEach { Text(it.words, fontSize = 12.sp) }
-            if (capabilities.contains("mcpUpdates")) {
-                // In the order the uses above are listed, each titled by its printers, MCP and copy.
-                pkg.moves.filter { move -> pkg.uses.any { it.printerId == printerId && it.mcpId == move.mcpId } }.forEach { move ->
-                    SecondaryButton(move.title, Modifier.fillMaxWidth(), enabled = busy == null && readProblem == null) { update(move.mcpId, true) }
-                }
-                if (pkg.appCopy != null) SecondaryButton("Update Counterpart’s copy", Modifier.fillMaxWidth()
-                    .semantics { contentDescription = "Update Counterpart’s copy of ${pkg.label}" }, enabled = busy == null && readProblem == null) { update(pkg.appMcpId, false) }
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
+                Text(row.name, fontSize = 14.sp, modifier = Modifier.weight(1f).semantics { heading() })
+                row.version?.let { Text(it, color = Palette.secondary, fontSize = 12.sp) }
+            }
+            row.status?.let { Text(it, fontSize = 12.sp, color = if (row.update != null) Palette.filament else Palette.secondary) }
+            // While it updates, its progress (below) stands in place of the button.
+            if (row.update != null && capabilities.contains("mcpUpdates") && !running(pkg.appMcpId))
+                SecondaryButton("Update", Modifier.fillMaxWidth().semantics { contentDescription = "Update ${row.name}" },
+                    enabled = busy == null && readProblem == null) { update(pkg.appMcpId, false) }
+            Text(row.usedBy, color = Palette.secondary, fontSize = 12.sp)
+            row.others.forEach { other ->
+                Text(other.words, fontSize = 12.sp)
+                if (capabilities.contains("mcpUpdates") && !running(other.mcpId))
+                    SecondaryButton(other.button, Modifier.fillMaxWidth().semantics { contentDescription = other.label },
+                        enabled = busy == null && readProblem == null) { update(other.mcpId, true) }
+                Text(other.footnote, color = Palette.secondary, fontSize = 12.sp)
             }
             // An update or Move started on another phone, the Mac or Linux: its events show here too (#357's deferred P2).
             (pkg.uses.filter { it.printerId == printerId }.map { it.mcpId } + pkg.appMcpId).distinct()
@@ -234,7 +250,6 @@ fun McpCopiesPanel(printerId: String, state: AppState) {
                     Text(if (id in unheard) AppState.MCP_UNHEARD else event.body.takeIf { it.isNotBlank() } ?: event.title, fontSize = 12.sp,
                         color = if (event.type.endsWith("failed")) Palette.failed else Palette.secondary)
                 }
-            Text("Moving updates Counterpart’s copy and uses it for the named printers. Your copy is left untouched.", color = Palette.secondary, fontSize = 12.sp)
           }
         }
         // Events are authoritative even when the accepted mutation's HTTP reply never arrived.
@@ -246,6 +261,6 @@ fun McpCopiesPanel(printerId: String, state: AppState) {
             if (event == null) attempt.problem?.let { Text(it, color = Palette.failed, fontSize = 12.sp) }
         }
         readProblem?.let { Text(it, color = Palette.failed, fontSize = 12.sp) }
-        if (!capabilities.contains("mcpCopies")) Text("Update Counterpart on your computer to see each printer’s software copy.", color = Palette.secondary, fontSize = 12.sp)
+        if (!capabilities.contains("mcpCopies")) Text("Update Counterpart on your computer to see its printer software here.", color = Palette.secondary, fontSize = 12.sp)
     }
 }

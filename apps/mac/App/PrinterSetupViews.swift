@@ -70,9 +70,11 @@ import ControlKit
     }
 }
 
-/// One printer MCP that no printer uses yet: Installed (where, which version) or **Download**. When a newer version
-/// is published, **Update** installs it as Counterpart's own copy (`printers.updateMcp` with `appMcpId`, #320's path),
-/// so a copy someone built by hand is never the only one Counterpart can update. That copy stays as it is.
+/// One printer MCP in Settings → Printer software (#775; David, Nov 12: "messy af looking, double entries, confusing
+/// wording"): its name and version; "Up to date", or "<version> available" with one **Update** (Counterpart's own copy,
+/// `printers.updateMcp` with `appMcpId`); the printers that use it, each once; and only when a printer runs another copy,
+/// one line and **Use Counterpart’s** (the Move). One this Mac hasn't is offered as **Download**. The words are
+/// CounterpartKit's `PrinterSoftwareRow`, the same on the iPhone and iPad.
 struct McpPackageRow: View {
     let package: PrinterMcpPackage
     let status: McpUpdateStatus?
@@ -81,67 +83,63 @@ struct McpPackageRow: View {
     var move: ((String) -> Void)? = nil
     @ObservedObject private var updates = PrinterUpdates.shared
 
-    /// Installed, a newer version is published, and this view can update it.
-    var offersUpdate: Bool { update != nil && package.offersUpdate }
-
+    private var row: PrinterSoftwareRow { package.softwareRow }
     private var busy: Bool { status?.busy == true }
-    private var place: String? {
-        guard let install = package.installs.first else { return nil }
-        switch install.kind {
-        case "app": return "Counterpart’s copy"
-        case "npx": return "Run with npx"
-        case "folder", "checkout": return install.path.map { ($0 as NSString).abbreviatingWithTildeInPath }
-        default: return install.path.map { ($0 as NSString).abbreviatingWithTildeInPath }
-        }
-    }
 
     var body: some View {
         HStack(alignment:.top, spacing:10) {
             VStack(alignment:.leading, spacing:3) {
-                HStack(spacing:6) {
-                    Text(package.label).font(.body.weight(.medium))
-                    if package.installed, let version = package.version { Text(version).font(.caption.monospacedDigit()).foregroundStyle(.secondary) }
+                HStack(alignment:.firstTextBaseline, spacing:6) {
+                    Text(row.name).font(.body.weight(.medium))
+                    Spacer(minLength:8)
+                    if let version = row.version { Text(version).font(.callout.monospacedDigit()).foregroundStyle(.secondary) }
                 }
-                Text(package.description).font(.caption).foregroundStyle(.secondary)
-                if let copy = package.appCopy {
-                    Text("Counterpart’s copy \(copy.version ?? "version unknown")").font(.caption).foregroundStyle(.secondary)
-                }
-                ForEach(package.uses ?? []) { use in
-                    Text(use.words).font(.caption).foregroundStyle(.secondary)
-                }
-                // In the order the uses above are listed, each titled by its printers, MCP and copy (two P1S profiles read apart).
-                ForEach(package.moves, id: \.mcpId) { item in
-                    if let move {
-                        Button(item.title) { move(item.mcpId) }
-                            .disabled(updates.status[item.mcpId]?.busy == true)
-                        Text("Updates Counterpart’s copy and switches these profiles. Your copy is left untouched.").font(.caption).foregroundStyle(.secondary)
-                        if let progress = updates.status[item.mcpId] { Text(progress.words).font(.caption) }
+                if !package.installed { Text(package.description).font(.caption).foregroundStyle(.secondary) }
+                // While it updates, its progress in place of "available" and the button. A finished update earlier in
+                // this session never hides the row's status or the next version's Update.
+                if let status, status.busy || row.status == nil { statusLine(status) }
+                else if let words = row.status {
+                    HStack(alignment:.firstTextBaseline) {
+                        switch words {
+                        case .upToDate: Label(words.words, systemImage:"checkmark.circle.fill").font(.caption).foregroundStyle(.secondary)
+                        case .available: Text(words.words).font(.caption.weight(.medium)).foregroundStyle(Color.filament)
+                        }
+                        Spacer(minLength:8)
+                        if update != nil, package.showsUpdate(status:status), let update {
+                            Button(failed ? "Try Again" : "Update", action:update)
+                                .buttonStyle(.glassProminent).controlSize(.small)
+                                .accessibilityLabel(package.updateLabel(failed:failed))
+                                .help("Installs \(package.available ?? "the latest version") for Counterpart. Other copies on this Mac are left as they are.")
+                        }
                     }
+                    if failed, let status { statusLine(status) }
                 }
-                if let status { statusLine(status) }
-                else if package.installed {
-                    Text(["Installed", place].compactMap { $0 }.joined(separator:" · ") + ((package.uses ?? []).isEmpty ? ". No printer uses it yet." : ".")).font(.caption).foregroundStyle(.secondary)
-                    if offersUpdate, let latest = package.latestVersion {
-                        Text("\(latest) is available.").font(.caption.weight(.medium)).foregroundStyle(Color.filament)
+                if package.installed { Text(row.usedBy).font(.caption).foregroundStyle(.secondary) }
+                ForEach(row.others, id:\.mcpId) { other in
+                    VStack(alignment:.leading, spacing:4) {
+                        Text(other.words).font(.caption)
+                        if let progress = updates.status[other.mcpId], progress.busy {
+                            Text(progress.words).font(.caption).foregroundStyle(.secondary)
+                        } else if let move {
+                            Button(other.button) { move(other.mcpId) }
+                                .controlSize(.small)
+                                .accessibilityLabel(other.accessibilityLabel)
+                            if let progress = updates.status[other.mcpId] { Text(progress.words).font(.caption) }
+                        }
+                        Text(other.footnote).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal:false, vertical:true)
                     }
+                    .padding(.top, 4)
                 }
             }
-            Spacer()
             if status?.spinning == true { ProgressView().controlSize(.small) }
             if !package.installed {
                 Button(failed ? "Try Again" : "Download", action:download)
                     .buttonStyle(.glassProminent).disabled(busy || installedNow)
                     .accessibilityLabel(failed ? "Try downloading \(package.label) again" : "Download \(package.label)")
                     .help("Installs the latest \(package.label) for Counterpart only. Nothing else changes.")
-            } else if offersUpdate, let update {
-                // Only while busy: a finished install earlier in this session must not block the next version.
-                Button(failed ? "Try Again" : "Update", action:update)
-                    .buttonStyle(.glassProminent).disabled(busy)
-                    .accessibilityLabel(package.updateLabel(failed:failed))
-                    .help("Installs \(package.latestVersion ?? "the latest version") as Counterpart’s own copy. Other copies on this Mac are left as they are.")
             }
         }
-        // One container per MCP: VoiceOver reads its name first, and its Update and Move buttons belong to it.
+        // One container per MCP: VoiceOver reads its name first, and its Update and Use Counterpart’s buttons belong to it.
         .accessibilityElement(children:.contain)
         .accessibilityLabel(package.label)
         .accessibilityIdentifier("mcp-row-" + package.package)
@@ -648,3 +646,46 @@ struct AddedPrinterActions: View {
         }
     }
 }
+
+#if DEBUG
+/// Review screenshots of Settings → Printer software (#775) from a `printers.mcps` answer, drawn in a window that is never
+/// shown (no window on the person's screen, no companion, nothing saved): `ScanToMake --render-printer-software
+/// <answer.json> <out.png> [dark]`, then it exits.
+@MainActor enum PrinterSoftwareSnapshot {
+    static func render(_ arguments: [String]) -> Never {
+        struct Reply: Decodable { let packages: [PrinterMcpPackage] }
+        do {
+            let input = URL(fileURLWithPath:arguments[0]), output = URL(fileURLWithPath:arguments[1])
+            let packages = try JSONDecoder().decode(Reply.self, from:Data(contentsOf:input)).packages
+            let app = NSApplication.shared
+            app.setActivationPolicy(.prohibited)
+            app.appearance = NSAppearance(named:arguments.count > 2 && arguments[2] == "dark" ? .darkAqua : .aqua)
+            let item = CounterpartKit.SettingsSchema.autoUpdateMcps
+            let view = Form {
+                Section {
+                    Toggle(isOn:.constant(true)) { Text(item.label); Text(item.footer) }
+                    ForEach(packages) { package in
+                        McpPackageRow(package:package, status:nil, download:{}, update:{}, move:{ _ in })
+                    }
+                } header: { Text("Printer software") }
+            }
+            .formStyle(.grouped)
+            let size = NSSize(width:620, height:CGFloat(220 + packages.count * 90 + packages.flatMap { $0.moves }.count * 90))
+            let host = NSHostingView(rootView:view.frame(width:size.width, height:size.height))
+            host.frame = NSRect(origin:.zero, size:size)
+            let window = NSWindow(contentRect:NSRect(origin:NSPoint(x:-20_000, y:-20_000), size:size), styleMask:[.borderless], backing:.buffered, defer:false)
+            window.contentView = host
+            host.layoutSubtreeIfNeeded()
+            RunLoop.main.run(until:Date().addingTimeInterval(1.5))
+            host.layoutSubtreeIfNeeded()
+            guard let bitmap = host.bitmapImageRepForCachingDisplay(in:host.bounds) else { exit(2) }
+            host.cacheDisplay(in:host.bounds, to:bitmap)
+            try bitmap.representation(using:.png, properties:[:])?.write(to:output)
+            exit(0)
+        } catch {
+            fputs("render-printer-software: \(error)\n", stderr)
+            exit(1)
+        }
+    }
+}
+#endif

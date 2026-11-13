@@ -25,6 +25,10 @@ import ControlKit
             return
         }
         #if DEBUG
+        // #775 review screenshots: Settings → Printer software drawn off screen from a fixture, then exit.
+        if let index = CommandLine.arguments.firstIndex(of:"--render-printer-software"), index + 2 < CommandLine.arguments.count {
+            MainActor.assumeIsolated { PrinterSoftwareSnapshot.render(Array(CommandLine.arguments[(index + 1)...])) }
+        }
         // Design QA only: the real app, on screen, with the mockup's projects read from a folder of assets.
         if let index = CommandLine.arguments.firstIndex(of:"--design-fixtures"), index + 1 < CommandLine.arguments.count {
             DesignFixtures.assets = URL(fileURLWithPath:CommandLine.arguments[index + 1], isDirectory:true)

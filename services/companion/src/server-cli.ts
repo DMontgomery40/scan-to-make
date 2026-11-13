@@ -186,7 +186,7 @@ const reloadPrinters=async()=>{
 const printerSetup=mcpUpdates?new PrinterSetup({env:printerEnv,gate:printGate,configs:()=>printerCatalog?.entries()??[],
   effective:(id,config)=>mcpUpdates!.effective(id,config),autoReason:id=>mcpUpdates!.autoReason(id),download:pkg=>mcpUpdates!.download(pkg),
   latestVersion:(pkg,options)=>mcpUpdates!.latestVersionSettled(pkg,options),folders:()=>findMcpFolders(homedir()),
-  node:process.execPath,profilesPath:printerProfiles,setupCachePath:printerSetupCache,catalog:()=>printerCatalog,reload:reloadPrinters,
+  node:process.execPath,profilesPath:printerProfiles,setupCachePath:printerSetupCache,catalog:()=>printerCatalog,nameOf:id=>printerDirectory?.nameOf(id),reload:reloadPrinters,
   // Complete Settings changed its .env: the MCP reads it again on a fresh start (with any Update's override).
   // Its services are rebuilt with the catalog's new config (the recorded model, passed as bambu_model), keeping the
   // pooled session and its confirmation relay.

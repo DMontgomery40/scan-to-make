@@ -53,7 +53,8 @@ final class ProjectScreensUITests: XCTestCase {
         for answer in [camera, photos, guess] { XCTAssertFalse(answer.frame.intersects(new), "\(answer.label) is under New") }
         XCTAssertEqual(camera.frame.minY, photos.frame.minY, accuracy: 2, "Camera and Photos share one row")
         // The Mac's real name and what its printer is doing, never "0 printers ready" while one prints.
-        XCTAssertTrue(app.staticTexts["Mac mini connected · Bambu Lab P1S printing"].exists)
+        // The printer as it is listed (its name, never the config's model code "p1s"), as the Mac says it (#766).
+        XCTAssertTrue(app.staticTexts["Mac mini connected · P1S printing"].exists)
     }
 
     func testSearchExplainsHiddenProjectsAndShowAllRestoresThem() {
@@ -1492,7 +1493,7 @@ final class LayoutParityUITests: XCTestCase {
         if regular {
             let status = app.staticTexts["projects-status"]
             XCTAssertTrue(status.label.contains("Mac mini connected"), status.label)
-            XCTAssertTrue(status.label.contains("Bambu Lab P1S printing"), status.label)
+            XCTAssertTrue(status.label.contains("P1S printing"), status.label)
             XCTAssertTrue(app.staticTexts["Needs you"].exists)
             XCTAssertFalse(app.staticTexts["Other"].exists, "the failed project belongs to Needs you")
         }
@@ -1904,13 +1905,13 @@ final class LayoutParityUITests: XCTestCase {
         move.tap()
         let waiting = app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] %@", "finishes its work on this printer")).firstMatch
         XCTAssertTrue(waiting.waitForExistence(timeout: 5))
-        XCTAssertFalse(move.isEnabled, "no second Move while the first one waits")
+        XCTAssertFalse(move.exists, "#775: while it waits, its progress stands in place of the button")
         let requests = try String(contentsOf: folder.appendingPathComponent("mcp-update-requests.log"), encoding: .utf8)
         XCTAssertTrue(requests.hasPrefix("/v1/printers/mcp/mcp-0000000000000002/update "), requests)
         XCTAssertTrue(requests.contains("\"fresh\":true"), "a Move asks for Counterpart's copy: \(requests)")
         XCTAssertTrue(app.staticTexts["Counterpart didn’t say whether this updated. Try Update again."].waitForExistence(timeout: 10))
         XCTAssertFalse(waiting.exists, "the wait no longer claims to be waiting")
-        XCTAssertTrue(move.isEnabled, "the Move can be pressed again")
+        XCTAssertTrue(move.waitForExistence(timeout: 5) && move.isEnabled, "the Move can be pressed again")
     }
 
     private func copyFixtures(_ names: [String]) throws -> URL {
@@ -1943,8 +1944,9 @@ final class LayoutParityUITests: XCTestCase {
         XCTAssertTrue(move.waitForExistence(timeout: 5), app.debugDescription)
         let list = app.collectionViews.firstMatch
         reveal(move, in: list)
-        XCTAssertTrue(app.staticTexts["Counterpart’s copy 1.2.45"].exists)
-        XCTAssertTrue(app.staticTexts["Bambu Lab P1S uses your copy at /home/ada/mcp-3D-printer-server (1.2.25)."].exists)
+        XCTAssertTrue(app.staticTexts["1.2.45"].exists, "#775: the version beside the name")
+        XCTAssertTrue(app.staticTexts["Bambu Lab P1S runs your own copy (1.2.25)"].exists)
+        XCTAssertEqual(move.label, "Use Counterpart’s mcp-3D-printer-server for Bambu Lab P1S instead of your own copy (1.2.25)")
         move.tap()
         if reopen {
             app.buttons["Done"].tap()
@@ -1952,8 +1954,9 @@ final class LayoutParityUITests: XCTestCase {
             app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Printers")).firstMatch.tap()
         }
         if completes {
-            XCTAssertTrue(app.staticTexts["Bambu Lab P1S uses Counterpart’s copy (1.2.45)."].waitForExistence(timeout: 5))
             XCTAssertTrue(move.waitForNonExistence(timeout: 5), "the completed move is no longer offered")
+            XCTAssertFalse(app.staticTexts["Bambu Lab P1S runs your own copy (1.2.25)"].exists, "and its line is gone")
+            XCTAssertTrue(app.staticTexts["Used by Bambu Lab P1S"].exists)
             XCTAssertTrue(app.staticTexts["Updated to 1.2.45"].waitForExistence(timeout: 5), "completion remains under the original MCP ID")
         } else {
             XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] %@", "finishes its work on this printer")).firstMatch.waitForExistence(timeout: 5))
@@ -2073,11 +2076,73 @@ final class LayoutParityUITests: XCTestCase {
         XCTAssertEqual(toggle.value as? String, "1", "on, as the companion sends it")
         XCTAssertTrue(words.isHittable)
         XCTAssertEqual(words.label, "Counterpart updates its printer software by itself when nothing is printing or being designed, and tells you afterwards.", "one sentence")
-        XCTAssertLessThan(toggle.frame.minY, app.staticTexts["Counterpart’s copy 1.2.45"].frame.minY, "above the MCP copies it updates")
+        XCTAssertLessThan(toggle.frame.minY, app.descendants(matching: .any)["mcp-package-mcp-3d-printer-server"].frame.minY, "above the MCP copies it updates")
         if let folder = ProcessInfo.processInfo.environment["STM_SHOTS"], !folder.isEmpty {
             try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
             try XCUIScreen.main.screenshot().pngRepresentation.write(to: URL(fileURLWithPath: folder).appendingPathComponent(regular ? "ipad.png" : "iphone.png"))
         }
+    }
+
+    // #775 (David, Nov 12, Settings → Printer software: "messy af looking, double entries, confusing wording, awkwared
+    // workflow"): the companion's own answers for his P1S (two profiles on Counterpart's copy), a newer version, and a
+    // printer on a copy of its own. Each MCP is one quiet row; STM_SHOTS keeps a screenshot of each for review.
+    func testPrinterSoftwareReadsOncePerPrinterWithProjects() throws {
+        let app = try printerSoftware("current")
+        let used = app.staticTexts.matching(NSPredicate(format: "label == %@", "Used by P1S"))
+        XCTAssertEqual(used.count, 1, "one P1S, not one line per profile")
+        XCTAssertTrue(app.staticTexts["No printer uses it yet"].exists)
+        XCTAssertEqual(app.staticTexts.matching(NSPredicate(format: "label == %@", "Up to date")).count, 2)
+        XCTAssertFalse(app.buttons["mcp-update-bambu-printer-mcp"].exists, "nothing newer: no Update")
+        XCTAssertEqual(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Counterpart’s copy")).count, 0, "no jargon on the usual path")
+        XCTAssertEqual(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "mcp-move-")).count, 0)
+        try shoot(app, "current")
+    }
+
+    func testPrinterSoftwareOffersOneUpdateWhenANewerVersionIsOutWithProjects() throws {
+        let app = try printerSoftware("update")
+        XCTAssertTrue(app.staticTexts["1.1.95 available"].exists)
+        let update = app.buttons["mcp-update-bambu-printer-mcp"]
+        XCTAssertTrue(update.exists && update.isHittable, "reachable with projects present")
+        XCTAssertEqual(update.label, "Update bambu-printer-mcp")
+        XCTAssertFalse(app.buttons["mcp-update-mcp-3d-printer-server"].exists, "only where something is newer")
+        try shoot(app, "update")
+    }
+
+    func testPrinterSoftwareNamesAPrinterOnItsOwnCopyWithProjects() throws {
+        let app = try printerSoftware("own-copy")
+        XCTAssertTrue(app.staticTexts["P1S also runs your own copy (1.1.80)"].exists, "its other profile is on Counterpart's copy (#775 review)")
+        let use = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "mcp-move-")).firstMatch
+        XCTAssertTrue(use.exists && use.isHittable)
+        XCTAssertEqual(use.label, "Use Counterpart’s bambu-printer-mcp for P1S instead of your own copy (1.1.80)")
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label ENDSWITH %@", "Your own copy is left as it is.")).firstMatch.exists)
+        try shoot(app, "own-copy")
+    }
+
+    /// Settings with one `mcp-printer-software-<name>.json`, scrolled until the last MCP row is on screen.
+    private func printerSoftware(_ name: String) throws -> XCUIApplication {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: folder) }
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { root.deleteLastPathComponent() }
+        try FileManager.default.copyItem(at: root.appendingPathComponent("packages/contracts/fixtures/mcp-printer-software-\(name).json"),
+                                         to: folder.appendingPathComponent("mcp-printer-software.json"))
+        let app = XCUIApplication()
+        app.launchArguments = ["-CounterpartFixtures", folder.path, "-CounterpartFixtureSet", "all", "-CounterpartScreen", "settings"]
+        app.launch()
+        XCTAssertTrue(app.descendants(matching: .any)["mac-status"].waitForExistence(timeout: 20))
+        let first = app.descendants(matching: .any)["mcp-package-bambu-printer-mcp"]
+        let last = app.descendants(matching: .any)["mcp-package-mcp-3d-printer-server"]
+        for _ in 0..<12 where !(last.exists && last.isHittable) { app.swipeUp() }
+        XCTAssertTrue(last.isHittable, "both MCPs are reachable with projects present")
+        for _ in 0..<3 where !first.isHittable { app.swipeDown() }
+        return app
+    }
+
+    private func shoot(_ app: XCUIApplication, _ name: String) throws {
+        guard let folder = ProcessInfo.processInfo.environment["STM_SHOTS"], !folder.isEmpty else { return }
+        try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+        try XCUIScreen.main.screenshot().pngRepresentation.write(to: URL(fileURLWithPath: folder).appendingPathComponent("\(regular ? "ipad" : "iphone")-\(name).png"))
     }
 
     func testNewNeverCoversARow() {
@@ -2527,10 +2592,23 @@ final class OnDeviceLibraryUITests: XCTestCase {
     /// 4 ms, and `model.published ready=true` 40 ms later never reached the page: no Explore in 3D, no AR. The page's model
     /// came from `@State` that a one-shot task set. Here the model reaches the phone just after the page is pushed from
     /// Home's own row (not a launch link), and the stage must still offer Explore in 3D and AR.
+    ///
+    /// The trace after #770 (build 202611122043, Stacking letter toy): the model reached the page's `body`, and a drag's
+    /// live view loaded it, but the stage that stayed on screen never ran its `.task` (`stage.appear` and
+    /// `stage.disappear` in the same millisecond, no `stage.begin`): no still, no size. So the stage must also reach its
+    /// still ("still"), which only its load gives. Explore in 3D alone shows on a stage whose load never ran. Twice: the
+    /// model 1.5 s after the push, and 70 ms after it, as on the phone. The iPhone simulator does show the instant
+    /// disappear on Mic mount's opens (this PR's run, Nov 12: `stage.appear` and `stage.disappear` in one millisecond,
+    /// then `stage.begin` 60 ms later). Whether this test fails without the stage's start from `body` was not run.
     func testAModelThatArrivesJustAfterThePageOpensIsOnTheStageWithProjectsPresent() throws {
+        for delay in ["1.5", "0.07"] { try openWithTheModelLate(delay) }
+    }
+
+    private func openWithTheModelLate(_ delay: String) throws {
         let folder = try folder()
         try cube(40).write(to: folder.appendingPathComponent("mic.stl"))
-        let app = launch(folder, ["-CounterpartSlowModel", "1.5", "-CounterpartStageIdle", "30"])
+        let app = launch(folder, ["-CounterpartSlowModel", delay, "-CounterpartStageIdle", "30"])
+        defer { app.terminate() }
         let search = app.textFields["project-search"]
         if app.collectionViews["Sidebar"].exists, search.waitForExistence(timeout: 20) {
             pick(app, search, "Mic mount", "sidebar-project-6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01", file: #filePath, line: #line)
@@ -2547,7 +2625,11 @@ final class OnDeviceLibraryUITests: XCTestCase {
         XCTAssertTrue(ar.waitForExistence(timeout: 10))
         let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "ready"), object: ar)
         XCTAssertEqual(XCTWaiter().wait(for: [ready], timeout: 20), .completed, "AR for the model that came: \(String(describing: ar.value))")
-        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "769-model-after-open"; shot.lifetime = .keepAlways; add(shot)
+        let stage = app.descendants(matching: .any)["model-stage"]
+        let still = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "still"), object: stage)
+        XCTAssertEqual(XCTWaiter().wait(for: [still], timeout: 20), .completed,
+                       "the stage loaded the model that came \(delay) s after the push: \(String(describing: stage.value))")
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "769-model-after-open-\(delay)"; shot.lifetime = .keepAlways; add(shot)
     }
 
     /// Back to Home and into Mic mount again (iPhone), or to another project and back by the sidebar (iPad). The iPad finds
