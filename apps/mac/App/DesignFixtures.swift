@@ -1,7 +1,5 @@
 #if DEBUG
 import Foundation
-import SwiftUI
-import AppKit
 import CounterpartKit
 #if canImport(ControlKit)
 import ControlKit
@@ -333,40 +331,6 @@ import UniformTypeIdentifiers
         let shown = shownBounds(window).map { NSStringFromRect(NSRectFromCGRect($0)) } ?? "?"
         return "frame-check \(window.title): \(bigEnough && onScreen && !strip ? "ok" : "FAIL") frame \(NSStringFromRect(window.frame)) "
             + "minimum \(Int(minimum.width))x\(Int(minimum.height)) onScreen \(onScreen) stageManagerStrip \(strip) shown \(shown)"
-    }
-}
-/// #788 review screenshots: one project's page drawn in a window that is never shown (no window on the person's screen,
-/// no companion, nothing saved), as #775's `--render-printer-software` does: `ScanToMake --render-project <projects.json>
-/// <id> <out.png> [dark]`, where the file is an array of projects as the companion serves them. Then it exits.
-@MainActor enum ProjectPageSnapshot {
-    static func render(_ arguments: [String]) -> Never {
-        do {
-            let input = URL(fileURLWithPath: arguments[0]), id = arguments[1], output = URL(fileURLWithPath: arguments[2])
-            let items = try JSONSerialization.jsonObject(with: Data(contentsOf: input)) as? [[String: Any]] ?? []
-            let app = NSApplication.shared
-            app.setActivationPolicy(.prohibited)
-            app.appearance = NSAppearance(named: arguments.count > 3 && arguments[3] == "light" ? .aqua : .darkAqua)
-            let model = ObjectsModel(companion: FixtureObjects(items: items, catalog: PrinterCatalog(destinations: [], defaultDestinationId: ""), now: Date().timeIntervalSince1970 * 1000))
-            var done = false
-            Task { await model.refresh(); model.selection = id; done = true }
-            while !done { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }
-            guard let object = model.objects.first(where: { $0.id == id }) else { fputs("render-project: no project \(id)\n", stderr); exit(2) }
-            let size = NSSize(width: 1000, height: 860)
-            let host = NSHostingView(rootView: ProjectDetail(object: object, model: model, print: {}).frame(width: size.width, height: size.height))
-            host.frame = NSRect(origin: .zero, size: size)
-            let window = NSWindow(contentRect: NSRect(origin: NSPoint(x: -20_000, y: -20_000), size: size), styleMask: [.borderless], backing: .buffered, defer: false)
-            window.contentView = host
-            host.layoutSubtreeIfNeeded()
-            RunLoop.main.run(until: Date().addingTimeInterval(2))
-            host.layoutSubtreeIfNeeded()
-            guard let bitmap = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { exit(2) }
-            host.cacheDisplay(in: host.bounds, to: bitmap)
-            try bitmap.representation(using: .png, properties: [:])?.write(to: output)
-            exit(0)
-        } catch {
-            fputs("render-project: \(error)\n", stderr)
-            exit(1)
-        }
     }
 }
 #endif
