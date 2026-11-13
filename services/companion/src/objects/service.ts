@@ -2025,15 +2025,17 @@ export class ObjectService {
       .then(async outcome => this.#dispatched(id, manifest.id, printDestination?.id ?? destinationId, (outcome as {result?: {dispatch?: {jobName?: string; taskId?: string; fileBase?: string}}} | undefined)?.result?.dispatch, await atDispatch()),
         async error => {
           const status = (await bundles.read(manifest.id).catch(() => undefined))?.status;
-          // Once the printer has the job it is printing, whatever went wrong afterwards (as the phone's print route does).
-          if (error instanceof DispatchedPrintError || status === 'printed') return this.#dispatched(id, manifest.id, printDestination?.id ?? destinationId, undefined, await atDispatch());
+          // The printer took the job: it is printing, whatever went wrong afterwards (as the phone's print route does).
+          if (error instanceof DispatchedPrintError) return this.#dispatched(id, manifest.id, printDestination?.id ?? destinationId, undefined, await atDispatch());
           // It may have reached the printer: never send it again by itself. The phone is told the project changed
-          // (it reads the failure), never that the printer didn't start it.
-          if (status === 'uncertain') {
+          // (it reads the failure), never that the printer didn't start it. A record that can't be read is missing
+          // evidence, never evidence that nothing was sent, and no record overrules the call's own dispatch-uncertain (#784).
+          if (status === undefined || status === 'uncertain' || (error instanceof PrinterMcpError && error.code === 'dispatch-uncertain')) {
             const unclear = await this.#deps.store.update(id, o => ({...o, state: 'failed', printConfirmation: undefined, progress: undefined, failure: error instanceof PrinterMcpError && error.detail ? `Printer service: ${error.detail} Counterpart could not confirm a print start. Check the printer before trying again.` : UNCERTAIN, print: {...o.print!, uncertain: true}}));
             await this.#emit({id: randomUUID(), type: 'project.updated', projectId: id, data: {keys: ['print']}});
             return unclear;
           }
+          if (status === 'printed') return this.#dispatched(id, manifest.id, printDestination?.id ?? destinationId, undefined, await atDispatch());
           if (this.#cancelledPrints.has(id) && !this.#recheckFailures.has(id)) return this.#deps.store.update(id, o => ({...o, state: 'ready', progress: undefined, printConfirmation: undefined, failure: undefined}));
           // Refused before anything reached the printer (review item 23): the phone hears it, with the reason.
           const refused = async (state: 'failed' | 'ready', failure: string) => {
@@ -2279,7 +2281,9 @@ export class ObjectService {
       if (monitor && monitor.phase !== 'ended') continue; // Its printer isn't configured now: leave it as it was.
       const services = destinationId ? this.#deps.print?.destinations?.get(destinationId) : this.#deps.print?.services;
       const status = (await services?.store.read(object.print.bundleId).catch(() => undefined))?.status;
-      const reached = status === 'uncertain' || status === 'printed';
+      // A destination that is gone or a record that can't be read is missing evidence, never evidence that nothing was
+      // sent; a print already marked uncertain stays uncertain (#784).
+      const reached = status === undefined || status === 'uncertain' || status === 'printed' || object.print.uncertain === true;
       this.#changed(await this.#deps.store.update(object.id, o => ({...o, state: 'failed', progress: undefined, printConfirmation: undefined,
         failure: reached ? UNCERTAIN : 'interrupted when your Mac restarted the app', ...(reached ? {print: {...o.print!, uncertain: true}} : {})})));
     }

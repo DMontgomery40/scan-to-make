@@ -3,6 +3,7 @@ import { filePath, picturePath } from "./gallery";
 import type {
   Estimate,
   Field,
+  Plate,
   Filament,
   PrintOptions,
   Project,
@@ -318,6 +319,19 @@ export const activePrint = (p: Project) =>
  */
 export const canSelectPlate = (p: Project) =>
   !!p.plates?.length && p.state !== "printing" && p.state !== "touching-up";
+/** A plate's last result in words, as CounterpartKit's and Android's `statusText`: a send that may have reached the
+ * printer ("unknown") reads "Check print result", never the raw status (#784). */
+export const plateStatusText = (plate: Pick<Plate, "status" | "completedAtMs">) =>
+  ({
+    printed: "Printed",
+    preparing: "Getting ready",
+    printing: "Printing",
+    paused: "Paused",
+    cancelled: plate.completedAtMs === undefined ? "Cancelled" : "Reprint cancelled · printed before",
+    failed: plate.completedAtMs === undefined ? "Print failed" : "Reprint failed · printed before",
+    sent: "Sent to printer",
+    unknown: "Check print result",
+  })[plate.status] ?? (plate.completedAtMs === undefined ? "Not printed" : "Printed");
 /** Print asks "I checked the printer" first: the last send, or the chosen plate's, may have reached it (the companion's rule). */
 export const printNeedsCheck = (p: Project) =>
   !!p.print?.uncertain || p.plates?.find((x) => x.selected)?.uncertain === true;

@@ -3,11 +3,12 @@ import {createHash} from 'node:crypto';
 import assert from 'node:assert/strict';
 import {mkdir, readFile, rm, writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
-import {DispatchedPrintError, HandoffBundleStore, InMemoryElicitationRelay} from '@scan-to-make/printer-handoff';
+import {DispatchedPrintError, HandoffBundleStore, InMemoryElicitationRelay, PrinterMcpError} from '@scan-to-make/printer-handoff';
 import {ObjectStore} from '../dist/objects/store.js';
 import {ObjectService, InvalidStateError, sendingWords} from '../dist/objects/service.js';
 import {createControlDispatcher} from '../dist/local-control-services.js';
-import {createObjectRoutes} from '../dist/objects/http.js';
+import {createObjectRoutes, publicObject} from '../dist/objects/http.js';
+import {plateNeedsPrinterCheck} from '../dist/objects/plates.js';
 import {createServer} from 'node:http';
 import {PrintEstimateSchema} from '@scan-to-make/contracts/counterpart';
 import {showing, showingRunner} from './support/shown-print.mjs';
@@ -78,6 +79,75 @@ const approve = async (service, id) => {
   return service.answerPrintConfirmation(id, question.id, {action: 'accept', content: {confirmed: true}});
 };
 const until = async check => { for (let i = 0; i < 200; i++) { const value = await check(); if (value) return value; await new Promise(r => setTimeout(r, 10)); } throw new Error('timed out'); };
+
+// #784: missing evidence is never evidence that nothing was sent. An unreadable handoff record, a destination that is
+// gone, or the call's own dispatch-uncertain keeps the print uncertain, so Print asks for "Check print result" first.
+async function retainedPlate(f) {
+  const sha256 = createHash('sha256').update(STL).digest('hex');
+  await f.store.update(f.object.id, o => ({...o, kind: 'published',
+    files: {current: 'current/model.stl', receipts: [{name: 'model.stl', path: 'current/model.stl', format: 'stl', sha256, byteLength: STL.length,
+      plates: [{index: 0, name: 'Base', sliced: false}]}]}, publishedSelection: {fileIndex: 0, plateIndex: 0, sliced: false}}));
+  return {sha256, plateIndex: 0};
+}
+function assertUncertainPlate(object) {
+  assert.equal(object.print.uncertain, true);
+  assert.doesNotMatch(object.failure ?? '', /interrupted/);
+  const plate = publicObject(object).plates[0];
+  assert.equal(plate.status, 'unknown');
+  assert.equal(plate.uncertain, true);
+  assert.equal(plateNeedsPrinterCheck(object), true);
+}
+
+for (const reread of ['unreadable', 'failed', 'printed'])
+test(`a print stays uncertain when its record is ${reread === 'unreadable' ? 'unreadable' : `read as ${reread}`} after a lost reply or a dispatch-uncertain error`, async t => {
+  const f = await setup({afterDispatch: reread === 'unreadable' ? new Error('fixture reply lost') : new PrinterMcpError('dispatch-uncertain')});
+  t.after(() => f.service.close());
+  await retainedPlate(f);
+  await f.service.print(f.object.id);
+  if (reread === 'unreadable') f.bundles.read = async () => { throw new Error('fixture bundle read failed'); };
+  else await f.bundles.setStatus((await f.service.get(f.object.id)).print.bundleId, reread);
+  await approve(f.service, f.object.id);
+  const failed = await f.service.settled(f.object.id);
+  assertUncertainPlate(failed);
+  assert.equal(f.emitted.some(e => e.type === 'print.not-started'), false);
+  await assert.rejects(f.service.print(f.object.id), InvalidStateError);
+});
+
+for (const unavailable of ['an unreadable record', 'its destination gone'])
+test(`after a restart, a print being sent stays uncertain with ${unavailable}`, async t => {
+  const f = await setup(); t.after(() => f.service.close());
+  const plate = await retainedPlate(f);
+  await f.store.update(f.object.id, o => ({...o, state: 'printing', print: {bundleId: '00000000-0000-4000-8000-000000000001', printId: 'interrupted', plate, destinationId: 'default'}}));
+  let resumed = f.service;
+  if (unavailable === 'an unreadable record') f.bundles.read = async () => { throw new Error('fixture bundle read failed'); };
+  else {
+    resumed = new ObjectService({store: f.store, runTouchup: async () => { throw Error('unused'); }, stlInfo: async () => undefined, claudePath: '/unused'});
+    t.after(() => resumed.close());
+  }
+  await resumed.resume();
+  assertUncertainPlate(await f.store.get(f.object.id));
+});
+
+test('after a restart, a print already marked uncertain stays uncertain even when its record reads as not sent', async t => {
+  const f = await setup(); t.after(() => f.service.close());
+  const plate = await retainedPlate(f);
+  const bundle = await f.bundles.create({stl: STL, prompt: '', backend: 'bambu-printer-mcp'});
+  await f.store.update(f.object.id, o => ({...o, state: 'printing', print: {bundleId: bundle.id, printId: 'interrupted', plate, destinationId: 'default', uncertain: true}}));
+  await f.service.resume();
+  assertUncertainPlate(await f.store.get(f.object.id));
+});
+
+test('after a restart, a print whose readable record shows it never left reads as interrupted, without a printer check', async t => {
+  const f = await setup(); t.after(() => f.service.close());
+  const plate = await retainedPlate(f);
+  const bundle = await f.bundles.create({stl: STL, prompt: '', backend: 'bambu-printer-mcp'});
+  await f.store.update(f.object.id, o => ({...o, state: 'printing', print: {bundleId: bundle.id, printId: 'interrupted', plate, destinationId: 'default'}}));
+  await f.service.resume();
+  const object = await f.store.get(f.object.id);
+  assert.equal(object.failure, 'interrupted when your Mac restarted the app');
+  assert.equal(object.print.uncertain, undefined);
+  assert.equal(plateNeedsPrinterCheck(object), false);
+});
 
 test('printing with no model is refused', async () => {
   const {service, store} = await setup();

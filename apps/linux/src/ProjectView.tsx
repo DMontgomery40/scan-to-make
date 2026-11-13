@@ -25,6 +25,7 @@ import {
   MAKE_FROM_SCAN,
   canMakeFromScan,
   scanLineage,
+  plateStatusText,
 } from "./domain";
 import { Picture, Stage } from "./Stage";
 import { NEWEST_WAITS, earlierOnStage, designAnswer, designHistory, designDate, designThumbnail, inheritedConversation, sealedLine, showingDesign, viewingLine } from "./designs";
@@ -638,7 +639,7 @@ export function ProjectPage({
                     className={plate.selected ? "plate selected" : "plate"}
                     disabled={!canSelectPlate(p)}
                     aria-pressed={plate.selected}
-                    aria-label={`${plate.name}, ${plate.status}${plate.selected ? ", selected" : ""}`}
+                    aria-label={`${plate.name}, ${plateStatusText(plate)}${plate.selected ? ", selected" : ""}`}
                     onClick={() =>
                       void mutate("objects.selectPlate", {
                         id: p.id,
@@ -654,7 +655,7 @@ export function ProjectPage({
                     />
                     <strong>{plate.name}</strong>
                     <small>{plate.fileName}</small>
-                    <span>{plate.status}</span>
+                    <span>{plateStatusText(plate)}</span>
                   </button>
                 ))}
               </div>
