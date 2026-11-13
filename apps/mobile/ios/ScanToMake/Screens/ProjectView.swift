@@ -43,6 +43,13 @@ struct ProjectView: View {
     /// The part's AR file once the stage's AR chip has prepared it, with the model it was written from (Share offers it too).
     @State private var arFile: PreparedAR?
     @State private var scanURL: URL?
+    /// Work this page starts from `body` as well as from `.task` (#769, `BodyKick`): the page's model download, the
+    /// scan still on this phone, and the trace that says which model the page drew.
+    @State private var modelDemand = BodyKick()
+    @State private var scanKick = BodyKick()
+    @State private var modelTrace = BodyKick()
+    /// This page's own tag in the media trace (`page.model-published`).
+    @State private var instance = String(UUID().uuidString.prefix(8))
     @State private var captureWarning: String?
     @State private var askWorking = false
     @State private var askProblem: String?
@@ -206,6 +213,10 @@ struct ProjectView: View {
     @ViewBuilder private func page(_ object: Project) -> some View {
         let words = store.words(object)
         let fit = answerFit(words)
+        // #769: an instance of this page can draw without running its `.task`s again; the model's download and its trace
+        // start from `body` too, once per key.
+        let _ = modelDemand.on(demandKey(object)) { [self] in demandModel(object) }
+        let _ = traceModel(object)
         // The page's content ends where the bottom bar begins (lead, Nov 10, as New and first run): Activity's lines never
         // read through or around "Ask for changes…" and Print, on any tab, with the keyboard up too.
         VStack(spacing: 0) {
@@ -427,7 +438,7 @@ struct ProjectView: View {
                     }
                     if let modelURL = viewingDesign == nil ? modelURL(object) : nil { ShareLink(object.preservesPublishedFilaments ? "Share 3MF" : "Share STL", item: modelURL) }
                     // Only the AR file of the model and colour on the stage now (review of #770), the AR chip's own test.
-                    if let arURL = ProjectGalleryView.arUSDZ(arFile, store: store, project: object.showingDesign(viewingDesign), modelURL: modelURL(object)) { ShareLink("Share USDZ", item: arURL) } else if let scanURL { ShareLink("Share Your Scan (USDZ)", item: scanURL) }
+                    if let arURL = ProjectGalleryView.arUSDZ(arFile, store: store, project: object.showingDesign(viewingDesign)) { ShareLink("Share USDZ", item: arURL) } else if let scanURL { ShareLink("Share Your Scan (USDZ)", item: scanURL) }
                     Divider()
                     Button("Delete Project", systemImage: "trash", role: .destructive) { confirmDelete = true }.disabled(away)
                 } label: { Image(systemName: "ellipsis") }
@@ -474,20 +485,29 @@ struct ProjectView: View {
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.protectedDataDidBecomeAvailableNotification)) { _ in
             if scenePhase == .active { store.models.recover() }
         }
-        .task(id: "\(object.id)#\(object.mediaVersion)#\(object.current?.model ?? "")#\(scenePhase)") {
-            // The store fetches it, so leaving the page never stops the download (Nov 10); back in the app, one that
-            // failed meanwhile starts again.
-            store.models.setActive(scenePhase == .active)
-            if object.current != nil, scenePhase == .active { store.models.want(object, "model.stl") }
-            let context = store.models.traceContext(object, "model.stl") ?? MediaTrace.Context(project: object.id, version: String(Int64(object.mediaVersion)))
-            MediaTrace.record("page.model-begin", ["key": object.current?.model ?? "none", "scene": String(describing: scenePhase)], context: context)
-            MediaTrace.record(Task.isCancelled ? "page.model-cancelled" : "page.model-demanded", ["scene": String(describing: scenePhase)], context: context)
-        }
-        .task(id: "\(modelURL(object)?.path ?? "")#\(object.spoolColour ?? "")") {
-            // The trace only: the page reads its model from the store in `body` (#769), never from state this task sets.
-            MediaTrace.record("page.model-published", ["file": String(modelURL(object) != nil), "scene": String(describing: scenePhase)],
-                              context: store.models.traceContext(object, "model.stl") ?? MediaTrace.Context(project: object.id, version: String(Int64(object.mediaVersion))))
-        }
+        // On every appear too: back on the page, a download that failed meanwhile starts again (`want` is idempotent).
+        .task(id: demandKey(object)) { _ = modelDemand.claim(demandKey(object)); demandModel(object) }
+    }
+
+    private func demandKey(_ object: Project) -> String { "\(object.id)#\(object.mediaVersion)#\(object.current?.model ?? "")#\(scenePhase)" }
+
+    /// The store fetches the page's model, so leaving the page never stops the download (Nov 10); back in the app, one
+    /// that failed meanwhile starts again.
+    private func demandModel(_ object: Project) {
+        store.models.setActive(scenePhase == .active)
+        if object.current != nil, scenePhase == .active { store.models.want(object, "model.stl") }
+        let context = store.models.traceContext(object, "model.stl") ?? MediaTrace.Context(project: object.id, version: String(Int64(object.mediaVersion)))
+        MediaTrace.record("page.model-begin", ["key": object.current?.model ?? "none", "scene": String(describing: scenePhase), "page": instance], context: context)
+        MediaTrace.record(Task.isCancelled ? "page.model-cancelled" : "page.model-demanded", ["scene": String(describing: scenePhase)], context: context)
+    }
+
+    /// `page.model-published`, from `body` (#769): the model this page instance drew, each time it changes. It was a
+    /// `.task(id:)`, which on David's phone never ran again on the page on screen, though its `body` had the new model.
+    private func traceModel(_ object: Project) {
+        let url = modelURL(object)
+        guard modelTrace.claim("\(url?.path ?? "")#\(object.spoolColour ?? "")") else { return }
+        MediaTrace.record("page.model-published", ["file": String(url != nil), "scene": String(describing: scenePhase), "page": instance],
+                          context: store.models.traceContext(object, "model.stl") ?? MediaTrace.Context(project: object.id, version: String(Int64(object.mediaVersion))))
     }
 
     // MARK: Answering a card
@@ -603,22 +623,23 @@ struct ProjectView: View {
         }
     }
 
-    /// The page's model (the file that prints, the newest design's), read from the store wherever the page shows it (#769).
-    /// It was `@State` that a one-shot `.task(id:)` set: on David's phone the pushed page's tasks are cancelled 4 ms after it
-    /// appears (NavigationStack, as #720 found for the stage) and the instance on screen never ran it, so a model that came
-    /// 40 ms later never reached the stage: no Explore in 3D and no AR. `ModelFiles.fetches` is observed, so the stage
-    /// follows the store.
+    /// The page's model (the file that prints, the newest design's), read from the store wherever the page shows it (#769):
+    /// Share here, and the stage, which reads it itself (`ProjectGalleryView.stageModel`). It was `@State` that a one-shot
+    /// `.task(id:)` set: on David's phone the pushed page's tasks are cancelled 4 ms after it appears and the instance on
+    /// screen never runs them again (`BodyKick`). `ModelFiles.fetches` is observed, so `body` follows the store.
     private func modelURL(_ object: Project) -> URL? { store.models.file(object, "model.stl") }
 
     @ViewBuilder private func hero(_ object: Project, _ words: ProjectWords, stage: CGFloat) -> some View {
+        // The scan while it's only on this phone, for Share until the Mac has it; from `body` too (#769, `BodyKick`).
+        let scanKey = "\(object.id)#\(object.scan ?? "")"
+        let _ = scanKick.on(scanKey) { [self] in scanURL = object.current == nil ? store.mac.localScan(object.id) : nil }
         VStack(spacing: 8) {
             ProjectGalleryView(store: store, project: object, words: words,
                                height: stage,
-                               modelURL: modelURL(object), arFile: $arFile, localScan: scanURL, working: working || away,
+                               arFile: $arFile, localScan: scanURL, working: working || away,
                                locate: { act { try await store.mac.client.locate(object.id) } })
-            .task(id: "\(object.id)#\(object.scan ?? "")") {
-                // The scan while it's only on this phone, for Share until the Mac has it.
-                scanURL = object.current == nil ? store.mac.localScan(object.id) : nil
+            .task(id: scanKey) {
+                _ = scanKick.claim(scanKey); scanURL = object.current == nil ? store.mac.localScan(object.id) : nil
             }
             .ignoresSafeArea(edges: .top)
             scanLineage(object)

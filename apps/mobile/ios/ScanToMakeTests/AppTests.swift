@@ -430,6 +430,24 @@ import CounterpartKit
         XCTAssertFalse(filler.pending.isEmpty, "the next list queues them again")
     }
 
+    /// Review of #777: a stage's load that failed starts again on the next appear (as `.task` did before #769), never from
+    /// `body` in a loop; one that is running or worked is never started twice for the same model.
+    func testAFailedStageLoadStartsAgainOnAppearButAGoodOneNever() {
+        let kick = BodyKick()
+        XCTAssertTrue(kick.claim("a"), "body starts a new model")
+        XCTAssertFalse(kick.claimOnAppear("a"), "the appear after it: running, not started twice")
+        kick.failed("a")
+        XCTAssertFalse(kick.claim("a"), "a failure that redraws body doesn't start it again")
+        XCTAssertTrue(kick.claimOnAppear("a"), "the next appear starts the failed load again")
+        XCTAssertFalse(kick.claimOnAppear("a"), "once")
+        // Worked (never marked failed): refused on every appear.
+        XCTAssertTrue(kick.claim("b"))
+        XCTAssertFalse(kick.claimOnAppear("b")); XCTAssertFalse(kick.claim("b"))
+        // A failure reported for an older model doesn't release the newer one.
+        kick.failed("a")
+        XCTAssertFalse(kick.claimOnAppear("b"))
+    }
+
     /// P1: a gallery switch never shows the previous entry's picture: a kept picture counts only for its own key, also
     /// after the new entry's fetch failed.
     func testAGalleryEntryNeverShowsAnotherEntrysPicture() {
