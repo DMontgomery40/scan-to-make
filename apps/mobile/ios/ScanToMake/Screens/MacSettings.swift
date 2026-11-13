@@ -332,7 +332,10 @@ struct MacSettingsSections: View {
 }
 
 
-/// Shared by Settings and Printers on compact and regular-width layouts.
+/// Settings → Printer software (#775), shared by Settings and Printers on compact and regular-width layouts: one quiet row
+/// per MCP from the companion's fields (CounterpartKit `PrinterSoftwareRow`). Its name and version; "Up to date", or
+/// "<version> available" with one Update; the printers that use it, each once; and only when a printer runs another
+/// copy, one line and one "Use Counterpart’s". David, Nov 12: "messy af looking, double entries, confusing wording".
 struct MCPCopiesView: View {
     let store: ProjectsStore
     var printerId: String? = nil
@@ -341,29 +344,41 @@ struct MCPCopiesView: View {
     private var packages: [MCPPackageCopies] {
         (store.mcpCopies ?? []).filter { package in printerId == nil || package.uses.contains { $0.printerId == printerId } }
     }
+    private var canChange: Bool { store.macCapabilities.contains("mcpUpdates") }
+    private func busy(_ id: String) -> Bool { working != nil || store.mcpCopiesProblem != nil || store.mcpUpdates[id]?.isRunning == true }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 16) {
             ForEach(packages) { package in
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(package.label).font(.headline)
-                    if let copy = package.appCopy { Text("Counterpart’s copy \(copy.version ?? "version unknown")").font(.caption) }
-                    ForEach(package.uses.filter { printerId == nil || $0.printerId == printerId }) { use in
-                        Text(use.words).font(.footnote).fixedSize(horizontal: false, vertical: true)
+                let row = package.row(printerId: printerId)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(row.name).font(.headline)
+                        Spacer(minLength: 8)
+                        if let version = row.version { Text(version).font(.subheadline.monospacedDigit()).foregroundStyle(.secondary) }
                     }
-                    if store.macCapabilities.contains("mcpUpdates") {
-                        // In the order the uses above are listed, each titled by its printers, MCP and copy.
-                        ForEach(package.moves.filter { move in printerId == nil || package.uses.contains { $0.printerId == printerId && $0.mcpId == move.mcpId } }, id: \.mcpId) { move in
-                            Button(move.title) { Task { await update(move.mcpId, fresh: true, moveTitle: move.title) } }
-                                .disabled(working != nil || store.mcpCopiesProblem != nil || store.mcpUpdates[move.mcpId]?.isRunning == true)
-                                .accessibilityIdentifier("mcp-move-" + move.mcpId)
-                            if store.attemptedMcpMoves[move.mcpId] == nil { progress(move.mcpId) }
+                    statusLine(row, package)
+                    Text(row.usedBy).font(.subheadline).foregroundStyle(.secondary)
+                    ForEach(row.others, id: \.mcpId) { other in
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(other.words).font(.subheadline).fixedSize(horizontal: false, vertical: true)
+                            if let progress = store.mcpUpdates[other.mcpId], progress.isRunning || !canChange {
+                                progressWords(progress)
+                            } else if canChange {
+                                Button(other.button) { Task { await update(other.mcpId, fresh: true, package: package.package) } }
+                                    .buttonStyle(.glass).controlSize(.small)
+                                    .disabled(busy(other.mcpId))
+                                    .accessibilityLabel(other.accessibilityLabel)
+                                    .accessibilityIdentifier("mcp-move-" + other.mcpId)
+                                if let progress = store.mcpUpdates[other.mcpId] { progressWords(progress) }
+                            }
+                            Text(other.footnote).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                         }
-                        if package.appCopy != nil {
-                            Button("Update Counterpart’s copy") { Task { await update(package.appMcpId, fresh: false) } }
-                                .disabled(working != nil || store.mcpCopiesProblem != nil || store.mcpUpdates[package.appMcpId]?.isRunning == true)
-                                .accessibilityLabel("Update Counterpart’s copy of \(package.label)")
-                            progress(package.appMcpId)
-                        }
+                        .padding(.top, 6)
+                    }
+                    // A finished Use Counterpart’s leaves the list; how it ended stays on its MCP's row.
+                    ForEach(store.attemptedMcpMoves.filter { $0.value == package.package && !row.others.map(\.mcpId).contains($0.key) }.keys.sorted(), id: \.self) { id in
+                        if let progress = store.mcpUpdates[id] { progressWords(progress) }
                     }
                 }
                 // One container per MCP: VoiceOver reads its name first, and its buttons belong to it.
@@ -371,26 +386,44 @@ struct MCPCopiesView: View {
                 .accessibilityLabel(package.label)
                 .accessibilityIdentifier("mcp-package-" + package.package)
             }
-            ForEach(store.attemptedMcpMoves.keys.sorted(), id: \.self) { id in
-                VStack(alignment: .leading, spacing: 4) {
-                    if let title = store.attemptedMcpMoves[id] { Text(title).font(.caption).foregroundStyle(.secondary) }
-                    progress(id)
-                }
-            }
-            if !packages.isEmpty { Text("Moving updates Counterpart’s copy and uses it for the named printers. Your copy is left untouched.").font(.caption).foregroundStyle(.secondary) }
             if let problem = problem ?? store.mcpCopiesProblem { Text(problem).font(.footnote).foregroundStyle(.orange) }
-            if !store.macCapabilities.contains("mcpCopies") { Text("Update Counterpart on your computer to see each printer’s software copy.").font(.footnote) }
+            if !store.macCapabilities.contains("mcpCopies") { Text("Update Counterpart on your computer to see its printer software here.").font(.footnote) }
         }
+        .padding(.vertical, 4)
         .buttonStyle(.borderless)
         .task { await store.loadCapabilities(); await store.loadMCPCopies() }
     }
-    @ViewBuilder private func progress(_ id: String) -> some View {
-        if let progress = store.mcpUpdates[id] { Text(progress.words).font(.caption) }
+
+    /// "Up to date", or "<version> available" and Update; while updating, its progress in place of the button.
+    @ViewBuilder private func statusLine(_ row: PrinterSoftwareRow, _ package: MCPPackageCopies) -> some View {
+        let progress = store.mcpUpdates[package.appMcpId]
+        HStack(alignment: .firstTextBaseline) {
+            if let progress, progress.isRunning || row.status == nil {
+                progressWords(progress)
+            } else if let status = row.status {
+                switch status {
+                case .upToDate: Text("\(Image(systemName: "checkmark.circle.fill")) \(status.words)").font(.subheadline).foregroundStyle(.secondary).accessibilityLabel(status.words)
+                case .available: Text(status.words).font(.subheadline.weight(.semibold)).foregroundStyle(Color.accentColor)
+                }
+            }
+            Spacer(minLength: 8)
+            if let id = row.update, canChange, progress?.isRunning != true {
+                Button("Update") { Task { await update(id, fresh: false) } }
+                    .buttonStyle(.glassProminent).controlSize(.small)
+                    .disabled(busy(id))
+                    .accessibilityLabel("Update \(row.name)")
+                    .accessibilityIdentifier("mcp-update-" + package.package)
+            }
+        }
+        if let progress, !progress.isRunning, row.status != nil, progress.state == "failed" || progress.state == "unheard" { progressWords(progress) }
     }
-    private func update(_ id: String, fresh: Bool, moveTitle: String? = nil) async {
+    @ViewBuilder private func progressWords(_ progress: MCPUpdateProgress) -> some View {
+        Text(progress.words).font(.caption).foregroundStyle(progress.state == "failed" ? .red : .secondary).fixedSize(horizontal: false, vertical: true)
+    }
+    private func update(_ id: String, fresh: Bool, package: String? = nil) async {
         guard working == nil else { return }
         working = id; problem = nil
-        if let moveTitle { store.attemptedMcpMoves[id] = moveTitle }
+        if let package { store.attemptedMcpMoves[id] = package }
         defer { working = nil }
         do { store.recordMCPUpdate(id, MCPUpdateProgress(try await store.mac.client.updateMCP(id, fresh: fresh))); await store.loadMCPCopies() }
         catch let failure as CompanionError { problem = failure.message }

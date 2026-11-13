@@ -432,9 +432,9 @@ private func project(_ item: [String: Any]) throws -> Project {
         let toggle = try XCTUnwrap(view.range(of: "if let on = companion.settings?.general?.autoUpdateMcps {"), "shown only when the companion sends it")
         XCTAssertTrue(view.contains("companion.setGeneral(CounterpartKit.SettingsSchema.autoUpdateMcps.key, value)"), "changes general.autoUpdateMcps")
         XCTAssertTrue(view.contains("Text(CounterpartKit.SettingsSchema.autoUpdateMcps.footer)"), "says what it does")
-        let section = try XCTUnwrap(view.range(of: #"header: { Text("Printer MCPs") }"#))
+        let section = try XCTUnwrap(view.range(of: #"header: { Text("Printer software") }"#), "#775: the same section name as the iPhone and iPad")
         let rows = try XCTUnwrap(view.range(of: "McpPackageRow(package:package"))
-        XCTAssertTrue(toggle.lowerBound < rows.lowerBound && rows.lowerBound < section.lowerBound, "in Printer MCPs, above the MCPs it updates")
+        XCTAssertTrue(toggle.lowerBound < rows.lowerBound && rows.lowerBound < section.lowerBound, "in Printer software, above the MCPs it updates")
     }
 
     func testAddPrinterSlicerControlsComeFromTheChosenMCPWithProjectsPresent() async throws {

@@ -32,6 +32,15 @@ function copyWords(install: ResolvedMcpInstall, path: string | undefined, manage
   return path ? `your copy at ${home(path)}` : 'your copy';
 }
 
+/** Each printer once, by its catalog id (two profiles of one P1S are one P1S), in the order the uses are listed. */
+function printerNames(uses: readonly {printerId: string; printer: string}[]): string[] {
+  return [...new Map(uses.map(use => [use.printerId, use.printer] as const)).values()];
+}
+/** "P1S", "P1S and X1C", "P1S, X1C and A1". */
+function listed(names: readonly string[]): string {
+  return names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)}` : names[0] ?? '';
+}
+
 /** A built copy of either MCP in a folder of its own (a clone or an unpacked package), found on this Mac. */
 export interface FoundFolder {dir: string; package: PrinterBackend; version?: string; hasEnv: boolean}
 
@@ -92,8 +101,18 @@ export interface McpPackageView {
   installs: PackageInstall[];
   appCopy?: PackageInstall;
   uses: McpUse[];
-  /** One Move per install a printer could leave for Counterpart's copy, in the order the uses are listed, each named by its printers, MCP and copy. */
-  moves: {mcpId: string; title: string}[];
+  /**
+   * One Move per install a printer could leave for Counterpart's copy, in the order the uses are listed, each named by its printers, MCP and copy.
+   * #775: `printers` (each once), `words` (the row's one line: "P1S runs your own copy (1.1.80)") and `reason`, why
+   * Keep printer software up to date leaves that copy alone (Q9). `title` stays for clients that predate them.
+   */
+  moves: {mcpId: string; title: string; printers: string[]; words: string; reason?: string}[];
+  /** #775: the printers with a profile on Counterpart's copy, each once however many profiles it has, in listed order. */
+  usedBy: string[];
+  /** #775: a published version newer than Counterpart's copy (else the copy Check and Add run); Update (`appMcpId`) installs it as Counterpart's own copy. */
+  available?: string;
+  /** #775: npm answered and nothing newer is published. Neither this nor `available` when npm didn't answer. */
+  upToDate?: true;
 }
 /**
  * A printer profile on a package. `managed`: it runs Counterpart's own copy (`<appPrinters>/bambu` or `/generic`).
@@ -371,6 +390,7 @@ export class PrinterSetup {
       const appVersion = installedVersion(own, env);
       const appCopy: PackageInstall | undefined = env.exists(own.entry!) ? {kind: 'app', path: own.prefix, ...(appVersion ? {version: appVersion} : {})} : undefined;
       const catalog = this.deps.catalog?.();
+      const reasons = new Map<string, string>();
       const uses = this.deps.configs().filter(entry => entry.config.backend === item.package).map(({id, config}): McpUse => {
         const effective = this.deps.effective?.(id, config) ?? config;
         const install = resolveMcpInstall(effective, env);
@@ -380,6 +400,7 @@ export class PrinterSetup {
         const printer = catalog?.destinations.find(destination => destination.id === catalog.canonical(id))?.name ?? id;
         const managed = install.type === 'app' && install.prefix === own.prefix;
         const reason = this.deps.autoReason ? this.deps.autoReason(id) : autoUpdateReason(install);
+        if (reason) reasons.set(id, reason);
         return {destinationId: id, printerId: catalog?.canonical(id) ?? id, printer, mcpId: mcpIdFor(resolveMcpInstall(config, env), config), kind: install.type,
           ...(path ? {path} : {}), ...(version ? {version} : {}), canMove: !managed, managed,
           words: `${printer} uses ${copyWords(install, path, managed, home)} (${version ?? 'version unknown'})`
@@ -390,14 +411,25 @@ export class PrinterSetup {
       // In the order the uses are listed: two Moves for one printer (one per MCP profile) read differently and in screen order.
       const moves = [...new Set(uses.filter(use => use.canMove).map(use => use.mcpId))].map(mcpId => {
         const on = uses.filter(use => use.mcpId === mcpId), first = on[0]!;
-        const printers = [...new Set(on.map(use => use.printer))].join(', ');
+        const printers = printerNames(on);
         const from = first.kind === 'app' ? `Counterpart’s older copy at ${home(first.path ?? '')}` : first.kind === 'npx' ? `npx ${first.path ?? item.label}`
           : first.path ? `your copy at ${home(first.path)}` : 'your copy';
-        return {mcpId, title: `Move ${printers} (${item.label}, ${from}) to Counterpart’s updated copy`};
+        const reason = on.map(use => reasons.get(use.destinationId)).find(Boolean);
+        // A printer that also has a profile on Counterpart's copy "also runs" this one (#775 review).
+        const also = on.every(use => uses.some(other => other.managed && other.printerId === use.printerId));
+        const words = `${listed(printers)} ${also ? 'also ' : ''}${printers.length > 1 ? 'run' : 'runs'} ${first.kind === 'app' ? 'an earlier copy' : 'your own copy'}${first.version ? ` (${first.version})` : ''}`;
+        return {mcpId, title: `Move ${[...new Set(on.map(use => use.printer))].join(', ')} (${item.label}, ${from}) to Counterpart’s updated copy`,
+          printers, words, ...(reason ? {reason} : {})};
       });
       const latestVersion = latest.get(item.package);
+      // What Update replaces: Counterpart's copy, else the copy Check and Add run. Update installs or updates Counterpart's
+      // own copy either way, so a hand-built copy is never the only one Counterpart can update (#320).
+      const current = appCopy?.version ?? version;
+      const newer = !!(latestVersion && current && newerVersion(latestVersion, current));
       return {...item, installed: !!selected, ...(version ? {version} : {}), ...(latestVersion ? {latestVersion} : {}),
-        appMcpId: appMcpId(item.package, env), uses, moves, ...(appCopy ? {appCopy} : {}), installs: selected ? [selected, ...found.filter(install => install !== selected)] : found};
+        appMcpId: appMcpId(item.package, env), uses, moves, usedBy: printerNames(uses.filter(use => use.managed)),
+        ...(newer ? {available: latestVersion} : {}), ...(latestVersion && current && !newer ? {upToDate: true as const} : {}),
+        ...(appCopy ? {appCopy} : {}), installs: selected ? [selected, ...found.filter(install => install !== selected)] : found};
     });
   }
 

@@ -1,4 +1,4 @@
-import { addressField, AUTO_UPDATE_LABEL, AUTO_UPDATE_WORDS, autoUpdatePatch, autoUpdateSwitch, folderModel, keepFields, mcpUsageWords, mcpMoveNotice, mcpMoves, mcpPackageIds, obtainControl, obtainValue, setupField, slicerControls, typeSerial, codeEngineRow, type CodeEngineView } from "./domain";
+import { addressField, AUTO_UPDATE_LABEL, AUTO_UPDATE_WORDS, autoUpdatePatch, autoUpdateSwitch, folderModel, keepFields, mcpMoveNotice, mcpPackageIds, printerSoftwareRow, obtainControl, obtainValue, setupField, slicerControls, typeSerial, codeEngineRow, type CodeEngineView } from "./domain";
 import { deviceConnected } from "./device-presence";
 import { useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
@@ -705,11 +705,7 @@ function Printers({
           one.
         </p>
       )}
-      <h3>Printer tools</h3>
-      <p>
-        Download and update the published MCP packages. They handle slicing,
-        camera and printer controls.
-      </p>
+      <h3>Printer software</h3>
       {autoUpdate.shown && (
         <>
           <label className="choice">
@@ -728,89 +724,90 @@ function Printers({
           <p className="muted">{AUTO_UPDATE_WORDS}</p>
         </>
       )}
-      {packages.map((pkg) => (
-        // One group per MCP: a screen reader names it, and its Move and Update buttons and progress belong to it.
+      {packages.map((pkg) => {
+        // #775: one quiet row per MCP (domain.ts printerSoftwareRow, the same words as every other layout).
+        const row = printerSoftwareRow(pkg);
+        return (
+        // One group per MCP: a screen reader names it, and its Update and Use Counterpart’s buttons and progress belong to it.
         <section className="package" key={pkg.package} role="group" aria-labelledby={`mcp-${pkg.package}`}>
-          <strong id={`mcp-${pkg.package}`}>{pkg.label}</strong>
-          <p>{pkg.description}</p>
-          <small>
-            {pkg.installed
-              ? `Installed ${pkg.version ?? "version unknown"}`
-              : "Not installed"}
-            {pkg.latestVersion ? ` · Latest ${pkg.latestVersion}` : ""}
-          </small>
-          {pkg.appCopy && (
-            <p>Counterpart’s copy {pkg.appCopy.version ?? "version unknown"}</p>
+          <div className="row">
+            <strong id={`mcp-${pkg.package}`}>{row.name}</strong>
+            {row.version && <span className="muted">{row.version}</span>}
+          </div>
+          {(row.status || row.update) && (
+            <div className="row">
+              {row.status && <span>{row.status}</span>}
+              {row.update && (
+                <Action
+                  label={`Update ${row.name}`}
+                  run={async () => {
+                    setNotice(pkg.appMcpId, "Requesting update…", true);
+                    const r = await call<{
+                      update?: { state: string; toVersion?: string; found?: string };
+                      state?: string;
+                      toVersion?: string;
+                      found?: string;
+                    }>("printers.updateMcp", { mcpId: pkg.appMcpId });
+                    setNotice(pkg.appMcpId, mcpUpdateNotice(r), false, mcpPhase(r));
+                    await refresh();
+                  }}
+                >
+                  Update
+                </Action>
+              )}
+            </div>
           )}
-          {(pkg.uses ?? []).map((use) => (
-            <p key={use.destinationId}>{mcpUsageWords(use)}</p>
-          ))}
-          {mcpMoves(pkg).map(({ mcpId, title }) => (
-            <div key={mcpId}>
+          <p className="muted">{row.usedBy}</p>
+          {row.others.map((other) => (
+            <div key={other.mcpId}>
+              <p>{other.words}</p>
               <Action
+                label={other.label}
                 run={async () => {
-                  setNotice(mcpId, "Requesting move…", true);
+                  setNotice(other.mcpId, "Requesting move…", true);
                   const result = await call<{ update: {state: string; found?: string} }>(
                     "printers.updateMcp",
-                    { mcpId, fresh: true },
+                    { mcpId: other.mcpId, fresh: true },
                   );
-                  setNotice(mcpId, mcpMoveNotice(result), false, mcpPhase(result));
+                  setNotice(other.mcpId, mcpMoveNotice(result), false, mcpPhase(result));
                   await refresh();
                 }}
               >
-                {title}
+                {other.button}
               </Action>
-              <small>
-                Updates Counterpart’s copy and switches these profiles. Your
-                copy is left untouched.
-              </small>
+              <small>{other.footnote}</small>
             </div>
           ))}
-          <div className="actions">
-            <Action
-              run={async () => {
-                setNotice(pkg.appMcpId, "Checking download…", true);
-                const r = await call<{
-                  update?: { state: string; found?: string };
-                }>("printers.installMcp", { package: pkg.package });
-                // A download that waits or starts gets the same clock as Update and Move: one that never hears
-                // back says so instead of "started" forever (PRD §8.10).
-                setNotice(
-                  pkg.appMcpId,
-                  r.update?.found ?? r.update?.state ?? "Already installed.",
-                  false,
-                  mcpPhase(r),
-                );
-                await refresh();
-              }}
-            >
-              {pkg.installed ? "Check download" : "Download"}
-            </Action>
-            {pkg.installed && (
+          {!pkg.installed && (
+            <div className="actions">
               <Action
-                label={`Update Counterpart’s copy of ${pkg.label}`}
                 run={async () => {
-                  setNotice(pkg.appMcpId, "Requesting update…", true);
+                  setNotice(pkg.appMcpId, "Checking download…", true);
                   const r = await call<{
-                    update?: { state: string; toVersion?: string; found?: string };
-                    state?: string;
-                    toVersion?: string;
-                    found?: string;
-                  }>("printers.updateMcp", { mcpId: pkg.appMcpId });
-                  setNotice(pkg.appMcpId, mcpUpdateNotice(r), false, mcpPhase(r));
+                    update?: { state: string; found?: string };
+                  }>("printers.installMcp", { package: pkg.package });
+                  // A download that waits or starts gets the same clock as Update and Move: one that never hears
+                  // back says so instead of "started" forever (PRD §8.10).
+                  setNotice(
+                    pkg.appMcpId,
+                    r.update?.found ?? r.update?.state ?? "Already installed.",
+                    false,
+                    mcpPhase(r),
+                  );
                   await refresh();
                 }}
               >
-                Update app copy
+                Download
               </Action>
-            )}
-          </div>
+            </div>
+          )}
           {/* Whichever client started it (the Mac, a phone, this one): the events say where it is. */}
           {mcpPackageIds(pkg).filter((id) => notices[id]).map((id) => (
             <p role="status" className="notice" key={id}>{notices[id]}</p>
           ))}
         </section>
-      ))}
+        );
+      })}
       {Object.entries(notices).filter(([id]) => !packages.some((pkg) => mcpPackageIds(pkg).includes(id))).map(([id, notice]) => (
         <p role="status" className="notice" key={id}>{notice}</p>
       ))}

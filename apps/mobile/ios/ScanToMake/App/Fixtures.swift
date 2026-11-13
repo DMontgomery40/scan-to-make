@@ -801,9 +801,11 @@ struct FixtureTransport: HTTPTransport {
         let objects = Fixtures.objects()
         func object(_ id: String) -> [String: Any]? { objects.first { $0["id"] as? String == id } }
         let parts = path.split(separator: "/").map(String.init)
-        if path == "/healthz" { return json(["status": "ok", "protocolVersion": "0.1.0", "capabilities": ["genericConfirmations": Fixtures.macAnswers, "fitFields": true, "mcpUpdates": true, "mcpCopies": FileManager.default.fileExists(atPath: folder.appending(path: "mcp-profile-copies.json").path), "projectSettings": true, "projectRename": true, "makeFromScan": true, "projectPreferences": true, "printCopies": true, "printLayerPauses": true, "printerChoices": true, "printerAdd": FileManager.default.fileExists(atPath: folder.appending(path: "printer-setup-phone.json").path)]]) }
+        if path == "/healthz" { return json(["status": "ok", "protocolVersion": "0.1.0", "capabilities": ["genericConfirmations": Fixtures.macAnswers, "fitFields": true, "mcpUpdates": true, "mcpCopies": ["mcp-profile-copies.json", "mcp-printer-software.json"].contains { FileManager.default.fileExists(atPath: folder.appending(path: $0).path) }, "projectSettings": true, "projectRename": true, "makeFromScan": true, "projectPreferences": true, "printCopies": true, "printLayerPauses": true, "printerChoices": true, "printerAdd": FileManager.default.fileExists(atPath: folder.appending(path: "printer-setup-phone.json").path)]]) }
         let completingMove = FileManager.default.fileExists(atPath: folder.appending(path: "mcp-profile-copies-moved.json").path)
         if path == "/v1/printers/mcps" {
+            // #775: a whole `printers.mcps` answer (both packages), as the companion writes `mcp-printer-software-*.json`.
+            if let data = try? Data(contentsOf: folder.appending(path: "mcp-printer-software.json")) { return HTTPReply(status: 200, body: data) }
             let moved = await Fixtures.mcpCopyState.moved
             let name = completingMove && moved ? "mcp-profile-copies-moved.json" : "mcp-profile-copies.json"
             return json(["packages": [try JSONSerialization.jsonObject(with: Data(contentsOf: folder.appending(path: name)))]])

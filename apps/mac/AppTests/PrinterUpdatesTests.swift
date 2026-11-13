@@ -1,5 +1,6 @@
 import XCTest
 import Darwin
+import struct CounterpartKit.PrinterSoftwareRow
 
 /// PRD §8.10: Update asks the companion, which updates the install its own way and reports with `mcp.update.*`.
 @MainActor final class PrinterUpdatesTests: XCTestCase {
@@ -48,6 +49,53 @@ import Darwin
         XCTAssertEqual(package.uses?.first?.words, "Bambu Lab P1S uses Counterpart’s older copy at /x/printers/bambu-1.1.46 (1.1.65).")
     }
 
+    // #775 (David, Nov 12, Settings → Printer software: "messy af looking, double entries, confusing wording"): the Mac's
+    // row reads the companion's fields through CounterpartKit's PrinterSoftwareRow, the same words as the iPhone and iPad.
+    private func software(_ name: String) throws -> [PrinterMcpPackage] {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<4 { root.deleteLastPathComponent() }
+        struct Reply: Decodable { let packages: [PrinterMcpPackage] }
+        return try JSONDecoder().decode(Reply.self, from: Data(contentsOf: root.appendingPathComponent("packages/contracts/fixtures/mcp-printer-software-\(name).json"))).packages
+    }
+
+    func testPrinterSoftwareRowsReadOncePerPrinterAndOfferUpdateOnlyWhenNewer() throws {
+        let current = try software("current").map(\.softwareRow)
+        XCTAssertEqual(current.map(\.usedBy), ["Used by P1S", "No printer uses it yet"], "two P1S profiles are one P1S")
+        XCTAssertEqual(current.map(\.version), ["1.1.94", "1.2.76"])
+        XCTAssertEqual(current.map(\.status), [.upToDate, .upToDate])
+        XCTAssertEqual(current.map(\.update), [nil, nil], "nothing newer: no Update")
+        XCTAssertTrue(current.allSatisfy { $0.others.isEmpty && !$0.allWords.contains("Counterpart’s copy") })
+        let update = try software("update")
+        XCTAssertEqual(update[0].softwareRow.status, .available("1.1.95"))
+        XCTAssertEqual(update[0].softwareRow.update, update[0].appMcpId)
+        // While it updates, its progress stands in place of the button; a finished update never hides the next.
+        XCTAssertTrue(update[0].showsUpdate(status: nil))
+        XCTAssertFalse(update[0].showsUpdate(status: .updating(from: "1.1.94", to: "1.1.95")))
+        XCTAssertFalse(update[0].showsUpdate(status: .waiting))
+        XCTAssertTrue(update[0].showsUpdate(status: .updated(version: "1.1.94")), "an earlier update this session")
+        XCTAssertTrue(update[0].showsUpdate(status: .failed(log: nil)), "Try Again")
+        XCTAssertFalse(try software("current")[0].showsUpdate(status: nil), "nothing newer")
+        let own = try software("own-copy")[0].softwareRow
+        XCTAssertEqual(own.others.map(\.words), ["P1S runs your own copy (1.1.80)"])
+        XCTAssertEqual(own.others.first?.footnote, "Runs from a folder you manage, so Counterpart doesn't update it by itself. Your own copy is left as it is.")
+    }
+
+    /// A companion from before #775 (the Mac always runs its own, but the row must not depend on it): no status, no
+    /// Update, printers once by name.
+    func testPrinterSoftwareRowFromAnOlderCompanionRendersCleanly() throws {
+        let json = #"""
+        {"package":"bambu-printer-mcp","label":"bambu-printer-mcp","description":"d","installed":true,"version":"1.1.94","latestVersion":"1.1.95","appMcpId":"mcp-a","installs":[],
+         "appCopy":{"kind":"app","version":"1.1.94"},
+         "uses":[{"destinationId":"current","printer":"P1S","mcpId":"mcp-a","kind":"app","version":"1.1.94","canMove":false,"managed":true},
+                 {"destinationId":"lan","printer":"P1S","mcpId":"mcp-a","kind":"app","version":"1.1.94","canMove":false,"managed":true}]}
+        """#
+        let row = try JSONDecoder().decode(PrinterMcpPackage.self, from: Data(json.utf8)).softwareRow
+        XCTAssertEqual(row.usedBy, "Used by P1S")
+        XCTAssertNil(row.status)
+        XCTAssertNil(row.update)
+        XCTAssertEqual(row.others, [])
+    }
+
     private func event(_ type: String, _ data: String) throws -> CounterpartEvent {
         try JSONDecoder().decode(CounterpartEvent.self, from: Data(#"""
         {"seq":1,"id":"e","at":"2026-11-01T10:00:00Z","type":"\#(type)","title":"t","body":"b","notify":"passive","data":\#(data)}
@@ -55,20 +103,19 @@ import Darwin
     }
 
     /// Mac, Nov 5: mcp-3D was only a hand-built checkout no printer used, 1.2.25 with 1.2.35 published, and Settings
-    /// offered neither Update nor Download. Update now installs the latest as Counterpart's own copy (#320's path).
+    /// offered neither Update nor Download. Update installs the latest as Counterpart's own copy (#320's path); the
+    /// companion sends `available` whatever the install (#775 review).
     func testAnInstalledMcpNoPrinterUsesOffersUpdateWhenANewerVersionIsPublished() {
         let checkout = PrinterMcpPackage(package: "mcp-3d-printer-server", label: "mcp-3D-printer-server", description: "d", installed: true,
-                                         version: "1.2.25", latestVersion: "1.2.35", appMcpId: "app-generic")
-        XCTAssertTrue(checkout.offersUpdate)
+                                         version: "1.2.25", latestVersion: "1.2.35", appMcpId: "app-generic", available: "1.2.35")
+        XCTAssertTrue(checkout.showsUpdate(status: nil), "no copy of Counterpart's own, and still Update")
+        XCTAssertEqual(checkout.softwareRow.update, "app-generic")
         let current = PrinterMcpPackage(package: "mcp-3d-printer-server", label: "l", description: "d", installed: true,
-                                        version: "1.2.35", latestVersion: "1.2.35", appMcpId: "app-generic")
-        XCTAssertFalse(current.offersUpdate, "already the latest")
+                                        version: "1.2.35", latestVersion: "1.2.35", appMcpId: "app-generic", upToDate: true)
+        XCTAssertFalse(current.showsUpdate(status: nil), "already the latest")
         let unknown = PrinterMcpPackage(package: "mcp-3d-printer-server", label: "l", description: "d", installed: true,
                                         version: "1.2.25", appMcpId: "app-generic")
-        XCTAssertFalse(unknown.offersUpdate, "npm not asked yet")
-        let missing = PrinterMcpPackage(package: "mcp-3d-printer-server", label: "l", description: "d", installed: false,
-                                        latestVersion: "1.2.35", appMcpId: "app-generic")
-        XCTAssertFalse(missing.offersUpdate, "not installed: Download, not Update")
+        XCTAssertFalse(unknown.showsUpdate(status: nil), "npm not asked yet")
     }
 
     func testTheEventsCarryAnUpdateFromStartToItsResult() throws {
