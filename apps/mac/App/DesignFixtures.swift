@@ -346,7 +346,7 @@ import UniformTypeIdentifiers
             let app = NSApplication.shared
             app.setActivationPolicy(.prohibited)
             app.appearance = NSAppearance(named: arguments.count > 3 && arguments[3] == "light" ? .aqua : .darkAqua)
-            let model = ObjectsModel(companion: FixtureObjects(items: items, catalog: PrinterCatalog(destinations: []), now: Date().timeIntervalSince1970 * 1000))
+            let model = ObjectsModel(companion: FixtureObjects(items: items, catalog: PrinterCatalog(destinations: [], defaultDestinationId: ""), now: Date().timeIntervalSince1970 * 1000))
             var done = false
             Task { await model.refresh(); model.selection = id; done = true }
             while !done { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }
