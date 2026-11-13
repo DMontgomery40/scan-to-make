@@ -55,6 +55,7 @@ import {
   keepFields,
   typeSerial,
   canSelectPlate,
+  plateStatusText,
   printNeedsCheck,
   AUTO_UPDATE_LABEL,
   AUTO_UPDATE_WORDS,
@@ -218,6 +219,23 @@ test("after an unconfirmed start every plate stays choosable, and only its plate
   const choices = { destinationId: "p1s", quality: "standard", strength: "standard", pauseBeforeLayers: [] } as Parameters<typeof printRequest>[1];
   assert.equal(printRequest("p", choices, "sha", rig.back.plates![0].id, true).checked, true);
   assert.equal("checked" in printRequest("p", choices, "sha", rig.switched.plates![3].id, false), false);
+});
+// #784: a send that may have reached the printer reads "Check print result" on Linux too, as on Apple and Android.
+test("a plate whose send may have reached the printer reads Check print result, never its raw status", () => {
+  assert.equal(plateStatusText({ status: "unknown" }), "Check print result");
+  assert.equal(plateStatusText({ status: "failed" }), "Print failed");
+  assert.equal(plateStatusText({ status: "failed", completedAtMs: 1 }), "Reprint failed · printed before");
+  assert.equal(plateStatusText({ status: "not-printed" }), "Not printed");
+  const rig = JSON.parse(
+    readFileSync(new URL("../../../packages/contracts/fixtures/six-plate-unconfirmed.json", import.meta.url), "utf8"),
+  ) as Record<"unconfirmed", Project>;
+  const html = renderToStaticMarkup(createElement(ProjectPage, {
+    project: rig.unconfirmed, printers: [], apply() {}, mutate: async () => ({}), onBack() {}, onView() {}, viewing: undefined,
+    changes: { queue: [], loaded: true, error: "", enqueue: async () => {}, discard: async () => {}, retry: async () => {} } as never,
+    capabilities: { projectSettings: true }, projects: [rig.unconfirmed], onOpenProject() {},
+  }));
+  assert.match(html, /Check print result/);
+  assert.doesNotMatch(html, /<span>unknown<\/span>/);
 });
 test("read issued before a mutation cannot overwrite its result", () => {
   const order = new ReadOrder();

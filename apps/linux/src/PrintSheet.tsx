@@ -13,6 +13,7 @@ import {
   offeredChoices,
   guardPlate,
   parseLayers,
+  plateStatusText,
   printNeedsCheck,
   printRequest,
   shownSlice,
@@ -324,7 +325,7 @@ export function PrintSheet({
           )}
           {plate && (
             <small>
-              {plate.fileName} · {plate.status}
+              {plate.fileName} · {plateStatusText(plate)}
             </small>
           )}
           <p>

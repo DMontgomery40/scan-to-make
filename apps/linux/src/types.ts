@@ -10,6 +10,7 @@ export interface Plate {
   selected: boolean;
   sliced: boolean;
   status: string;
+  completedAtMs?: number;
   /** Its last send may have reached the printer: printing it again asks "I checked the printer". */
   uncertain?: boolean;
 }
