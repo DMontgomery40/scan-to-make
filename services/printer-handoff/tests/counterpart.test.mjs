@@ -109,11 +109,13 @@ test('#766: counterpart_printer_info keeps printer.displayName as the MCP gives 
   const withoutIt = await read(older);
   assert.equal(withoutIt.printer.model, 'P1S');
   assert.equal('displayName' in withoutIt.printer, false);
-  for (const unreadable of [42, '', 'x'.repeat(121)]) {
+  for (const unreadable of [42, '', '   ', 'x'.repeat(121)]) {
     const kept = await read({...info.printer, displayName: unreadable});
     assert.equal(kept?.capabilities.camera, 'bambu-tcp', `a displayName of ${JSON.stringify(unreadable).slice(0, 12)} costs nothing else`);
     assert.equal(kept.printer.displayName, undefined);
   }
+  // A name padded with spaces is shown without them (review of #779).
+  assert.equal((await read({...info.printer, displayName: '  Bambu Lab P1S '})).printer.displayName, 'Bambu Lab P1S');
 });
 
 test('#630: progress.physical is forwarded (verdict, evidence, the frame to judge); a physical field this version cannot read never costs the report', async () => {

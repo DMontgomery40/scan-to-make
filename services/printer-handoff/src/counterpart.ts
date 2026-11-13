@@ -22,8 +22,9 @@ export const counterpartPrinterInfoSchema = z.object({
     /**
      * The model with its maker, as the MCP names it ("Bambu Lab P1S"), shown as given (#766). Optional: an install
      * without it, or one this version can't read, loses only this field, never the printer info.
+     * Spaces around it are dropped, and a name of only spaces counts as none.
      */
-    displayName: z.string().min(1).max(120).optional().catch(undefined),
+    displayName: z.string().trim().min(1).max(120).optional().catch(undefined),
   }),
   capabilities: z.object({
     progress: z.boolean(), layers: z.boolean(),
