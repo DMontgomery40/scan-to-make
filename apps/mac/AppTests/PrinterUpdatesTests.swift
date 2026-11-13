@@ -76,7 +76,7 @@ import struct CounterpartKit.PrinterSoftwareRow
         XCTAssertTrue(update[0].showsUpdate(status: .failed(log: nil)), "Try Again")
         XCTAssertFalse(try software("current")[0].showsUpdate(status: nil), "nothing newer")
         let own = try software("own-copy")[0].softwareRow
-        XCTAssertEqual(own.others.map(\.words), ["P1S runs your own copy (1.1.80)"])
+        XCTAssertEqual(own.others.map(\.words), ["P1S also runs your own copy (1.1.80)"], "its other profile is on Counterpart's copy (#775 review)")
         XCTAssertEqual(own.others.first?.footnote, "Runs from a folder you manage, so Counterpart doesn't update it by itself. Your own copy is left as it is.")
     }
 
