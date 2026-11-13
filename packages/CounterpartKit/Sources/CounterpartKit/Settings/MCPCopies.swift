@@ -62,9 +62,9 @@ public struct MCPPackageCopies: Decodable, Sendable, Identifiable {
     /// Settings → Printer software's row (#775), from the companion's fields. `printerId` narrows it to one printer's page.
     public func row(printerId: String? = nil) -> PrinterSoftwareRow {
         let mine = moves.filter { move in printerId == nil || uses.contains { $0.printerId == printerId && $0.mcpId == move.mcpId } }
-        return PrinterSoftwareRow.build(label: label, version: appCopy?.version ?? version, appMcpId: appMcpId, hasAppCopy: appCopy != nil,
+        return PrinterSoftwareRow.build(label: label, version: appCopy?.version ?? version, appMcpId: appMcpId,
                                         available: available, upToDate: upToDate, usedBy: usedBy,
-                                        uses: uses.map { ($0.printerId, $0.printer, $0.mcpId, $0.kind, $0.version) },
+                                        uses: uses.map { ($0.printerId, $0.printer, $0.mcpId, $0.kind, $0.version, $0.managed ?? !$0.canMove) },
                                         moves: mine.map { ($0.mcpId, $0.title, $0.printers, $0.words, $0.reason) })
     }
 }
@@ -87,7 +87,7 @@ public struct PrinterSoftwareRow: Equatable, Sendable {
         public var button: String { "Use Counterpart’s" }
         /// Two printers' buttons never read the same: each names its MCP, printers and copy.
         public var accessibilityLabel: String {
-            let copy = words.hasPrefix(PrinterSoftwareRow.listed(printers) + " ") ? String(words.dropFirst(PrinterSoftwareRow.listed(printers).count + 1)).replacingOccurrences(of: #"^runs? "#, with: "", options: .regularExpression) : words
+            let copy = words.hasPrefix(PrinterSoftwareRow.listed(printers) + " ") ? String(words.dropFirst(PrinterSoftwareRow.listed(printers).count + 1)).replacingOccurrences(of: #"^(also )?runs? "#, with: "", options: .regularExpression) : words
             return "Use Counterpart’s \(label) for \(PrinterSoftwareRow.listed(printers)) instead of \(copy)"
         }
         /// Under the button, only in this case: why it isn't kept current, and that the person's copy stays.
@@ -96,19 +96,21 @@ public struct PrinterSoftwareRow: Equatable, Sendable {
     /// The row from the companion's `printers.mcps` fields (iPhone and iPad: `MCPPackageCopies.row`; Mac: ControlKit's
     /// `PrinterMcpPackage`). A companion from before #775 sends no `available`, `upToDate`, `usedBy` or Move `words`:
     /// no status line and no Update, printers once by id (by name where the client has no id), the same plain line.
-    public static func build(label: String, version: String?, appMcpId: String, hasAppCopy: Bool, available: String?, upToDate: Bool?, usedBy: [String]?,
-                             uses: [(printerId: String, printer: String, mcpId: String, kind: String, version: String?)],
+    /// `available` is sent whatever the install: Update installs or updates Counterpart's own copy, so a hand-built copy
+    /// is never the only one Counterpart can update (#320). "Used by" names only printers on Counterpart's copy.
+    public static func build(label: String, version: String?, appMcpId: String, available: String?, upToDate: Bool?, usedBy: [String]?,
+                             uses: [(printerId: String, printer: String, mcpId: String, kind: String, version: String?, managed: Bool)],
                              moves: [(mcpId: String, title: String, printers: [String]?, words: String?, reason: String?)]) -> PrinterSoftwareRow {
         let others = moves.map { move -> Other in
             let on = uses.filter { $0.mcpId == move.mcpId }
             let printers = move.printers ?? once(on.map { ($0.printerId, $0.printer) })
-            let words = move.words ?? on.first.map { otherCopy(printers, earlier: $0.kind == "app", version: $0.version) } ?? move.title
+            let also = on.allSatisfy { use in uses.contains { $0.managed && $0.printerId == use.printerId } }
+            let words = move.words ?? on.first.map { otherCopy(printers, earlier: $0.kind == "app", version: $0.version, also: also) } ?? move.title
             return Other(mcpId: move.mcpId, label: label, printers: printers, words: words, reason: move.reason)
         }
-        let newer = hasAppCopy ? available : nil
-        return PrinterSoftwareRow(name: label, version: version, status: newer.map { .available($0) } ?? (upToDate == true ? .upToDate : nil),
-                                  update: newer == nil ? nil : appMcpId,
-                                  usedBy: Self.usedBy(usedBy ?? once(uses.map { ($0.printerId, $0.printer) })), others: others)
+        return PrinterSoftwareRow(name: label, version: version, status: available.map { .available($0) } ?? (upToDate == true ? .upToDate : nil),
+                                  update: available == nil ? nil : appMcpId,
+                                  usedBy: Self.usedBy(usedBy ?? once(uses.filter(\.managed).map { ($0.printerId, $0.printer) })), others: others)
     }
 
     public let name: String
@@ -137,7 +139,7 @@ public struct PrinterSoftwareRow: Equatable, Sendable {
         return printers.filter { seen.insert($0.id).inserted }.map(\.name)
     }
     /// A companion from before #775: the same line the companion now sends.
-    public static func otherCopy(_ printers: [String], earlier: Bool, version: String?) -> String {
-        "\(listed(printers)) \(printers.count > 1 ? "run" : "runs") \(earlier ? "an earlier copy" : "your own copy")" + (version.map { " (\($0))" } ?? "")
+    public static func otherCopy(_ printers: [String], earlier: Bool, version: String?, also: Bool = false) -> String {
+        "\(listed(printers)) \(also ? "also " : "")\(printers.count > 1 ? "run" : "runs") \(earlier ? "an earlier copy" : "your own copy")" + (version.map { " (\($0))" } ?? "")
     }
 }

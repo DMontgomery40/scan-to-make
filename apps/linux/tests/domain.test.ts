@@ -1380,7 +1380,7 @@ test("#775: a printer on another copy gets one line, 'Use Counterpart’s', and 
   const row = printerSoftwareRow(packages[0]);
   assert.equal(row.usedBy, "Used by P1S");
   assert.deepEqual(row.others, [{
-    mcpId: packages[0].uses[1].mcpId, words: "P1S runs your own copy (1.1.80)", button: "Use Counterpart’s",
+    mcpId: packages[0].uses[1].mcpId, words: "P1S also runs your own copy (1.1.80)", button: "Use Counterpart’s",
     label: "Use Counterpart’s bambu-printer-mcp for P1S instead of your own copy (1.1.80)",
     footnote: "Runs from a folder you manage, so Counterpart doesn't update it by itself. Your own copy is left as it is.",
   }]);
@@ -1395,6 +1395,23 @@ test("#775: a companion from before #775 renders cleanly: no Update, no status, 
       {destinationId: "x1c", printerId: "x1c", printer: "X1C", mcpId: "mcp-b", kind: "checkout", path: "/x/bambu", version: "1.1.80", canMove: true}],
     moves: [{mcpId: "mcp-b", title: "Move X1C (bambu-printer-mcp, your copy at /x/bambu) to Counterpart’s updated copy"}]};
   const row = printerSoftwareRow(older);
-  assert.deepEqual([row.version, row.status, row.update, row.usedBy], ["1.1.94", undefined, undefined, "Used by P1S and X1C"]);
+  assert.deepEqual([row.version, row.status, row.update, row.usedBy], ["1.1.94", undefined, undefined, "Used by P1S"], "only printers on Counterpart's copy (#775 review)");
   assert.deepEqual(row.others.map((other) => [other.words, other.footnote]), [["X1C runs your own copy (1.1.80)", "Your own copy is left as it is."]]);
+});
+
+test("#775 review (#320): a checkout-only install still offers Update; its printer isn't 'Used by'", async () => {
+  const { printerSoftwareRow } = await import("../src/domain.ts");
+  const row = printerSoftwareRow({package: "bambu-printer-mcp", label: "bambu-printer-mcp", description: "", installed: true, version: "1.1.80", latestVersion: "1.1.95",
+    available: "1.1.95", usedBy: [], appMcpId: "mcp-a", installs: [], uses: [
+      {destinationId: "lan", printerId: "p1s", printer: "P1S", mcpId: "mcp-b", kind: "checkout", version: "1.1.80", canMove: true, managed: false}],
+    moves: [{mcpId: "mcp-b", title: "Move P1S", printers: ["P1S"], words: "P1S runs your own copy (1.1.80)"}]});
+  assert.deepEqual([row.status, row.update, row.usedBy], ["1.1.95 available", "mcp-a", "No printer uses it yet"]);
+  // An older companion with one printer on both copies says "also".
+  const older = printerSoftwareRow({package: "bambu-printer-mcp", label: "bambu-printer-mcp", description: "", installed: true, appMcpId: "mcp-a", installs: [],
+    appCopy: {kind: "app", version: "1.1.94"}, uses: [
+      {destinationId: "current", printerId: "p1s", printer: "P1S", mcpId: "mcp-a", kind: "app", version: "1.1.94", canMove: false},
+      {destinationId: "lan", printerId: "p1s", printer: "P1S", mcpId: "mcp-b", kind: "checkout", version: "1.1.80", canMove: true}]});
+  assert.equal(older.usedBy, "Used by P1S");
+  assert.deepEqual(older.others.map((other) => [other.words, other.label]),
+    [["P1S also runs your own copy (1.1.80)", "Use Counterpart’s bambu-printer-mcp for P1S instead of your own copy (1.1.80)"]]);
 });

@@ -548,29 +548,33 @@ function printersOnce(uses: { printerId?: string; printer: string }[]): string[]
  */
 export function printerSoftwareRow(pkg: import("./types").McpPackage, printerId?: string) {
   const uses = pkg.uses ?? [];
-  const status = pkg.available && pkg.appCopy ? `${pkg.available} available` : pkg.upToDate ? "Up to date" : undefined;
+  // `available` whatever the install: Update installs Counterpart's own copy, so a hand-built one is never the only one (#320).
+  const status = pkg.available ? `${pkg.available} available` : pkg.upToDate ? "Up to date" : undefined;
+  // "Used by" names only printers on Counterpart's copy; one also on another copy "also runs" it (#775 review).
+  const managed = uses.filter((use) => use.managed ?? !use.canMove);
   const others = mcpMoves(pkg)
     .filter((move) => !printerId || uses.some((use) => use.printerId === printerId && use.mcpId === move.mcpId))
     .map((move) => {
       const on = uses.filter((use) => use.mcpId === move.mcpId), first = on[0];
       const printers = move.printers ?? printersOnce(on);
+      const also = on.every((use) => managed.some((other) => (other.printerId ?? other.printer) === (use.printerId ?? use.printer)));
       const words = move.words ?? (first
-        ? `${listedNames(printers)} ${printers.length > 1 ? "run" : "runs"} ${first.kind === "app" ? "an earlier copy" : "your own copy"}${first.version ? ` (${first.version})` : ""}`
+        ? `${listedNames(printers)} ${also ? "also " : ""}${printers.length > 1 ? "run" : "runs"} ${first.kind === "app" ? "an earlier copy" : "your own copy"}${first.version ? ` (${first.version})` : ""}`
         : move.title);
       const lead = `${listedNames(printers)} `;
-      const copy = words.startsWith(lead) ? words.slice(lead.length).replace(/^runs? /, "") : words;
+      const copy = words.startsWith(lead) ? words.slice(lead.length).replace(/^(also )?runs? /, "") : words;
       return {
         mcpId: move.mcpId, words, button: "Use Counterpart’s",
         label: `Use Counterpart’s ${pkg.label} for ${listedNames(printers)} instead of ${copy}`,
         footnote: [move.reason, "Your own copy is left as it is."].filter(Boolean).join(" "),
       };
     });
-  const used = pkg.usedBy ?? printersOnce(uses);
+  const used = pkg.usedBy ?? printersOnce(managed);
   return {
     name: pkg.label,
     version: pkg.appCopy?.version ?? pkg.version,
     status,
-    update: pkg.available && pkg.appCopy ? pkg.appMcpId : undefined,
+    update: pkg.available ? pkg.appMcpId : undefined,
     usedBy: used.length ? `Used by ${listedNames(used)}` : "No printer uses it yet",
     others,
   };

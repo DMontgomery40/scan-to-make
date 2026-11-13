@@ -99,19 +99,23 @@ data class McpPackageCopies(val `package`: String, val label: String, val appMcp
 
     /** Settings → Printer software's row (#775); `printerId` narrows it to one printer's page. */
     fun row(printerId: String? = null): PrinterSoftwareRow {
+        // "Used by" names only printers on Counterpart's copy; one also on another copy "also runs" it (#775 review).
+        val managed = uses.filter { it.managed ?: !it.canMove }
         val others = moves.filter { move -> printerId == null || uses.any { it.printerId == printerId && it.mcpId == move.mcpId } }.map { move ->
             val on = uses.filter { it.mcpId == move.mcpId }
             val printers = move.printers ?: PrinterSoftwareRow.once(on.map { it.printerId to it.printer })
             val first = on.firstOrNull()
-            val words = move.words ?: first?.let { PrinterSoftwareRow.otherCopy(printers, it.kind == "app", it.version) } ?: move.title
+            val also = on.all { use -> managed.any { it.printerId == use.printerId } }
+            val words = move.words ?: first?.let { PrinterSoftwareRow.otherCopy(printers, it.kind == "app", it.version, also) } ?: move.title
             val lead = PrinterSoftwareRow.listed(printers) + " "
-            val copy = if (words.startsWith(lead)) words.removePrefix(lead).replace(Regex("^runs? "), "") else words
+            val copy = if (words.startsWith(lead)) words.removePrefix(lead).replace(Regex("^(also )?runs? "), "") else words
             PrinterSoftwareRow.Other(move.mcpId, words, "Use Counterpart’s",
                 "Use Counterpart’s $label for ${PrinterSoftwareRow.listed(printers)} instead of $copy",
                 listOfNotNull(move.reason, PrinterSoftwareRow.LEFT_ALONE).joinToString(" "))
         }
-        val newer = if (appCopy != null) available else null
-        val used = usedBy ?: PrinterSoftwareRow.once(uses.map { it.printerId to it.printer })
+        // `available` whatever the install: Update installs Counterpart's own copy, so a hand-built one is never the only one (#320).
+        val newer = available
+        val used = usedBy ?: PrinterSoftwareRow.once(managed.map { it.printerId to it.printer })
         return PrinterSoftwareRow(label, appCopy?.version ?: version,
             newer?.let { "$it available" } ?: if (upToDate == true) PrinterSoftwareRow.UP_TO_DATE else null,
             if (newer != null) appMcpId else null,
@@ -135,8 +139,8 @@ data class PrinterSoftwareRow(val name: String, val version: String?, val status
         /** Each printer once by its id, in listed order. */
         fun once(printers: List<Pair<String, String>>) = printers.distinctBy { it.first }.map { it.second }
         /** A companion from before #775: the same line the companion now sends. */
-        fun otherCopy(printers: List<String>, earlier: Boolean, version: String?) =
-            listed(printers) + (if (printers.size > 1) " run " else " runs ") + (if (earlier) "an earlier copy" else "your own copy") + (version?.let { " ($it)" } ?: "")
+        fun otherCopy(printers: List<String>, earlier: Boolean, version: String?, also: Boolean = false) =
+            listed(printers) + (if (also) " also" else "") + (if (printers.size > 1) " run " else " runs ") + (if (earlier) "an earlier copy" else "your own copy") + (version?.let { " ($it)" } ?: "")
     }
 }
 @Serializable private data class McpCopiesReply(val packages: List<McpPackageCopies>)

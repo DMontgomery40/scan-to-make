@@ -207,18 +207,16 @@ struct PrinterMCP: Identifiable, Equatable {
 }
 
 extension PrinterMcpPackage {
-    /// Installed, and a newer version is published: a package no printer uses then offers Update, which installs
-    /// the latest as Counterpart's own copy (`printers.updateMcp` with `appMcpId`, #320's path).
-    var offersUpdate: Bool { installed && McpUpdateStatus.newer(installed: version, latest: latestVersion) }
     /// Settings → Printer software's row (#775), the same words as the iPhone and iPad (CounterpartKit `PrinterSoftwareRow`).
     var softwareRow: PrinterSoftwareRow {
-        let uses = (uses ?? []).map { ($0.printerId ?? $0.printer, $0.printer, $0.mcpId, $0.kind, $0.version) }
-        return PrinterSoftwareRow.build(label: label, version: appCopy?.version ?? (installed ? version : nil), appMcpId: appMcpId, hasAppCopy: appCopy != nil,
+        let uses = (uses ?? []).map { ($0.printerId ?? $0.printer, $0.printer, $0.mcpId, $0.kind, $0.version, $0.managed ?? !$0.canMove) }
+        return PrinterSoftwareRow.build(label: label, version: appCopy?.version ?? (installed ? version : nil), appMcpId: appMcpId,
                                         available: available, upToDate: upToDate, usedBy: usedBy, uses: uses,
                                         moves: moves.map { ($0.mcpId, $0.title, $0.printers, $0.words, $0.reason) })
     }
-    /// #775: Update shows when a newer version is published, except while an update is under way; a finished one
-    /// earlier in this session (`.updated`, `.failed`) never hides the next.
+    /// #775: Update shows when a newer version is published, whatever the install (a hand-built copy too: Update installs
+    /// Counterpart's own copy, #320's path), except while an update is under way; a finished one earlier in this session
+    /// (`.updated`, `.failed`) never hides the next.
     func showsUpdate(status: McpUpdateStatus?) -> Bool { softwareRow.update != nil && status?.busy != true }
     /// The Update button's name outside its row (the rotor lists buttons alone).
     func updateLabel(failed: Bool) -> String {

@@ -41,7 +41,7 @@
           "printers": [
             "P1S"
           ],
-          "words": "P1S runs your own copy (1.1.80)",
+          "words": "P1S also runs your own copy (1.1.80)",
           "reason": "Runs from a folder you manage, so Counterpart doesn't update it by itself."
         }
       ],

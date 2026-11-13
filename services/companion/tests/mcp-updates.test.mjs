@@ -1221,20 +1221,21 @@ test('Settings → Printers follow-up: the shared two-profile fixture is what th
  * One P1S with two profiles, both on Counterpart's copy; mcp-3D used by nothing. `latest` per package; `own` puts the
  * P1S's second profile on a checkout of its own. Shared with every client's tests as `mcp-printer-software-*.json`.
  */
-async function printerSoftware({latest = {'bambu-printer-mcp': '1.1.94', 'mcp-3d-printer-server': '1.2.76'}, own = false} = {}) {
+async function printerSoftware({latest = {'bambu-printer-mcp': '1.1.94', 'mcp-3d-printer-server': '1.2.76'}, own = false, ownOnly = false, noAppCopy = false} = {}) {
   const {PrinterSetup} = await import('../dist/printing/setup.js');
   const bambuOwn = `${APP}/printers/bambu`, generic = `${APP}/printers/generic`, dir = `${HOME}/bambu-printer-mcp`;
   const env = mac({
-    [`${bambuOwn}/lib/node_modules/bambu-printer-mcp/package.json`]: pkgJson('1.1.94'), [`${bambuOwn}/lib/node_modules/bambu-printer-mcp/dist/index.js`]: '',
+    ...(noAppCopy ? {} : {[`${bambuOwn}/lib/node_modules/bambu-printer-mcp/package.json`]: pkgJson('1.1.94'), [`${bambuOwn}/lib/node_modules/bambu-printer-mcp/dist/index.js`]: ''}),
     [`${generic}/lib/node_modules/mcp-3d-printer-server/package.json`]: pkgJson('1.2.76', 'mcp-3d-printer-server'), [`${generic}/lib/node_modules/mcp-3d-printer-server/dist/index.js`]: '',
-    ...(own ? {[`${dir}/.git/HEAD`]: 'x', [`${dir}/package.json`]: pkgJson('1.1.80'), [`${dir}/dist/index.js`]: ''} : {}),
+    ...(own || ownOnly || noAppCopy ? {[`${dir}/.git/HEAD`]: 'x', [`${dir}/package.json`]: pkgJson('1.1.80'), [`${dir}/dist/index.js`]: ''} : {}),
   });
   const managed = {backend: 'bambu-printer-mcp', process: {command: '/node', args: [`${bambuOwn}/lib/node_modules/bambu-printer-mcp/dist/index.js`]}};
-  const configs = [
+  const checkout = {backend: 'bambu-printer-mcp', process: {command: '/node', args: [`${dir}/dist/index.js`]}};
+  const configs = ownOnly || noAppCopy ? [{id: 'counterpart-p1s-lan', config: checkout}] : [
     {id: 'current', config: managed},
     {id: 'counterpart-p1s-lan', config: own ? {backend: 'bambu-printer-mcp', process: {command: '/node', args: [`${dir}/dist/index.js`]}} : {...managed, process: {...managed.process, env: {BAMBU_MODE: 'lan'}}}},
   ];
-  const setup = new PrinterSetup({env, configs: () => configs, list: () => ['bambu', 'generic'], latestVersion: pkg => latest[pkg],
+  const setup = new PrinterSetup({env, configs: () => configs, list: () => noAppCopy ? ['generic'] : ['bambu', 'generic'], latestVersion: pkg => latest[pkg],
     catalog: () => ({canonical: () => 'p1s', destinations: [{id: 'p1s', name: 'P1S'}]})});
   return (await setup.mcps()).packages;
 }
@@ -1250,7 +1251,7 @@ test('#775: two profiles of one printer give one "Used by" name; nothing newer i
   assert.equal(generic.upToDate, true);
 });
 
-test('#775: a newer published version is "available" only beside Counterpart\'s copy; an unknown latest says neither', async () => {
+test('#775: a newer published version is "available"; a package npm has never answered for says neither available nor up to date', async () => {
   const [bambu, generic] = await printerSoftware({latest: {'bambu-printer-mcp': '1.1.95'}});
   assert.equal(bambu.available, '1.1.95');
   assert.equal(bambu.upToDate, undefined);
@@ -1258,16 +1259,30 @@ test('#775: a newer published version is "available" only beside Counterpart\'s 
   assert.equal(generic.upToDate, undefined, 'and no claim that it is up to date');
 });
 
-test('#775: a printer on another copy gets one plain line, a reason, and the Move', async () => {
+test('#775: a printer with one profile on Counterpart\'s copy and one on its own: "Used by P1S" and "P1S also runs your own copy", a reason, and the Move', async () => {
   const [bambu] = await printerSoftware({own: true});
-  assert.deepEqual(bambu.usedBy, ['P1S']);
+  assert.deepEqual(bambu.usedBy, ['P1S'], 'the profile on Counterpart\'s copy');
   assert.equal(bambu.moves.length, 1);
   const [move] = bambu.moves;
   assert.equal(move.mcpId, bambu.uses[1].mcpId);
   assert.deepEqual(move.printers, ['P1S']);
-  assert.equal(move.words, 'P1S runs your own copy (1.1.80)');
+  assert.equal(move.words, 'P1S also runs your own copy (1.1.80)');
   assert.equal(move.reason, 'Runs from a folder you manage, so Counterpart doesn\'t update it by itself.', 'Q9: why it isn\'t kept current');
   assert.ok(move.title.startsWith('Move P1S'), 'the title stays for clients that predate #775');
+});
+
+test('#775 review: a printer whose only profile runs its own copy is not "Used by" Counterpart\'s copy', async () => {
+  const [bambu] = await printerSoftware({ownOnly: true});
+  assert.deepEqual(bambu.usedBy, [], '"No printer uses it yet" beside Counterpart\'s version');
+  assert.deepEqual(bambu.moves.map(move => move.words), ['P1S runs your own copy (1.1.80)']);
+});
+
+test('#775 review (#320): an install with only a hand-built copy still offers Update when a newer version is published', async () => {
+  const [bambu] = await printerSoftware({noAppCopy: true, latest: {'bambu-printer-mcp': '1.1.95'}});
+  assert.equal(bambu.appCopy, undefined, 'no copy of Counterpart\'s own');
+  assert.equal(bambu.version, '1.1.80');
+  assert.equal(bambu.available, '1.1.95', 'Update installs Counterpart\'s own copy (appMcpId)');
+  assert.equal(bambu.upToDate, undefined);
 });
 
 test('#775: the shared printer-software fixtures are what the companion lists', async () => {

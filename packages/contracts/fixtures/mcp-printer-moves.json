@@ -32,9 +32,7 @@
           "words": "Bambu Lab P1S runs an earlier copy (1.1.65)"
         }
       ],
-      "usedBy": [
-        "Bambu Lab P1S"
-      ],
+      "usedBy": [],
       "upToDate": true,
       "appCopy": {
         "kind": "app",
@@ -87,9 +85,7 @@
           "reason": "Runs from a folder you manage, so Counterpart doesn't update it by itself."
         }
       ],
-      "usedBy": [
-        "Bambu Lab P1S"
-      ],
+      "usedBy": [],
       "upToDate": true,
       "appCopy": {
         "kind": "app",

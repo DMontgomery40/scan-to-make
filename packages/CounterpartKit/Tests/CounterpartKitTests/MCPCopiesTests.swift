@@ -78,7 +78,7 @@ final class MCPCopiesTests: XCTestCase {
         XCTAssertEqual(row.usedBy, "Used by P1S")
         XCTAssertEqual(row.others.count, 1)
         XCTAssertEqual(row.others[0].mcpId, package.uses[1].mcpId)
-        XCTAssertEqual(row.others[0].words, "P1S runs your own copy (1.1.80)")
+        XCTAssertEqual(row.others[0].words, "P1S also runs your own copy (1.1.80)", "its other profile is on Counterpart's copy")
         XCTAssertEqual(row.others[0].footnote, "Runs from a folder you manage, so Counterpart doesn't update it by itself. Your own copy is left as it is.")
         XCTAssertEqual(row.others[0].button, "Use Counterpart’s")
         XCTAssertEqual(row.others[0].accessibilityLabel, "Use Counterpart’s bambu-printer-mcp for P1S instead of your own copy (1.1.80)")
@@ -101,8 +101,35 @@ final class MCPCopiesTests: XCTestCase {
         XCTAssertEqual(row.version, "1.1.94")
         XCTAssertNil(row.status, "an older companion doesn't say whether it's current")
         XCTAssertNil(row.update, "and offers no Update")
-        XCTAssertEqual(row.usedBy, "Used by P1S and X1C")
+        XCTAssertEqual(row.usedBy, "Used by P1S", "only printers on Counterpart's copy (#775 review)")
         XCTAssertEqual(row.others.map(\.words), ["X1C runs your own copy (1.1.80)"])
         XCTAssertEqual(row.others.first?.footnote, "Your own copy is left as it is.")
+    }
+
+    /// #775 review (#320): only a hand-built copy, a newer version published: Update installs Counterpart's own copy.
+    func testACheckoutOnlyInstallStillOffersUpdate() throws {
+        let json = #"""
+        {"package":"bambu-printer-mcp","label":"bambu-printer-mcp","appMcpId":"mcp-a","version":"1.1.80","latestVersion":"1.1.95","available":"1.1.95","usedBy":[],
+         "uses":[{"destinationId":"lan","printerId":"p1s","printer":"P1S","mcpId":"mcp-b","kind":"checkout","version":"1.1.80","canMove":true,"managed":false}],
+         "moves":[{"mcpId":"mcp-b","title":"Move P1S","printers":["P1S"],"words":"P1S runs your own copy (1.1.80)"}]}
+        """#
+        let row = try JSONDecoder().decode(MCPPackageCopies.self, from: Data(json.utf8)).row()
+        XCTAssertEqual(row.version, "1.1.80")
+        XCTAssertEqual(row.status, .available("1.1.95"))
+        XCTAssertEqual(row.update, "mcp-a")
+        XCTAssertEqual(row.usedBy, "No printer uses it yet", "its only profile runs its own copy")
+    }
+
+    /// A companion from before #775 with one printer on both copies: "Used by P1S" and "P1S also runs your own copy".
+    func testAnOlderCompanionSaysAlsoForAPrinterOnBothCopies() throws {
+        let json = #"""
+        {"package":"bambu-printer-mcp","label":"bambu-printer-mcp","appMcpId":"mcp-a","appCopy":{"kind":"app","version":"1.1.94"},
+         "uses":[{"destinationId":"current","printerId":"p1s","printer":"P1S","mcpId":"mcp-a","kind":"app","version":"1.1.94","canMove":false},
+                 {"destinationId":"lan","printerId":"p1s","printer":"P1S","mcpId":"mcp-b","kind":"checkout","version":"1.1.80","canMove":true}]}
+        """#
+        let row = try JSONDecoder().decode(MCPPackageCopies.self, from: Data(json.utf8)).row()
+        XCTAssertEqual(row.usedBy, "Used by P1S")
+        XCTAssertEqual(row.others.map(\.words), ["P1S also runs your own copy (1.1.80)"])
+        XCTAssertEqual(row.others.first?.accessibilityLabel, "Use Counterpart’s bambu-printer-mcp for P1S instead of your own copy (1.1.80)")
     }
 }

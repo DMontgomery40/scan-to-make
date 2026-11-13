@@ -932,7 +932,7 @@ class HomeLayoutTests {
         compose.onNodeWithContentDescription("Printers").performClick()
         // #775: one quiet row: the version beside the name, the printer once, and one plain line for its own copy.
         compose.onNodeWithText("1.2.45").assertExists()
-        compose.onNodeWithText("Used by Bambu Lab P1S").assertExists()
+        compose.onNodeWithText("No printer uses it yet").assertExists()
         compose.onNodeWithText("Bambu Lab P1S runs your own copy (1.2.25)").assertExists()
         compose.onNodeWithText("Counterpart’s copy", substring = true).assertDoesNotExist()
         compose.onNodeWithContentDescription(USE_COUNTERPARTS).assertExists()
@@ -1027,7 +1027,7 @@ class HomeLayoutTests {
         compose.onNodeWithContentDescription("Printers").performClick()
         compose.waitUntil(5_000) { compose.onAllNodes(hasTestTag("auto-update-mcps")).fetchSemanticsNodes().isNotEmpty() }
         compose.onAllNodes(hasTestTag("auto-update-mcps")).assertCountEquals(1)
-        compose.onNodeWithText("Used by Bambu Lab P1S").assertExists()
+        compose.onNodeWithText("No printer uses it yet").assertExists()
         val switch = compose.onNodeWithTag("auto-update-mcps")
         switch.performScrollTo().assertIsOn().assertTextContains("Keep printer software up to date")
         compose.onNodeWithText(com.scantomake.counterpart.ui.AUTO_UPDATE_MCPS_WORDS).assertExists()
@@ -1040,7 +1040,7 @@ class HomeLayoutTests {
         compose.onNodeWithContentDescription("Back").performClick()
         sendsKey = false
         compose.onNodeWithContentDescription("Printers").performClick()
-        compose.onNodeWithText("Used by Bambu Lab P1S").assertExists()
+        compose.onNodeWithText("No printer uses it yet").assertExists()
         compose.waitUntil(5_000) { reads == 2 }
         compose.waitForIdle()
         compose.onAllNodes(hasTestTag("auto-update-mcps")).assertCountEquals(0)
@@ -1155,7 +1155,7 @@ class HomeLayoutTests {
             compose.onNode(hasContentDescription("Update ${pkg.label}") and group).assertDoesNotExist()
         }
         compose.onNodeWithText("Bambu Lab P1S runs an earlier copy (1.1.65)").assertExists()
-        compose.onAllNodes(hasText("Used by Bambu Lab P1S")).assertCountEquals(2)
+        compose.onAllNodes(hasText("No printer uses it yet")).assertCountEquals(2)
     }
 
     /** #357's deferred Codex P2: an update or Move started on another client shows here without a tap on this phone. */

@@ -43,7 +43,7 @@ class PrinterSoftwareTests {
         val pkg = software("own-copy")[0]
         val other = pkg.row().others.single()
         assertEquals(pkg.uses[1].mcpId, other.mcpId)
-        assertEquals("P1S runs your own copy (1.1.80)", other.words)
+        assertEquals("P1S also runs your own copy (1.1.80)", other.words)
         assertEquals("Use Counterpart’s", other.button)
         assertEquals("Use Counterpart’s bambu-printer-mcp for P1S instead of your own copy (1.1.80)", other.label)
         assertEquals("Runs from a folder you manage, so Counterpart doesn't update it by itself. Your own copy is left as it is.", other.footnote)
@@ -64,8 +64,32 @@ class PrinterSoftwareTests {
         assertEquals("1.1.94", row.version)
         assertNull(row.status)
         assertNull(row.update)
-        assertEquals("Used by P1S and X1C", row.usedBy)
+        assertEquals("only printers on Counterpart's copy (#775 review)", "Used by P1S", row.usedBy)
         assertEquals(listOf("X1C runs your own copy (1.1.80)"), row.others.map { it.words })
         assertEquals("Your own copy is left as it is.", row.others.single().footnote)
+    }
+
+    /** #775 review (#320): only a hand-built copy, a newer version published: Update installs Counterpart's own copy. */
+    @Test fun aCheckoutOnlyInstallStillOffersUpdate() {
+        val row = WireJson.decodeFromString<McpPackageCopies>("""
+        {"package":"bambu-printer-mcp","label":"bambu-printer-mcp","appMcpId":"mcp-a","version":"1.1.80","available":"1.1.95","usedBy":[],
+         "uses":[{"destinationId":"lan","printerId":"p1s","printer":"P1S","mcpId":"mcp-b","kind":"checkout","version":"1.1.80","canMove":true,"managed":false}],
+         "moves":[{"mcpId":"mcp-b","title":"Move P1S","printers":["P1S"],"words":"P1S runs your own copy (1.1.80)"}]}
+        """.trimIndent()).row()
+        assertEquals("1.1.95 available", row.status)
+        assertEquals("mcp-a", row.update)
+        assertEquals("No printer uses it yet", row.usedBy)
+    }
+
+    /** A companion from before #775 with one printer on both copies: "Used by P1S" and "P1S also runs your own copy". */
+    @Test fun anOlderCompanionSaysAlsoForAPrinterOnBothCopies() {
+        val row = WireJson.decodeFromString<McpPackageCopies>("""
+        {"package":"bambu-printer-mcp","label":"bambu-printer-mcp","appMcpId":"mcp-a","appCopy":{"kind":"app","version":"1.1.94"},
+         "uses":[{"destinationId":"current","printerId":"p1s","printer":"P1S","mcpId":"mcp-a","kind":"app","version":"1.1.94","canMove":false},
+                 {"destinationId":"lan","printerId":"p1s","printer":"P1S","mcpId":"mcp-b","kind":"checkout","version":"1.1.80","canMove":true}]}
+        """.trimIndent()).row()
+        assertEquals("Used by P1S", row.usedBy)
+        assertEquals(listOf("P1S also runs your own copy (1.1.80)"), row.others.map { it.words })
+        assertEquals("Use Counterpart’s bambu-printer-mcp for P1S instead of your own copy (1.1.80)", row.others.single().label)
     }
 }

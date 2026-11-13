@@ -2109,7 +2109,7 @@ final class LayoutParityUITests: XCTestCase {
 
     func testPrinterSoftwareNamesAPrinterOnItsOwnCopyWithProjects() throws {
         let app = try printerSoftware("own-copy")
-        XCTAssertTrue(app.staticTexts["P1S runs your own copy (1.1.80)"].exists)
+        XCTAssertTrue(app.staticTexts["P1S also runs your own copy (1.1.80)"].exists, "its other profile is on Counterpart's copy (#775 review)")
         let use = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "mcp-move-")).firstMatch
         XCTAssertTrue(use.exists && use.isHittable)
         XCTAssertEqual(use.label, "Use Counterpart’s bambu-printer-mcp for P1S instead of your own copy (1.1.80)")

@@ -103,20 +103,19 @@ import struct CounterpartKit.PrinterSoftwareRow
     }
 
     /// Mac, Nov 5: mcp-3D was only a hand-built checkout no printer used, 1.2.25 with 1.2.35 published, and Settings
-    /// offered neither Update nor Download. Update now installs the latest as Counterpart's own copy (#320's path).
+    /// offered neither Update nor Download. Update installs the latest as Counterpart's own copy (#320's path); the
+    /// companion sends `available` whatever the install (#775 review).
     func testAnInstalledMcpNoPrinterUsesOffersUpdateWhenANewerVersionIsPublished() {
         let checkout = PrinterMcpPackage(package: "mcp-3d-printer-server", label: "mcp-3D-printer-server", description: "d", installed: true,
-                                         version: "1.2.25", latestVersion: "1.2.35", appMcpId: "app-generic")
-        XCTAssertTrue(checkout.offersUpdate)
+                                         version: "1.2.25", latestVersion: "1.2.35", appMcpId: "app-generic", available: "1.2.35")
+        XCTAssertTrue(checkout.showsUpdate(status: nil), "no copy of Counterpart's own, and still Update")
+        XCTAssertEqual(checkout.softwareRow.update, "app-generic")
         let current = PrinterMcpPackage(package: "mcp-3d-printer-server", label: "l", description: "d", installed: true,
-                                        version: "1.2.35", latestVersion: "1.2.35", appMcpId: "app-generic")
-        XCTAssertFalse(current.offersUpdate, "already the latest")
+                                        version: "1.2.35", latestVersion: "1.2.35", appMcpId: "app-generic", upToDate: true)
+        XCTAssertFalse(current.showsUpdate(status: nil), "already the latest")
         let unknown = PrinterMcpPackage(package: "mcp-3d-printer-server", label: "l", description: "d", installed: true,
                                         version: "1.2.25", appMcpId: "app-generic")
-        XCTAssertFalse(unknown.offersUpdate, "npm not asked yet")
-        let missing = PrinterMcpPackage(package: "mcp-3d-printer-server", label: "l", description: "d", installed: false,
-                                        latestVersion: "1.2.35", appMcpId: "app-generic")
-        XCTAssertFalse(missing.offersUpdate, "not installed: Download, not Update")
+        XCTAssertFalse(unknown.showsUpdate(status: nil), "npm not asked yet")
     }
 
     func testTheEventsCarryAnUpdateFromStartToItsResult() throws {
