@@ -39,10 +39,27 @@ Lead: Claude Opus 5.5 (high), T3 thread "Recover Work and Stabilize Counterpart"
 - **#766:** the read-only `printers.mcps` and printer-list read on his Mac showing "Bambu Lab P1S".
 - All three carry needs-device-verify until then.
 
+**Train 2026-11-13b (12f), [#787](https://github.com/DMontgomery40/scan-to-make/pull/787), merged at about 03:50Z: #785 (#784, P1 safety).**
+- **The bug.** An unreadable print record counted as "didn't start", and so did a `dispatch-uncertain` call whose record couldn't be re-read, and a restart with an unreadable record or a missing destination. Each time Print could send the job again: a possible double print.
+- **The fix.** These prints are now uncertain ("Check print result"), and Print refuses until the print is checked. Linux shows the same words as the other layouts.
+- **Where it came from.** The triage of stale PR #404 found the bug. #404 is closed; its plate-marking feature is #723, and its branch `fix/print-truth` stays until #723 takes the code.
+- **Review and gate.** One review; nothing blocks. The older gap and the test gaps are #786. Gate: 8/8 jobs (companion on Node 22 and 24, Android, Linux, e2e, licences).
+- **Install.** Only the Mac needs it, because the companion ships inside the Mac app.
+- `fix/x100-review4` was deleted: all its work is on main.
+- **Running the Mac gate:** `ci_local.py` over plain `ssh mac` stops at once. Line 1 of the Mac's `~/.ssh/config` includes a file on Spillover, which an SSH session can't read. Run it through a T3 agent on the Mac.
+
 **Filed tonight**
 - #778: no way to retry when npm hasn't answered.
 - #780: the config code "p1s" still shows next to the printer's name in some Settings rows.
 - #781: a printer named like a generated name ("Printer 2") is renamed. Record a "chosen by the person" flag instead of guessing from the spelling.
+- #784 (fixed in 12f) and #786 (its follow-up).
+
+**Design engine round 4 (#608, #734)** is being built on agents-136, in both MCPs:
+- a computed assembly that blocks "ready" while an interface isn't modelled;
+- the purpose turned into checks;
+- no designer-fed gate.
+
+It is tested with Sonnet, before and after, on the car phone holder that failed, on two requests with no cookbook example, and on the three earlier cases. Nothing is released before a review.
 
 ## Before that (2026-11-12, 21:45Z): afternoon — #769 fixed, MCP release 4, Mac on train 12d
 
