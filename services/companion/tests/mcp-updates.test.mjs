@@ -1221,7 +1221,7 @@ test('Settings → Printers follow-up: the shared two-profile fixture is what th
  * One P1S with two profiles, both on Counterpart's copy; mcp-3D used by nothing. `latest` per package; `own` puts the
  * P1S's second profile on a checkout of its own. Shared with every client's tests as `mcp-printer-software-*.json`.
  */
-async function printerSoftware({latest = {'bambu-printer-mcp': '1.1.94', 'mcp-3d-printer-server': '1.2.76'}, own = false, ownOnly = false, noAppCopy = false} = {}) {
+async function printerSoftware({latest = {'bambu-printer-mcp': '1.1.94', 'mcp-3d-printer-server': '1.2.76'}, own = false, ownOnly = false, noAppCopy = false, catalogName = 'P1S', nameOf} = {}) {
   const {PrinterSetup} = await import('../dist/printing/setup.js');
   const bambuOwn = `${APP}/printers/bambu`, generic = `${APP}/printers/generic`, dir = `${HOME}/bambu-printer-mcp`;
   const env = mac({
@@ -1236,9 +1236,22 @@ async function printerSoftware({latest = {'bambu-printer-mcp': '1.1.94', 'mcp-3d
     {id: 'counterpart-p1s-lan', config: own ? {backend: 'bambu-printer-mcp', process: {command: '/node', args: [`${dir}/dist/index.js`]}} : {...managed, process: {...managed.process, env: {BAMBU_MODE: 'lan'}}}},
   ];
   const setup = new PrinterSetup({env, configs: () => configs, list: () => noAppCopy ? ['generic'] : ['bambu', 'generic'], latestVersion: pkg => latest[pkg],
-    catalog: () => ({canonical: () => 'p1s', destinations: [{id: 'p1s', name: 'P1S'}]})});
+    catalog: () => ({canonical: () => 'p1s', destinations: [{id: 'p1s', name: catalogName}]}), ...(nameOf ? {nameOf} : {})});
   return (await setup.mcps()).packages;
 }
+
+test('#775 + #766: "Used by" and the own-copy line name a printer as the printer list does, so an unnamed P1S reads as its MCP names it', async () => {
+  // David's P1S has no name of his own: the catalog calls it "Your printer", and the printer list shows the MCP's
+  // display name instead (#766). Printer software must say the same, not "Used by Your printer".
+  const nameOf = id => id === 'p1s' || id === 'current' || id === 'counterpart-p1s-lan' ? 'Bambu Lab P1S' : undefined;
+  const [bambu] = await printerSoftware({own: true, catalogName: 'Your printer', nameOf});
+  assert.deepEqual(bambu.usedBy, ['Bambu Lab P1S']);
+  assert.equal(bambu.moves[0].words, 'Bambu Lab P1S also runs your own copy (1.1.80)');
+  assert.ok(bambu.uses.every(use => use.printer === 'Bambu Lab P1S' && use.words.startsWith('Bambu Lab P1S uses ')), 'older clients\' lines too');
+  // Without the printer list (an older wiring, a test), the catalog's name is used as before.
+  const [plain] = await printerSoftware({catalogName: 'Your printer'});
+  assert.deepEqual(plain.usedBy, ['Your printer']);
+});
 
 test('#775: two profiles of one printer give one "Used by" name; nothing newer is up to date with no update; no other copy', async () => {
   const [bambu, generic] = await printerSoftware();

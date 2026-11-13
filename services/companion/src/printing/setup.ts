@@ -266,6 +266,11 @@ export interface PrinterSetupDeps {
   /** `<appPrinters>/profiles.json`. */
   profilesPath?: string;
   catalog?(): PrinterCatalog | undefined;
+  /**
+   * A printer's name as the printer list shows it (`PrinterDirectory.nameOf`): an unnamed printer reads as its MCP names
+   * it, not "Your printer" (#766). Without it, the catalog's name.
+   */
+  nameOf?(destinationId: string): string | undefined;
   /** Reads the catalog again and starts or stops the printers' services. */
   reload?(): Promise<void>;
   /** Restarts a printer's MCP session, so its MCP reads its `.env` again. */
@@ -397,7 +402,7 @@ export class PrinterSetup {
         const path = install.type === 'checkout' ? install.dir : install.type === 'app' || install.type === 'global' ? install.prefix
           : install.type === 'npx' ? install.spec : undefined;
         const version = install.type === 'npx' ? undefined : installedVersion(install, env);
-        const printer = catalog?.destinations.find(destination => destination.id === catalog.canonical(id))?.name ?? id;
+        const printer = this.deps.nameOf?.(id) ?? catalog?.destinations.find(destination => destination.id === catalog.canonical(id))?.name ?? id;
         const managed = install.type === 'app' && install.prefix === own.prefix;
         const reason = this.deps.autoReason ? this.deps.autoReason(id) : autoUpdateReason(install);
         if (reason) reasons.set(id, reason);
