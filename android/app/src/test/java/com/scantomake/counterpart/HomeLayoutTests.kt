@@ -31,6 +31,7 @@ import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertAll
 import androidx.compose.ui.test.assertIsEnabled
@@ -303,6 +304,44 @@ class HomeLayoutTests {
         compose.onNodeWithTag("print").performScrollTo().assertIsEnabled()
         compose.onNodeWithTag("design-history").assertDoesNotExist()
         compose.onNodeWithText("What you have").assertDoesNotExist()
+    }
+
+    /** #788 with projects present (AGENTS.md "Every layout"): a code design pass that ended with no run the engine let the
+     *  designer make final keeps its last valid run as a draft. Its page shows the one plain line and the printer MCP's
+     *  reasons as given (two, then Show all), and Print and Ask for changes stay. An older MCP's draft has no reasons.
+     *  From the shared `packages/contracts/fixtures/project-draft.json`. */
+    @Test fun aDraftDesignSaysItIsNotFinishedWithTheEnginesReasonsWithProjectsPresent() {
+        val doc = parseObject(contractFixture("project-draft.json").readText())!!
+        val projects = doc["projects"]!!.jsonObject
+        val round4 = projects["round4"]!!.jsonObject
+        val data = round4["project"]!!.jsonObject
+        val reasons = round4["reasons"]!!.jsonArray.map { it.jsonPrimitive.content }
+        val id = data["id"]!!.jsonPrimitive.content
+        answerProject(data)
+        state.projects.value = listOf(project("other", "Existing project", "ready"), requireNotNull(Project.decode(data)))
+        state.loaded.value = true
+        compose.setContent { WithApp { com.scantomake.counterpart.ui.ProjectScreen(id, back = {}, print = {}, printing = {}, scan = {}) } }
+        compose.onNodeWithTag("draft-design-line").performScrollTo().assertTextContains(doc["line"]!!.jsonPrimitive.content, substring = true)
+        compose.onAllNodesWithTag("draft-design-reason").assertCountEquals(2)
+        compose.onNodeWithText(reasons[0], substring = true).assertExists()
+        compose.onNodeWithTag("draft-design-more").performScrollTo().assertTextContains("Show all 3").performClick()
+        compose.onAllNodesWithTag("draft-design-reason").assertCountEquals(3)
+        compose.onNodeWithTag("print").performScrollTo().assertIsEnabled()
+        compose.onNodeWithText("Ask for changes").assertExists()
+    }
+
+    @Test fun anOlderMCPsDraftShowsTheLineAndNoReasonsWithProjectsPresent() {
+        val doc = parseObject(contractFixture("project-draft.json").readText())!!
+        val data = doc["projects"]!!.jsonObject["older"]!!.jsonObject["project"]!!.jsonObject
+        val id = data["id"]!!.jsonPrimitive.content
+        answerProject(data)
+        state.projects.value = listOf(project("other", "Existing project", "ready"), requireNotNull(Project.decode(data)))
+        state.loaded.value = true
+        compose.setContent { WithApp { com.scantomake.counterpart.ui.ProjectScreen(id, back = {}, print = {}, printing = {}, scan = {}) } }
+        compose.onNodeWithTag("draft-design-line").performScrollTo().assertExists()
+        compose.onAllNodesWithTag("draft-design-reason").assertCountEquals(0)
+        compose.onNodeWithTag("draft-design-more").assertDoesNotExist()
+        compose.onNodeWithTag("print").performScrollTo().assertIsEnabled()
     }
 
     private val firstDesign = "10000000-0000-4000-8000-000000000001"

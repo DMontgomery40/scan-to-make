@@ -249,6 +249,8 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
                 }
             }
             if (version != null) ViewingEarlierDesignBar(project, version) { viewingDesign = null }
+            // #788: the design on the stage is a draft: the plain line and the printer MCP's reasons as given.
+            shown.current?.draft?.let { DraftDesignNote(it) }
             // Under What you scanned (design §3.3): make something else from this scan, on any project the computer has a
             // scan for, whatever its kind; where this one's scan came from; what else was made from it.
             val lineage = ScanLineage(project, projects)
@@ -529,4 +531,17 @@ fun AskSizesCard(form: AskSizesForm, enabled: Boolean, changed: (AskSizesForm) -
             answer?.let(send)
         }
     }
+}
+
+/** #788: a design that isn't finished: the plain line, then the printer MCP's reasons word for word (two, then Show all). */
+@Composable
+private fun DraftDesignNote(draft: Project.Draft) {
+    var expanded by remember(draft) { mutableStateOf(false) }
+    GlassCard(Modifier.fillMaxWidth().testTag("draft-design")) { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("⚠ " + Project.Draft.LINE, Modifier.testTag("draft-design-line"), color = Palette.needsYou, fontWeight = FontWeight.SemiBold)
+        draft.shown(expanded).forEach { reason -> Text("•  $reason", Modifier.testTag("draft-design-reason"), color = Palette.secondary, fontSize = 14.sp) }
+        if (draft.collapses) Text(if (expanded) "Show fewer" else "Show all ${draft.reasons.size}",
+            Modifier.testTag("draft-design-more").clickable(role = Role.Button) { expanded = !expanded },
+            color = Palette.filament, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+    } }
 }

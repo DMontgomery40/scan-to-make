@@ -179,6 +179,11 @@ export interface Project {
     renders: string[];
     /** #769: the merged mesh beside a multi-part design's 3MF, listed by the computer only while the file is there. */
     mergedMesh?: string;
+    /**
+     * #788: a draft, never a finished design: the design engine's last valid run of a pass with no final run.
+     * `reasons` are the printer MCP's own words, shown as given; none from an MCP before engine round 4.
+     */
+    draft?: { reasons?: string[] };
     sizeMm?: number[];
     summary?: string;
     changes?: { tag: string; text: string }[];

@@ -26,6 +26,9 @@ import {
   canMakeFromScan,
   scanLineage,
   plateStatusText,
+  DRAFT_LINE,
+  DRAFT_COLLAPSE_AFTER,
+  draftReasons,
 } from "./domain";
 import { Picture, Stage } from "./Stage";
 import { NEWEST_WAITS, earlierOnStage, designAnswer, designHistory, designDate, designThumbnail, inheritedConversation, sealedLine, showingDesign, viewingLine } from "./designs";
@@ -612,6 +615,7 @@ export function ProjectPage({
             />
             </fieldset>
           )}
+          {shown.current?.draft && <DraftNote draft={shown.current.draft} />}
           {shown.current?.summary && (
             <p className="result-summary">{shown.current.summary}</p>
           )}
@@ -1283,5 +1287,28 @@ function ProjectSettings({
         </div>
       )}
     </Modal>
+  );
+}
+
+/** #788: a design that isn't finished: the plain line, then the printer MCP's reasons word for word (two, then Show all). */
+function DraftNote({ draft }: { draft: { reasons?: string[] } }) {
+  const [expanded, setExpanded] = useState(false);
+  const all = draftReasons(draft, true), shown = draftReasons(draft, expanded);
+  return (
+    <section className="notice draft-design" data-testid="draft-design">
+      <strong>{DRAFT_LINE}</strong>
+      {shown.length > 0 && (
+        <ul>
+          {shown.map((reason, i) => (
+            <li key={i}>{reason}</li>
+          ))}
+        </ul>
+      )}
+      {all.length > DRAFT_COLLAPSE_AFTER && (
+        <button type="button" onClick={() => setExpanded(!expanded)}>
+          {expanded ? "Show fewer" : `Show all ${all.length}`}
+        </button>
+      )}
+    </section>
   );
 }
