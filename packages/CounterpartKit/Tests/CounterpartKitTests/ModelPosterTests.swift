@@ -252,5 +252,152 @@ final class ModelPosterTests: XCTestCase {
         let cached = await cache.load(key: "model") { XCTFail("Old completion evicted the new window's model"); return nil }
         XCTAssertEqual(cached?.name, "reopened")
     }
+
+    // MARK: A third model waits for a slot (#805, review SF4)
+
+    @MainActor private static func rows(_ trace: MediaTrace) throws -> [[String: String]] {
+        guard let text = try? String(contentsOf: trace.url, encoding: .utf8) else { return [] }
+        return try text.split(separator: "\n").map { try JSONSerialization.jsonObject(with: Data($0.utf8)) as! [String: String] }
+    }
+
+    /// A printed project's page asks for the part, the scan and the two together at once. With the first two still
+    /// loading, the third used to resolve nil at once (`<label>.busy`) and show as failed; it waits for a slot instead.
+    @MainActor func testThirdDistinctKeyWaitsForASlotAndEndsLoadedNeverFailed() async throws {
+        for label in ["mesh", "poster"] {
+            let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            defer { try? FileManager.default.removeItem(at: folder) }
+            let trace = MediaTrace(url: folder.appendingPathComponent("media-trace.ndjson"))
+            let work = MediaWork<Int>(label: label)
+            var part: CheckedContinuation<Int?, Never>?, scan: CheckedContinuation<Int?, Never>?
+            var togetherStarted = false
+            let first = Task { await work.run(key: "part") { await withCheckedContinuation { part = $0 } } }
+            let second = Task { await work.run(key: "scan") { await withCheckedContinuation { scan = $0 } } }
+            await Self.waitUntil { part != nil && scan != nil }
+            let third = Task {
+                await MediaTrace.$destination.withValue(trace) {
+                    await work.run(key: "together") { togetherStarted = true; return 3 }
+                }
+            }
+            await Self.waitUntil { work.queuedCount == 1 }
+            XCTAssertFalse(togetherStarted, "\(label): two keys in flight is still the limit")
+            part?.resume(returning: 1)
+            let together = await third.value
+            XCTAssertEqual(together, 3, "\(label): the third model loads once a slot frees, never nil for being busy")
+            let firstValue = await first.value
+            XCTAssertEqual(firstValue, 1)
+            scan?.resume(returning: 2)
+            let secondValue = await second.value
+            XCTAssertEqual(secondValue, 2)
+            let events = try Self.rows(trace).compactMap { $0["event"] }
+            XCTAssertTrue(events.contains("\(label).queued"), "\(label): \(events)")
+            XCTAssertTrue(events.contains("\(label).dequeued"), "\(label): \(events)")
+            XCTAssertFalse(events.contains("\(label).busy"), "\(label): \(events)")
+            XCTAssertEqual(work.queuedCount, 0)
+        }
+    }
+
+    /// The same through the stage's cache: part, scan and together, the first two held.
+    @MainActor func testEntityCacheThirdModelLoadsAfterTheFirstTwoInsteadOfFailing() async {
+        let cache = ModelEntityCache(limit: 3)
+        var part: CheckedContinuation<Entity?, Never>?, scan: CheckedContinuation<Entity?, Never>?
+        let first = Task { await cache.load(key: "part") { await withCheckedContinuation { part = $0 } } }
+        let second = Task { await cache.load(key: "scan") { await withCheckedContinuation { scan = $0 } } }
+        await Self.waitUntil { part != nil && scan != nil }
+        let third = Task { await cache.load(key: "together") { let e = Self.box(); e.name = "together"; return e } }
+        await Self.waitUntil { cache.queuedLoads == 1 }
+        scan?.resume(returning: Self.box())
+        let together = await third.value
+        XCTAssertEqual(together?.name, "together", "The third model must end loaded, never failed")
+        part?.resume(returning: Self.box())
+        let partValue = await first.value, scanValue = await second.value
+        XCTAssertNotNil(partValue); XCTAssertNotNil(scanValue)
+    }
+
+    /// A page closed while its model waits: the waiter leaves the queue and resolves nil at once, its operation never
+    /// runs, and the next waiter still gets the slot.
+    @MainActor func testCancelledQueuedWaiterLeavesTheQueueResolvesNilAndNeverRuns() async {
+        let work = MediaWork<Int>(label: "mesh", limit: 1)
+        var held: CheckedContinuation<Int?, Never>?
+        var cancelledRan = false, nextRan = false
+        let owner = Task { await work.run(key: "held") { await withCheckedContinuation { held = $0 } } }
+        await Self.waitUntil { held != nil }
+        let closed = Task { await work.run(key: "closed") { cancelledRan = true; return 1 } }
+        let next = Task { await work.run(key: "next") { nextRan = true; return 2 } }
+        await Self.waitUntil { work.queuedCount == 2 }
+        closed.cancel()
+        let closedValue = await closed.value
+        XCTAssertNil(closedValue, "A cancelled waiter resolves nil without waiting for the slot")
+        await Self.waitUntil { work.queuedCount == 1 }
+        XCTAssertFalse(nextRan)
+        held?.resume(returning: 0)
+        let ownerValue = await owner.value, nextValue = await next.value
+        XCTAssertEqual(ownerValue, 0)
+        XCTAssertEqual(nextValue, 2)
+        XCTAssertTrue(nextRan)
+        XCTAssertFalse(cancelledRan, "A cancelled waiter's operation must never start")
+    }
+
+    /// The 20 s deadline is per operation: it starts when the operation runs, not while it waits for a slot. A real
+    /// timeout still fails.
+    @MainActor func testQueuedDeadlineStartsWhenTheOperationRunsNotWhileItWaits() async {
+        let timeout = Duration.milliseconds(400)
+        let work = MediaWork<Int>(label: "mesh", limit: 1, timeout: timeout)
+        var hung: CheckedContinuation<Int?, Never>?, queued: CheckedContinuation<Int?, Never>?
+        let enqueued = ContinuousClock.now
+        let stuck = Task { await work.run(key: "stuck") { await withCheckedContinuation { hung = $0 } } }
+        await Self.waitUntil { hung != nil }
+        let waiting = Task { await work.run(key: "waiting") { await withCheckedContinuation { queued = $0 } } }
+        await Self.waitUntil { work.queuedCount == 1 }
+        // The stuck operation times out at T and frees the slot; the waiter runs then.
+        let stuckValue = await stuck.value
+        XCTAssertNil(stuckValue, "A real timeout still fails")
+        await Self.waitUntil { queued != nil }
+        // 1.5 T after it queued: past a deadline counted from the queue, inside one counted from the run.
+        try? await Task.sleep(until: enqueued.advanced(by: timeout * 1.5), clock: .continuous)
+        queued?.resume(returning: 7)
+        let value = await waiting.value
+        XCTAssertEqual(value, 7, "The queued operation's deadline must start when it runs")
+        hung?.resume(returning: 0)
+    }
+
+    /// Cancel, a freed slot, a scene deferral and a late cancel all race: every waiter resolves exactly once (a second
+    /// resume of a checked continuation traps), one key runs once, and nothing queued starts after a deferral.
+    @MainActor func testQueuedWaitersResolveExactlyOnceAcrossCancelReleaseAndDeferral() async {
+        let work = MediaWork<Int>(label: "poster", limit: 1)
+        var held: CheckedContinuation<Int?, Never>?
+        var starts: [String: Int] = [:]
+        let owner = Task { await work.run(key: "held") { await withCheckedContinuation { held = $0 } } }
+        await Self.waitUntil { held != nil }
+        let cancelled = Task { await work.run(key: "b") { starts["b", default: 0] += 1; return 1 } }
+        let shared1 = Task { await work.run(key: "c") { starts["c", default: 0] += 1; return 3 } }
+        let shared2 = Task { await work.run(key: "c") { starts["c", default: 0] += 1; return 4 } }
+        await Self.waitUntil { work.queuedCount == 3 }
+        // In one main-actor turn: the demand is cancelled (its cleanup hop comes later) and the slot frees.
+        cancelled.cancel()
+        held?.resume(returning: 0)
+        let ownerValue = await owner.value, cancelledValue = await cancelled.value
+        let firstShared = await shared1.value, secondShared = await shared2.value
+        XCTAssertEqual(ownerValue, 0)
+        XCTAssertNil(cancelledValue)
+        XCTAssertEqual(firstShared, 3); XCTAssertEqual(secondShared, 3, "A queued duplicate key joins the one operation")
+        XCTAssertEqual(starts["c"], 1)
+        XCTAssertNil(starts["b"])
+        // A deferral settles the waiters still queued; a cancel arriving afterwards finds nothing to resume.
+        var late: CheckedContinuation<Int?, Never>?
+        let running = Task { await work.run(key: "running") { await withCheckedContinuation { late = $0 } } }
+        await Self.waitUntil { late != nil }
+        let deferred = Task { await work.run(key: "deferred") { starts["deferred", default: 0] += 1; return 5 } }
+        await Self.waitUntil { work.queuedCount == 1 }
+        work.cancelAll()
+        deferred.cancel()
+        let runningValue = await running.value, deferredValue = await deferred.value
+        XCTAssertNil(runningValue); XCTAssertNil(deferredValue)
+        XCTAssertEqual(work.queuedCount, 0)
+        await Task.yield()
+        XCTAssertNil(starts["deferred"], "Nothing queued starts after the scene deferred it")
+        late?.resume(returning: 9)
+        let after = await work.run(key: "after") { 6 }
+        XCTAssertEqual(after, 6)
+    }
 }
 #endif
