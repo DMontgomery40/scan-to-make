@@ -311,7 +311,15 @@ struct NewObjectView: View {
             }
             #if DEBUG
             // `-CounterpartNewScan walk-around` (scripts/ux_screens.py): New as it looks after a scan, which a simulator can't take.
-            if attached == nil, UserDefaults.standard.string(forKey: "CounterpartNewScan") == "walk-around" { attached = .walkAround }
+            // `stopped-<photos>` (#795): as `savedCapture` attaches a scan stopped at that many photos, without declaring it.
+            if attached == nil, let fake = UserDefaults.standard.string(forKey: "CounterpartNewScan") {
+                if fake == "walk-around" { attached = .walkAround }
+                else if fake.hasPrefix("stopped-"), let photos = Int(fake.dropFirst("stopped-".count)) {
+                    attached = .walkAround
+                    captureWarning = MacConnection.stoppedScanWords(photos: photos)
+                    removableStop = MacConnection.isEnough(stoppedPhotos: photos) ? nil : "debug-stopped-\(photos)"
+                }
+            }
             #endif
             store.refreshStoppedScans()
         }
