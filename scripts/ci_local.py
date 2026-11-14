@@ -100,7 +100,7 @@ def condition(expression, context, failed):
         expression = expression[3:-2].strip()
     if expression == 'failure()': return failed
     if expression == 'success()': return not failed
-    if expression == 'always()': return True
+    if expression in ('always()', '!cancelled()'): return True  # a local run is never cancelled
     match = re.fullmatch(r"(steps\.[\w-]+\.outputs\.[\w-]+)\s*(==|!=)\s*'([^']*)'", expression)
     if not match: raise ValueError('Unsupported step condition: ' + expression)
     if match[1] not in context: raise ValueError('Missing step output: ' + match[1])

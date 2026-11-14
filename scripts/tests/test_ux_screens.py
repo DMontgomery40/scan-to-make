@@ -241,5 +241,41 @@ class UxScreensTests(unittest.TestCase):
         self.assertEqual(device.session, f'ux-screens-iphone-{ux_screens.RUN_ID}')
 
 
+class FoldTests(unittest.TestCase):
+    """A Duo fold whose hinge can't be read back (Xcode 27.2's devicectl) is accepted only when the capture's panel is
+    the pose's size: 466 x 678 points folded, 951 x 669 (or 669 x 951) unfolded."""
+
+    def fold(self, why, pose, size):
+        seen = []
+        def panel_points():
+            seen.append(pose)
+            return size
+        return ux_screens.fold_failure(why, pose, panel_points), seen
+
+    def test_no_hinge_sample_with_the_folded_panel_passes(self):
+        self.assertEqual(self.fold('agent-device fold: fold-hinge-angle-no-sample', 'closed', (466, 678))[0], '')
+
+    def test_no_hinge_sample_with_the_unfolded_panel_passes(self):
+        self.assertEqual(self.fold('fold-hinge-angle-no-sample', 'open', (951, 669))[0], '')
+        self.assertEqual(self.fold('fold-hinge-angle-no-sample', 'open', (669, 951))[0], '')
+
+    def test_unverified_pose_still_passes_the_same_way(self):
+        self.assertEqual(self.fold('fold-pose-dispatched-unverified', 'closed', (466, 678))[0], '')
+
+    def test_no_hinge_sample_with_the_wrong_panel_fails(self):
+        why, _ = self.fold('fold-hinge-angle-no-sample', 'open', (466, 678))
+        self.assertIn('fold open sent, but the capture is (466, 678) points', why)
+        why, _ = self.fold('fold-hinge-angle-no-sample', 'closed', (951, 669))
+        self.assertIn('fold-hinge-angle-no-sample', why)
+
+    def test_no_capture_at_all_fails(self):
+        self.assertIn('None points', self.fold('fold-hinge-angle-no-sample', 'closed', None)[0])
+
+    def test_any_other_fold_error_fails_without_a_capture(self):
+        why, seen = self.fold('agent-device fold: DEVICE_IN_USE', 'closed', (466, 678))
+        self.assertEqual(why, 'agent-device fold: DEVICE_IN_USE')
+        self.assertEqual(seen, [])
+
+
 if __name__ == '__main__':
     unittest.main()

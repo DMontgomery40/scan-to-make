@@ -103,6 +103,28 @@ class LocalWorkflowTests(unittest.TestCase):
         self.assertTrue(ci.condition('failure()',{},True))
         self.assertFalse(ci.condition(None,{},True))
         self.assertTrue(ci.condition("steps.blender-cache.outputs.cache-hit != 'true'",{'steps.blender-cache.outputs.cache-hit':'false'},False))
+        self.assertTrue(ci.condition('${{ !cancelled() }}',{},True))  # a local run is never cancelled
+
+    def test_mobile_runs_ipad_tests_and_release_check_after_a_failed_iphone_test(self):
+        # #805: under `set -e` one failed iPhone test skipped the iPad layout tests and the Release check.
+        app = next(j for j in ci.read_workflows(ROOT, 'mobile') if j['key'] == 'app')['job']
+        tests = next(s for s in app['steps'] if 'test-without-building' in s.get('run', ''))
+        self.assertIn('|| iphone=$?', tests['run']); self.assertIn('|| ipad=$?', tests['run'])
+        self.assertIn('echo "iPhone unit and UI tests: exit $iphone"', tests['run'])
+        self.assertIn('echo "iPad layout tests: exit $ipad"', tests['run'])
+        release = next(s for s in app['steps'] if s.get('name', '').startswith('Unsigned iPhoneOS Release build'))
+        self.assertTrue(ci.condition(release.get('if'), {}, True))
+        for step in app['steps']: ci.condition(step.get('if'), {}, False)  # every condition is one ci_local can read
+
+    def test_a_step_that_runs_unless_cancelled_runs_after_a_failure_and_the_job_still_fails(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder).resolve()
+            job={'workflow':'fixture','key':'test','matrix':{},'env':{},'defaults':{},'job':{'runs-on':'ubuntu-latest','steps':[
+                {'run':'exit 3'}, {'run':'touch skipped'}, {'if':'${{ !cancelled() }}','run':'touch release-ran'}]}}
+            result=ci.execute_job(job,root,root/'logs')
+            self.assertEqual([r['status'] for r in result['steps']],['FAIL','SKIP','PASS'])
+            self.assertEqual(result['status'],'FAIL')
+            self.assertTrue((root/'release-ran').exists()); self.assertFalse((root/'skipped').exists())
 
     def test_steps_keep_environment_cwd_failure_handler_and_pipefail(self):
         with tempfile.TemporaryDirectory() as folder:
