@@ -224,6 +224,8 @@ export async function readDiagnostics(session: PrinterSession, maxBytes: number,
   const catalog = await session.connect(options.signal ? {signal: options.signal} : {});
   const server = {name: catalog.server.name, version: catalog.server.version};
   const info = await readPrinterInfo(session, options);
+  // The tool is there but its printer info didn't parse: say that, not "too old".
+  if (!info && session.hasTool('counterpart_diagnostics')) throw new Error("its printer info couldn't be read");
   if (info?.capabilities.diagnostics !== true || !session.hasTool('counterpart_diagnostics')) return {server, unsupported: true};
   const result = await session.call('counterpart_diagnostics', {max_bytes: maxBytes}, {timeoutMs: 20000, largeResult: true, ...options});
   const parsed = counterpartDiagnosticsSchema.safeParse(toolResultJson(result));

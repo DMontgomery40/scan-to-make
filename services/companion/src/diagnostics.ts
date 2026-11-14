@@ -62,6 +62,8 @@ export interface SoftwarePackage {
 const SECRET_WORD = String.raw`(?:password|passwd|passcode|pwd|secret|token|api[_-]?key|apikey|access[_-]?code|accesscode|access[_-]?key|authorization|auth(?:[_-]?key)?(?![a-z])|cookie|credential|private[_-]?key|signature|ticket|login|email|user[_-]?info)`;
 const SECRET_KEY = String.raw`[A-Za-z0-9_.-]*${SECRET_WORD}[A-Za-z0-9_.-]*`;
 const SECRET_NAME = new RegExp(SECRET_WORD, 'i');
+/** Values that are already safe after a secret's name: a "[set]" or "[redacted…]" marker, an empty string, true/false/null. */
+const SAFE = String.raw`(?!"(?:\[set\]|\[redacted[^"]*\])?"|\[set\]|\[redacted|true\b|false\b|null\b|"")`;
 const RULES: [RegExp, string][] = [
   // PEM private keys, whole.
   [/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g, '[redacted private key]'],
@@ -70,9 +72,11 @@ const RULES: [RegExp, string][] = [
   // Escaped JSON inside a string: \"accessCode\":\"1234\".
   [new RegExp(String.raw`(\\"${SECRET_KEY}\\"\s*:\s*)\\"(?:[^"\\]|\\[^"])*\\"`, 'gi'), '$1\\"[redacted]\\"'],
   // JSON: "accessCode": "1234" (a number or bare word too).
-  [new RegExp(String.raw`("${SECRET_KEY}"\s*:\s*)(?:"(?:[^"\\]|\\.)*"|[^\s,}\]]+)`, 'gi'), '$1"[redacted]"'],
+  // A value that is already safe stays: "[set]", "" and true/false/null say whether a secret is configured.
+  [new RegExp(String.raw`("${SECRET_KEY}"\s*:\s*)${SAFE}(?:"(?:[^"\\]|\\.)*"|[^\s,}\]]+)`, 'gi'), '$1"[redacted]"'],
   // key=value, key: value, ?key=value&, --key value.
-  [new RegExp(String.raw`(\b${SECRET_KEY}\s*[=:]\s*|--${SECRET_KEY}\s+)(?:"[^"\n]*"|'[^'\n]*'|[^\s,;&}\]"']+)`, 'gi'), '$1[redacted]'],
+  // (On one line: `KEY=` with nothing after it is empty, never the next line's first word.)
+  [new RegExp(String.raw`(\b${SECRET_KEY}[ \t]*[=:][ \t]*|--${SECRET_KEY}[ \t]+)${SAFE}(?:"[^"\n]*"|'[^'\n]*'|[^\s,;&}\]"']+)`, 'gi'), '$1[redacted]'],
   // Authorization schemes.
   [/\b(Bearer|Basic|Digest|Token)\s+[A-Za-z0-9._~+/=-]{6,}/g, '$1 [redacted]'],
   // Cookie headers, whole line.

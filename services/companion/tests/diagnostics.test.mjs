@@ -169,6 +169,25 @@ test('an MCP file name that could leave its folder is left out with a note', asy
   assert.equal(bundle.notes.filter(note => note.includes('named a file this export can\'t use')).length, 2);
 });
 
+test('safe markers stay: [set], empty values and whether a credential is set (a "won\'t connect" report needs them)', () => {
+  const settings = '{\n  "BAMBU_ACCESS_CODE": "[set]",\n  "BAMBU_TOKEN": "",\n  "accessCodeSet": true,\n  "password": null\n}\nLAN_PASSWORD=\nNEXT_LINE=kept';
+  assert.equal(redact(settings), settings);
+  assert.ok(!redact('"BAMBU_ACCESS_CODE": "12345678"').includes('12345678'), 'an all-digit access code still goes');
+  assert.ok(!redact('"accessCode": 12345678').includes('12345678'));
+});
+
+test('an MCP that lists counterpart_diagnostics but whose printer info can\'t be read is not called too old', async t => {
+  const {eventsPath} = await fixture(t, '');
+  const odd = session('p1s', {diagnostics: true, bundle: {}});
+  const tools = odd.session;
+  // Its printer info answers something this version can't read.
+  const original = tools.call.bind(tools);
+  tools.call = async (name, args, options) => name === 'counterpart_printer_info' ? {content: [{type: 'text', text: '{"contract":"counterpart/1"}'}]} : original(name, args, options);
+  const bundle = await diagnosticsBundle({eventsPath, sessions: () => [{destinationId: 'p1s', printer: 'P1S', session: odd.session}]});
+  assert.ok(!bundle.notes.some(note => note.includes('too old')), bundle.notes.join('\n'));
+  assert.ok(bundle.notes.some(note => note.includes('printer info couldn\'t be read')), bundle.notes.join('\n'));
+});
+
 test('tail starts at a whole line', () => {
   assert.deepEqual(tail('aaa\nbbb\nccc\n', 6), {content: 'ccc\n', truncated: true});
   assert.deepEqual(tail('short', 100), {content: 'short', truncated: false});

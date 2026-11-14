@@ -42,6 +42,22 @@ enum Diagnostics {
         return out
     }
 
+    /// The companion's part arrives redacted (#799): only value-shaped secrets are removed again (URL credentials, bearer
+    /// tokens, a pairing link, email addresses), so its JSON stays JSON and its words and `[set]` markers stay.
+    static func redact(companion text: String) -> String {
+        var out = stripURLCredentials(text)
+        let rules: [(String, String)] = [
+            (#"(?i)(bearer\s+)[A-Za-z0-9._~+/=-]+"#, "$1<removed>"),
+            (#"scantomake://pair\?[^\s"]+"#, "scantomake://pair?<removed>"),
+            (#"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}"#, "<removed email>"),
+        ]
+        for (pattern, template) in rules {
+            let regex = try! NSRegularExpression(pattern: pattern)
+            out = regex.stringByReplacingMatches(in: out, range: NSRange(out.startIndex..., in: out), withTemplate: template)
+        }
+        return out
+    }
+
     static func redact(json value: Any) -> Any {
         if let object = value as? [String: Any] {
             return object.reduce(into:[String: Any]()) { result, pair in
@@ -93,16 +109,16 @@ enum Diagnostics {
                 }
                 var notes = unanswered.map { [$0] } ?? []
                 if let answered {
-                    // The companion already redacted it; the app's own redaction runs again over every file.
+                    // The companion already redacted it; the value-shaped rules run again over every file (`redact(companion:)`).
                     let root = folder.appendingPathComponent("companion", isDirectory:true)
                     for file in answered.files {
                         guard let name = safeRelativePath(file.name) else { notes.append("The companion named a file this export can’t use; it was left out."); continue }
                         let url = root.appendingPathComponent(name)
                         try fm.createDirectory(at:url.deletingLastPathComponent(), withIntermediateDirectories:true)
-                        try redact(log:file.content).write(to:url, atomically:true, encoding:.utf8)
+                        try redact(companion:file.content).write(to:url, atomically:true, encoding:.utf8)
                         if file.truncated { notes.append("companion/\(name) holds only its newest part.") }
                     }
-                    notes += answered.notes.map(redact(log:))
+                    notes += answered.notes.map(redact(companion:))
                 }
                 let notesText = notes.isEmpty ? "Everything answered.\n" : notes.map { "- \($0)" }.joined(separator:"\n") + "\n"
                 try notesText.write(to:folder.appendingPathComponent("notes.txt"), atomically:true, encoding:.utf8)

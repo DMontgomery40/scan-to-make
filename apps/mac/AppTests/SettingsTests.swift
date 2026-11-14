@@ -88,8 +88,9 @@ final class DiagnosticsTests: XCTestCase {
         let zip = fm.temporaryDirectory.appendingPathComponent("diag-\(UUID().uuidString).zip")
         defer { try? fm.removeItem(at:zip) }
         let part = CompanionDiagnostics(files:[
-            .init(name:"events-tail.ndjson", content:"{\"seq\":1,\"token\":\"synthetic-event-token\"}\n", truncated:true),
-            .init(name:"mcp/P1S-bambu-printer-mcp/fulu/control-trace.log", content:"serial=01P00A123456789 accessCode: 31415926\n", truncated:false),
+            // As the companion sends it (already redacted); the Mac still removes value-shaped secrets it missed.
+            .init(name:"events-tail.ndjson", content:"{\"seq\":1,\"token\":\"[redacted]\",\"by\":\"owner@example.com\"}\n", truncated:true),
+            .init(name:"mcp/P1S-bambu-printer-mcp/fulu/control-trace.log", content:"serial=01P00A123456789 Authorization: Bearer synthetic-event-token mqtts://bblp:31415926@192.0.2.7\n", truncated:false),
             .init(name:"../escape.txt", content:"outside", truncated:false),
         ], notes:["mcp-3D-printer-server 1.2.26 is too old to add its own diagnostics; update it in Settings → Printers."])
         let ok = await Diagnostics.export(state:state, to:zip) { part }
@@ -107,7 +108,18 @@ final class DiagnosticsTests: XCTestCase {
         XCTAssertTrue(notes.contains("companion/events-tail.ndjson holds only its newest part."))
         XCTAssertTrue(try XCTUnwrap(files[root + "about.txt"]).contains("(build "), "the build number, not only 2.0")
         let all = files.values.joined(separator:"\n")
-        for secret in ["synthetic-mac-secret", "synthetic-event-token", "31415926", "tester@example.com"] { XCTAssertFalse(all.contains(secret), secret) }
+        for secret in ["synthetic-mac-secret", "synthetic-event-token", "31415926", "tester@example.com", "owner@example.com"] { XCTAssertFalse(all.contains(secret), secret) }
+    }
+
+    /// The companion's part arrives redacted: the Mac removes only value-shaped secrets again, so its JSON stays JSON
+    /// and its words and `[set]` markers stay (#799 review).
+    func testTheCompanionPartKeepsItsShape() {
+        let event = "{\"seq\":1,\"passIndex\":2,\"words\":\"Failed to authenticate: Claude login\",\"BAMBU_ACCESS_CODE\": \"[set]\"}"
+        XCTAssertEqual(Diagnostics.redact(companion:event), event)
+        let leaky = "connect http://bblp:pw@192.0.2.7 Authorization: Bearer abc.def-ghi by tester@example.com scantomake://pair?c=secret"
+        let clean = Diagnostics.redact(companion:leaky)
+        for secret in ["pw@", "abc.def-ghi", "tester@example.com", "c=secret"] { XCTAssertFalse(clean.contains(secret), secret) }
+        XCTAssertTrue(clean.contains("192.0.2.7"))
     }
 
     func testExportStillSucceedsWhenTheCompanionDoesNotAnswer() async throws {
