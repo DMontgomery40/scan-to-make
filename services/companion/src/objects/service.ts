@@ -183,7 +183,11 @@ function photoName(path: string, taken: string[]): string {
 }
 /** Making something from a scan whose phone hasn't finished sending it (its preview came, its photos are still to come). */
 const SCAN_STILL_ARRIVING = 'This scan is still arriving from the phone that recorded it. Finish sending it from that phone, then make something from it.';
-const CAPTURE_PENDING = 'The capture is still missing camera or depth files, or its completed file list. Resume sending it from the phone that recorded it.';
+/** A start on a draft whose declared scan hasn't begun to arrive (#791): the scan is on the phone, not lost. */
+export function scanStillOnPhone(photos: number): string {
+  return `Your scan is still on the phone that took it (${photos} photo${photos === 1 ? '' : 's'}). Send it from that phone; its project there has Send to your Mac.`;
+}
+const CAPTURE_PENDING ='The capture is still missing camera or depth files, or its completed file list. Resume sending it from the phone that recorded it.';
 /** The design's Linux gate: an iPhone's Object Capture scan is rebuilt only by a Mac (PhotogrammetrySession). */
 export const SCANS_NEED_A_MAC = 'Scans from iPhone are rebuilt on a Mac. Pair this iPhone with a Mac to use Scan it.';
 /** A scan sent without a request, on a computer that can't keep it as a model: it is never touched up without asking. */
@@ -1633,8 +1637,11 @@ export class ObjectService {
       void this.#gate(id, () => this.#bringScan(id)).catch(() => undefined);
       return waiting;
     }
-    // A declared walk-around starts only with its own manifest, once every image is here.
-    if (captureManifest === undefined && object.captureDeclared) throw new InvalidStateError(CAPTURE_PENDING);
+    // A declared walk-around starts only with its own manifest, once every image is here. None of it here yet: the
+    // scan is still on the phone, so say that rather than asking to resume a send (#791).
+    if (captureManifest === undefined && object.captureDeclared) {
+      throw new InvalidStateError((object.capture ?? []).length === 0 ? scanStillOnPhone(object.captureDeclared.images.length) : CAPTURE_PENDING);
+    }
     if (captureManifest !== undefined) {
       const manifest = parseCaptureManifest(captureManifest);
       if (manifest.source === 'object-capture' && !this.objectCaptureImages) throw new InvalidStateError(SCANS_NEED_A_MAC);

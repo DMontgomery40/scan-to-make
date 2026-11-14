@@ -35,6 +35,8 @@ struct NewObjectView: View {
     @State private var measuredMiddle = ""
     @State private var measuredShortest = ""
     @State private var captureWarning: String?
+    /// A stopped scan with too few photos to send by itself, attached here: Remove takes it off (review of #795).
+    @State private var removableStop: String?
     /// One of the finished scan's own frames, shown beside its question.
     @State private var scanPicture: URL?
     @FocusState private var describing: Bool
@@ -377,6 +379,14 @@ struct NewObjectView: View {
                 if picked != nil {
                     Button("Remove") { picked = nil; scanUse = nil }.font(.subheadline)
                         .disabled(working != nil).accessibilityIdentifier("scan-use-remove")
+                } else if let run = removableStop {
+                    // A few stray photos from a stopped scan: take them off and the project designs from the words.
+                    Button("Remove") {
+                        MacConnection.removeStoppedScan(run: run)
+                        removableStop = nil; attached = nil; captureWarning = nil; scanUse = nil
+                        store.refreshStoppedScans()
+                    }
+                    .font(.subheadline).disabled(working != nil).accessibilityIdentifier("scan-use-remove")
                 }
             }
             ScanUseRow(symbol: "doc.on.doc", title: ScanLineage.copyChoice,
@@ -637,13 +647,35 @@ struct NewObjectView: View {
         store.beginUpload(object.id) { try await mac.uploadProject(object.id) }
     }
 
-    private func savedCapture(_ id: String) async -> Attached? {
+    /// The scan this draft holds on the phone. A scan stopped after it kept photos is attached like a finished one
+    /// and says how many it kept (#791): David stopped a 68-photo scan whose Done never enabled, came back to an
+    /// empty draft, and Send started the project from his words alone.
+    /// `includingStopped: false` when Scan is pressed again: a stopped scan is the one you may want to redo, so a new
+    /// capture opens (its run is newer, so it is the one kept); a finished scan is still just attached.
+    private func savedCapture(_ id: String, includingStopped: Bool = true) async -> Attached? {
         if HandheldCapture.finished(id) { return .inHand }
-        if await store.mac.finishedScan(id) != nil {
+        switch store.mac.keptScan(id) {
+        case .finished:
             captureWarning = store.mac.localScanWarning(id)
+            removableStop = nil
             return .walkAround
+        case .stopped(let run, let photos) where includingStopped:
+            captureWarning = MacConnection.stoppedScanWords(photos: photos)
+            removableStop = MacConnection.isEnough(stoppedPhotos: photos) ? nil : run
+            return .walkAround
+        case .stopped, nil:
+            return nil
         }
-        return nil
+    }
+
+    /// A stopped scan with enough photos is named to the Mac at once (its photos follow on Send): the Mac then starts
+    /// this project only with them, from any client, and says the scan is still on the phone until they come. Scan
+    /// again names the new run's photos instead. One with fewer is named on Send, so Remove can still take it off.
+    private func declareStoppedScan(_ object: Project) {
+        let kept = store.mac.keptScan(object.id)
+        guard MacConnection.declaresAtOnce(kept), case .stopped(let run, _)? = kept else { return }
+        let mac = store.mac
+        Task { try? await mac.declareKeptScan(object.id, run: run) }
     }
 
     /// Scans for this draft and comes back here with the scan attached; Send sends it with the rest.
@@ -652,7 +684,7 @@ struct NewObjectView: View {
         await run("scan") {
             let object = try await object(scanning: true)
             guard object.state == .new else { started(object); return }
-            if let saved = await savedCapture(object.id) { attached = saved; useJobDefault(); store.refreshStoppedScans(); return }
+            if let saved = await savedCapture(object.id, includingStopped: false) { attached = saved; useJobDefault(); store.refreshStoppedScans(); return }
             guard object.scan == nil, (object.capture ?? []).isEmpty else {
                 throw CompanionError(code: "missing-capture", message: "This project's saved scan is no longer on this phone. Start a new project to scan it again.")
             }
@@ -664,8 +696,9 @@ struct NewObjectView: View {
                 beginUpload(object)
             } else if let saved = await savedCapture(object.id) {
                 // "Keep for later" in the capture still comes back here with the scan attached, not to a
-                // project page that can only offer Scan again.
+                // project page that can only offer Scan again. So does Stop, once the scan kept photos (#791).
                 attached = saved
+                declareStoppedScan(object)
             }
             if attached != nil { useJobDefault(); store.refreshStoppedScans() }
         }

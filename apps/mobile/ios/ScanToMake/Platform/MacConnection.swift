@@ -98,8 +98,13 @@ typealias MacError = CompanionError
         if HandheldCapture.finished(id) {
             try await sendChosen(id, chosen)
             sent = try await sendHandheld(id)
-        } else if let run = await finishedScan(id) {
-            let manifest = try await sendCapture(id, run: run)
+        } else if let kept = keptScan(id) {
+            // A stopped scan goes like a finished one, as its photos (#791): Send never leaves it on the phone.
+            let manifest: [String: Any]?
+            switch kept {
+            case .finished(let run): manifest = try await sendCapture(id, run: run)
+            case .stopped(let run, _): manifest = try await sendStoppedCapture(id, run: run)
+            }
             try await sendChosen(id, chosen)
             sent = try await start(id, captureManifest: manifest)
         } else {
@@ -113,8 +118,20 @@ typealias MacError = CompanionError
     /// Sends a finished scan's own files without starting the project, so choosing Copy or Fit doesn't
     /// wait for the largest transfer. Chosen photos stay for Send, so their thumbnails stay put here.
     func uploadProject(_ id: String) async throws {
-        if HandheldCapture.finished(id) { _ = try await uploadHandheld(id) }
-        else if let run = await finishedScan(id) { _ = try await sendCapture(id, run: run) }
+        if HandheldCapture.finished(id) { _ = try await uploadHandheld(id); return }
+        switch keptScan(id) {
+        case .finished(let run): _ = try await sendCapture(id, run: run)
+        case .stopped(let run, _): _ = try await sendStoppedCapture(id, run: run)
+        case nil: break
+        }
+    }
+
+    /// A stopped scan's photos alone, declared before any is sent: only a Mac that rebuilds from photos takes them.
+    private func sendStoppedCapture(_ id: String, run: String) async throws -> [String: Any] {
+        guard let manifest = try await sendCapture(id, run: run, modelRequired: false) else {
+            throw MacError(code: "needs-update", message: "Update Counterpart on your Mac to rebuild a scan from its photos.")
+        }
+        return manifest
     }
 
     /// The photos chosen for a project still being sent, kept beside them in the cache.
@@ -264,6 +281,7 @@ typealias MacError = CompanionError
         let drafts = (try? NativeCaptureCoordinator.shared.drafts()) ?? []
         let active = NativeCaptureCoordinator.status()["activeRunID"] as? String
         var newest: [String: StoppedScan?] = [:]
+        let removed = Self.removedStoppedScans
         // Newest first (the store sorts by creation time).
         for draft in drafts {
             guard let run = draft["runID"] as? String, UUID(uuidString: run) != nil, run == run.lowercased(), run != active,
@@ -271,12 +289,78 @@ typealias MacError = CompanionError
                   let status = draft["status"] as? String else { continue }
             let folder = URL.documentsDirectory.appending(path: "NativeCaptures/\(run)", directoryHint: .isDirectory)
             let stopped = ["stopped", "failed", "interrupted"].contains(status)
+            if stopped && removed.contains(run) { continue }
             let photos = stopped ? Self.imageNames(in: folder.appending(path: "Images", directoryHint: .isDirectory)).count : 0
             if stopped && photos == 0 { continue }
             guard newest[project] == nil else { continue }
             newest[project] = stopped ? StoppedScan(run: run, photos: photos) : .some(nil)
         }
         return newest.compactMapValues { $0 }
+    }
+
+    /// The scan on this phone that a project sends: its newest run that kept something, a finished one or one stopped
+    /// after it kept photos (#791: David stopped a 68-photo scan whose Done never enabled, and Send went without it).
+    enum KeptScan: Equatable { case finished(run: String), stopped(run: String, photos: Int) }
+
+    /// `drafts` newest first, as the capture store lists them; `photos` counts a run's kept images.
+    /// `removed`: stopped runs taken off their project with Remove; they stay on the phone and are never sent.
+    static func keptScan(for project: String, drafts: [[String: Any]], active: String?, removed: Set<String> = [],
+                         photos: (String) -> Int) -> KeptScan? {
+        for draft in drafts {
+            guard let run = draft["runID"] as? String, UUID(uuidString: run) != nil, run == run.lowercased(), run != active,
+                  (draft["origin"] as? [String: Any])?["projectId"] as? String == project,
+                  let status = draft["status"] as? String else { continue }
+            if status == "ready" { return .finished(run: run) }
+            guard ["stopped", "failed", "interrupted"].contains(status), !removed.contains(run) else { continue }
+            let kept = photos(run)
+            if kept > 0 { return .stopped(run: run, photos: kept) }
+        }
+        return nil
+    }
+
+    func keptScan(_ id: String) -> KeptScan? {
+        let drafts = (try? NativeCaptureCoordinator.shared.drafts()) ?? []
+        let active = NativeCaptureCoordinator.status()["activeRunID"] as? String
+        return Self.keptScan(for: id, drafts: drafts, active: active, removed: Self.removedStoppedScans) { run in
+            Self.imageNames(in: URL.documentsDirectory.appending(path: "NativeCaptures/\(run)/Images", directoryHint: .isDirectory)).count
+        }
+    }
+
+    /// Stopped runs taken off their project on New with Remove (review of #795): a stray few photos never lock a draft
+    /// or go with its Send. Kept on the phone; nothing deletes a capture.
+    static var removedStoppedScans: Set<String> { Set(UserDefaults.standard.stringArray(forKey: removedStoppedKey) ?? []) }
+    static func removeStoppedScan(run: String) {
+        UserDefaults.standard.set((removedStoppedScans.union([run])).sorted(), forKey: removedStoppedKey)
+    }
+    private static let removedStoppedKey = "CounterpartRemovedStoppedScans"
+
+    /// Whether a kept scan is named to the Mac as soon as it's attached: a stopped one with enough photos. One with
+    /// fewer waits for Send, so Remove can still take it off and the project designs from the words (review of #795).
+    static func declaresAtOnce(_ kept: KeptScan?) -> Bool {
+        if case .stopped(_, let photos)? = kept { return isEnough(stoppedPhotos: photos) }
+        return false
+    }
+
+    /// The photos of the run a capture just stopped, comparing the project's kept scan before and after it: nil when
+    /// that run kept none, so an older stopped run is never sent again in its place (review of #795).
+    static func justStopped(before: KeptScan?, after: KeptScan?) -> Int? {
+        guard case .stopped(let run, let photos)? = after else { return nil }
+        if case .stopped(let earlier, _)? = before, earlier == run { return nil }
+        return photos
+    }
+
+    /// Whether a send cut short (Send was pressed, `sendRequested`) has a scan on this phone to finish with: an in-hand
+    /// capture, or a kept walk-around scan, finished or stopped after it kept photos (#791, review of #795).
+    static func resumesSend(handheldFinished: Bool, kept: KeptScan?) -> Bool { handheldFinished || kept != nil }
+
+    /// A stopped scan with this many photos is sent as it is, like a finished one; fewer are still offered, with a
+    /// warning, and the Mac says plainly if it can't build from them.
+    static func isEnough(stoppedPhotos photos: Int) -> Bool { photos >= 20 }
+
+    static func stoppedScanWords(photos: Int) -> String {
+        let kept = "The scan stopped at \(photos) photo\(photos == 1 ? "" : "s")."
+        return isEnough(stoppedPhotos: photos) ? "\(kept) Your Mac builds the model from them."
+            : "\(kept) That may be too few: your Mac will try, or scan it again."
     }
 
     private static func imageNames(in images: URL) -> [String] {
@@ -286,11 +370,22 @@ typealias MacError = CompanionError
     }
 
     /// Sends a stopped scan's photos as they are; the Mac rebuilds from what's there and says plainly if it's too few.
+    /// Names a kept scan's photos to the Mac without sending any (#791), the same list `sendCapture` declares, so the
+    /// Mac starts the project only with them. Nothing on a Mac that can't rebuild from photos.
+    func declareKeptScan(_ id: String, run: String) async throws {
+        guard UUID(uuidString: run) != nil, run == run.lowercased() else { return }
+        let images = URL.documentsDirectory.appending(path: "NativeCaptures/\(run)/Images", directoryHint: .isDirectory)
+        let frames = try ProjectUploader.captureFrames((try? FileManager.default.contentsOfDirectory(atPath: images.path)) ?? [])
+        guard !frames.isEmpty, try await client.capabilities().contains("objectCaptureImages") else { return }
+        _ = try await client.declareCapture(id, manifest: Self.captureManifest(frames.map(\.name)))
+    }
+
+    static func captureManifest(_ images: [String]) -> [String: Any] {
+        ["version": 1, "images": images, "depthRequired": false, "source": "object-capture"]
+    }
+
     func sendStoppedScan(_ id: String, run: String) async throws -> StmObject {
-        guard let manifest = try await sendCapture(id, run: run, modelRequired: false) else {
-            throw MacError(code: "needs-update", message: "Update Counterpart on your Mac to rebuild a scan from its photos.")
-        }
-        return try await start(id, captureManifest: manifest)
+        try await start(id, captureManifest: try await sendStoppedCapture(id, run: run))
     }
 
     func sendScan(_ id: String, run: String) async throws -> StmObject {
@@ -343,7 +438,7 @@ typealias MacError = CompanionError
             return nil
         }
         let frames = try ProjectUploader.captureFrames(((try? FileManager.default.contentsOfDirectory(atPath: images.path)) ?? []))
-        let manifest: [String: Any] = ["version": 1, "images": frames.map(\.name), "depthRequired": false, "source": "object-capture"]
+        let manifest = Self.captureManifest(frames.map(\.name))
         // Every image is named before any is sent: no client can start the Mac on part of them.
         _ = try await client.declareCapture(id, manifest: manifest)
         // Then the images: the Mac takes capture frames only until a scan is there.

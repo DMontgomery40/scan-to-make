@@ -157,8 +157,10 @@ struct ProjectView: View {
     private func resumeSavedCapture() async {
         guard !resumed, !away, let object, object.state == .new, !store.sending.contains(object.id), MacConnection.sendRequested(object.id) else { return }
         resumed = true
-        let saved = HandheldCapture.finished(object.id) ? true : await store.mac.finishedScan(object.id) != nil
-        if saved { act { try await finishSending(object) } }
+        // A stopped scan's send resumes too (#791): Send sent it as its photos, so a send cut short finishes the same way.
+        if MacConnection.resumesSend(handheldFinished: HandheldCapture.finished(object.id), kept: store.mac.keptScan(object.id)) {
+            act { try await finishSending(object) }
+        }
     }
 
     private func finishSending(_ object: Project) async throws -> Project? {
@@ -172,7 +174,17 @@ struct ProjectView: View {
             throw CompanionError(code: "missing-capture", message: "This project's saved scan is no longer on this phone. Start a new project to scan it again.")
         }
         if handheld { return await HandheldCapture.run(objectId: object.id) ? try await finishSending(object) : nil }
-        guard try await store.mac.scan(object.id) != nil else { return nil }
+        let before = store.mac.keptScan(object.id)
+        guard try await store.mac.scan(object.id) != nil else {
+            // Stop after enough photos means done: they're sent, as Done's would be (#791). Fewer stay on the page's
+            // "Scan stopped · N photos kept" card, with Send to your Mac. Only the run just stopped: one that kept no
+            // photos never sends an older stopped scan again.
+            if let photos = MacConnection.justStopped(before: before, after: store.mac.keptScan(object.id)),
+               MacConnection.isEnough(stoppedPhotos: photos) {
+                return try await finishSending(object)
+            }
+            return nil
+        }
         captureWarning = store.mac.localScanWarning(object.id)
         return try await finishSending(object)
     }
