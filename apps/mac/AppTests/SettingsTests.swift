@@ -52,4 +52,79 @@ final class DiagnosticsTests: XCTestCase {
         XCTAssertFalse(Diagnostics.redact(log:"connecting to http://user:pw@10.0.0.2").contains("pw"))
         XCTAssertEqual((Diagnostics.redact(json:["host": "http://a:b@h"]) as? [String: Any])?["host"] as? String, "http://<removed>@h")
     }
+
+    // #799: the companion's part goes in as `companion/`, redacted again; a name that could leave the folder is left out.
+    func testCompanionNamesStayInsideTheirFolder() {
+        XCTAssertEqual(Diagnostics.safeRelativePath("mcp/P1S-bambu-printer-mcp/fulu/control-trace.log"), "mcp/P1S-bambu-printer-mcp/fulu/control-trace.log")
+        for bad in ["", "/etc/passwd", "../escape.txt", "mcp/../../x", "a//b", "./a", "a\\b", "line\nbreak"] { XCTAssertNil(Diagnostics.safeRelativePath(bad), bad) }
+    }
+
+    private func unzip(_ zip: URL) throws -> URL {
+        let out = FileManager.default.temporaryDirectory.appendingPathComponent("diag-out-\(UUID().uuidString)")
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath:"/usr/bin/ditto")
+        process.arguments = ["-x", "-k", zip.path, out.path]
+        try process.run(); process.waitUntilExit()
+        XCTAssertEqual(process.terminationStatus, 0)
+        return out
+    }
+
+    private func everything(in folder: URL) -> [String: String] {
+        var files: [String: String] = [:]
+        let enumerator = FileManager.default.enumerator(at:folder, includingPropertiesForKeys:[.isRegularFileKey])
+        while let url = enumerator?.nextObject() as? URL {
+            guard (try? url.resourceValues(forKeys:[.isRegularFileKey]))?.isRegularFile == true else { continue }
+            files[String(url.path.dropFirst(folder.path.count + 1))] = (try? String(contentsOf:url, encoding:.utf8)) ?? ""
+        }
+        return files
+    }
+
+    func testExportAddsTheCompanionPartTheBuildAndNotes() async throws {
+        let fm = FileManager.default
+        let state = fm.temporaryDirectory.appendingPathComponent("diag-state-\(UUID().uuidString)")
+        try fm.createDirectory(at:state.appendingPathComponent("logs"), withIntermediateDirectories:true)
+        defer { try? fm.removeItem(at:state) }
+        try "start BAMBU_TOKEN=synthetic-mac-secret login tester@example.com\n".write(to:state.appendingPathComponent("logs/companion.log"), atomically:true, encoding:.utf8)
+        let zip = fm.temporaryDirectory.appendingPathComponent("diag-\(UUID().uuidString).zip")
+        defer { try? fm.removeItem(at:zip) }
+        let part = CompanionDiagnostics(files:[
+            .init(name:"events-tail.ndjson", content:"{\"seq\":1,\"token\":\"synthetic-event-token\"}\n", truncated:true),
+            .init(name:"mcp/P1S-bambu-printer-mcp/fulu/control-trace.log", content:"serial=01P00A123456789 accessCode: 31415926\n", truncated:false),
+            .init(name:"../escape.txt", content:"outside", truncated:false),
+        ], notes:["mcp-3D-printer-server 1.2.26 is too old to add its own diagnostics; update it in Settings → Printers."])
+        let ok = await Diagnostics.export(state:state, to:zip) { part }
+        XCTAssertTrue(ok)
+        let out = try unzip(zip)
+        defer { try? fm.removeItem(at:out) }
+        let files = everything(in:out)
+        let root = files.keys.first { $0.hasSuffix("/about.txt") }.map { String($0.dropLast("about.txt".count)) } ?? ""
+        XCTAssertNotNil(files[root + "companion/events-tail.ndjson"])
+        XCTAssertTrue(files[root + "companion/mcp/P1S-bambu-printer-mcp/fulu/control-trace.log"]?.contains("01P00A123456789") == true, "serials stay")
+        XCTAssertFalse(files.keys.contains { $0.contains("escape") }, "a name with .. never lands anywhere")
+        let notes = try XCTUnwrap(files[root + "notes.txt"])
+        XCTAssertTrue(notes.contains("mcp-3D-printer-server 1.2.26 is too old to add its own diagnostics; update it in Settings → Printers."))
+        XCTAssertTrue(notes.contains("left out"))
+        XCTAssertTrue(notes.contains("companion/events-tail.ndjson holds only its newest part."))
+        XCTAssertTrue(try XCTUnwrap(files[root + "about.txt"]).contains("(build "), "the build number, not only 2.0")
+        let all = files.values.joined(separator:"\n")
+        for secret in ["synthetic-mac-secret", "synthetic-event-token", "31415926", "tester@example.com"] { XCTAssertFalse(all.contains(secret), secret) }
+    }
+
+    func testExportStillSucceedsWhenTheCompanionDoesNotAnswer() async throws {
+        let fm = FileManager.default
+        let state = fm.temporaryDirectory.appendingPathComponent("diag-state-\(UUID().uuidString)")
+        try fm.createDirectory(at:state, withIntermediateDirectories:true)
+        defer { try? fm.removeItem(at:state) }
+        let zip = fm.temporaryDirectory.appendingPathComponent("diag-\(UUID().uuidString).zip")
+        defer { try? fm.removeItem(at:zip) }
+        struct Down: Error {}
+        let ok = await Diagnostics.export(state:state, to:zip) { throw Down() }
+        XCTAssertTrue(ok)
+        let out = try unzip(zip)
+        defer { try? fm.removeItem(at:out) }
+        let files = everything(in:out)
+        let notes = try XCTUnwrap(files.first { $0.key.hasSuffix("notes.txt") }?.value)
+        XCTAssertTrue(notes.contains("couldn’t read the companion’s part"), notes)
+        XCTAssertFalse(files.keys.contains { $0.contains("/companion/") })
+    }
 }
