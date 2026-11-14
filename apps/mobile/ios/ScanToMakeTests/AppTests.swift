@@ -1093,6 +1093,22 @@ private actor HeldDownload {
         XCTAssertEqual(MacConnection.pendingDeclares(defaults), [:], "the Mac refused: the project has moved on")
     }
 
+    /// A new scan clears a stopped one's line and its Remove (regression watcher on e8de25fe): a 12-photo stop offers
+    /// Remove; once a scan finishes in its place, `scan-use-remove` is gone and the line with it. 20 or more never offer it.
+    func testANewScanClearsAStoppedScansRemove() {
+        var stop = NewObjectView.ScanStop()
+        XCTAssertNil(stop.removableRun, "no scan, no Remove")
+        stop.stopped(run: "run12", photos: 12)
+        XCTAssertEqual(stop.removableRun, "run12", "a few photos: Remove takes this run off")
+        XCTAssertEqual(stop.photos, 12)
+        stop.clear()  // what every path that attaches a finished scan does
+        XCTAssertNil(stop.removableRun, "Remove isn't shown beside the finished scan")
+        XCTAssertNil(stop.photos, "nor the stopped line")
+        stop.stopped(run: "run68", photos: 68)
+        XCTAssertNil(stop.removableRun, "enough photos are sent as they are: no Remove")
+        XCTAssertEqual(stop.photos, 68)
+    }
+
     /// What the New sheet says under a stopped scan's question (#795): enough photos are simply sent; a few are sent
     /// with a warning beside Remove, never kept back.
     func testAStoppedScanSaysWhatItKeptAndWhetherThatIsEnough() {
