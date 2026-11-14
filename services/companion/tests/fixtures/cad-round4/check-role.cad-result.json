@@ -1,0 +1,237 @@
+{
+  "valid": true,
+  "units": "mm",
+  "bounds_mm": [
+    [
+      -43.005184173583984,
+      -39.265960693359375,
+      0
+    ],
+    [
+      43.005184173583984,
+      62,
+      23.049999237060547
+    ]
+  ],
+  "size_mm": [
+    86.01036834716797,
+    101.26596069335938,
+    23.049999237060547
+  ],
+  "volume_mm3": 42884.414355842564,
+  "step_volume_mm3": 42884.624996027305,
+  "solid_count": 1,
+  "mesh_components": 1,
+  "checks": {
+    "watertight": true,
+    "winding_consistent": true,
+    "positive_volume": true,
+    "manifold": true,
+    "step_valid": true,
+    "step_solids": true,
+    "stl_step_bounds_agree": true
+  },
+  "bodies": {
+    "solids": 1,
+    "clearance_mm": 0.3,
+    "clearance_source": "default: Prusa's \"at least 0.3 mm\" for movable parts (fdm_fit)",
+    "print_in_place": true,
+    "declared_bodies": null,
+    "pairs_measured": 0,
+    "exact_measurements": 0,
+    "screened_only": 0,
+    "pairs_not_measured": [],
+    "errors": [],
+    "fused": [],
+    "too_close": [],
+    "unconfirmed": [],
+    "closest": null,
+    "above_bed": [],
+    "below_bed": [],
+    "severed": [],
+    "problems": [],
+    "seconds": 0
+  },
+  "problems": [],
+  "checked": [
+    "the exported mesh is closed, manifold and consistently wound, and the STEP agrees with it (valid, checks)",
+    "bounds, size, volumes and solid count of the exported files",
+    "whether each solid stands on the print plate (Z = 0 of the exported frame) or rests on a solid that does, and whether any reaches below it (bodies; failures are in problems)",
+    "what PURPOSE says it is for, compiled into requirements and evaluated on use(): the held objects, the mounts, the loads at each mount and whether it faces its user (purpose; anything not passing is in purpose.blocked)"
+  ],
+  "not_checked": [
+    "fit to the real object or a mating part (use cad_check_fit per state)",
+    "strength, stiffness or how it holds under load",
+    "motion, articulated poses and snap or flex behaviour",
+    "printing: supports, bridges and bed adhesion are the slicer's answer"
+  ],
+  "renders": {
+    "front": "@RUN@/chk_cradle_seated.renders/front.png",
+    "back": "@RUN@/chk_cradle_seated.renders/back.png",
+    "left": "@RUN@/chk_cradle_seated.renders/left.png",
+    "right": "@RUN@/chk_cradle_seated.renders/right.png",
+    "top": "@RUN@/chk_cradle_seated.renders/top.png",
+    "bottom": "@RUN@/chk_cradle_seated.renders/bottom.png",
+    "perspective": "@RUN@/chk_cradle_seated.renders/perspective.png",
+    "contact": "@RUN@/chk_cradle_seated.renders/contact.png",
+    "use": "@RUN@/chk_cradle_seated.renders/use.png"
+  },
+  "purpose": {
+    "declared": true,
+    "for": "holds my iPhone 16 Pro (with a thick stick-on wallet on its back) on the dash of my 2016 Subaru Forester, facing me, with one-push in and pinch-to-release",
+    "modelled_on": "iOttie / Kenu Airframe spring-grip car cradle on a ProClip-style tape-on ball-joint dash base",
+    "classes": [
+      "holder",
+      "vehicle",
+      "screen"
+    ],
+    "user": [
+      -250,
+      600,
+      330
+    ],
+    "material": "asa",
+    "jolt_g": 1.5,
+    "press_n": 1.5,
+    "within_deg": 25,
+    "requirements": [
+      {
+        "requirement": "for",
+        "status": "pass",
+        "says": "stated"
+      },
+      {
+        "requirement": "modelled_on",
+        "status": "pass",
+        "says": "stated"
+      },
+      {
+        "requirement": "use is the built part",
+        "status": "fail",
+        "says": "the part in use() is 95946 mm^3, the part build() exports 42885 mm^3",
+        "fix": "Build the part in use() from build() (the same bodies, moved into the pose it is used in): its 95946 mm^3 is not the 42885 mm^3 build() exports, so nothing checked in use() is the part that prints"
+      },
+      {
+        "requirement": "holds phone",
+        "status": "pass",
+        "says": "held:phone sits on the part (0.00 mm)"
+      },
+      {
+        "requirement": "holds wallet",
+        "status": "pass",
+        "says": "held:wallet sits on the part (0.00 mm)"
+      },
+      {
+        "requirement": "mounts dash",
+        "status": "pass",
+        "says": "2025 mm^2 of the part touches world:dash (tape)"
+      },
+      {
+        "requirement": "faces user (phone)",
+        "status": "pass",
+        "angle_deg": 0.3,
+        "says": "phone's exposed face is 0 deg off the line to the user's eye (allowed 25)"
+      },
+      {
+        "requirement": "tape on dash, sustained",
+        "status": "pass",
+        "says": "gravity: peak tension 11.2 kPa, shear 0.0 kPa over 2025 mm^2 (allowed 15 kPa sustained; 3M VHB)"
+      },
+      {
+        "requirement": "tape on dash, short-term",
+        "status": "pass",
+        "says": "gravity + 1.5 g along +Y: peak tension 61.2 kPa, shear 6.9 kPa over 2025 mm^2 (allowed 85 kPa short-term; 3M VHB)"
+      }
+    ],
+    "loads": [
+      {
+        "case": "gravity",
+        "force_n": 3.55,
+        "moment_nm": 0.172,
+        "peak_tension_kpa": 11.2,
+        "shear_kpa": 0
+      },
+      {
+        "case": "gravity + 1.5 g along +X",
+        "force_n": 6.4,
+        "moment_nm": 0.585,
+        "peak_tension_kpa": 32.9,
+        "shear_kpa": 12.9
+      },
+      {
+        "case": "gravity + 1.5 g along -X",
+        "force_n": 6.4,
+        "moment_nm": 0.703,
+        "peak_tension_kpa": 54.2,
+        "shear_kpa": 12.9
+      },
+      {
+        "case": "gravity + 1.5 g along +Y",
+        "force_n": 6.4,
+        "moment_nm": 0.744,
+        "peak_tension_kpa": 61.2,
+        "shear_kpa": 6.9
+      },
+      {
+        "case": "gravity + 1.5 g along -Y",
+        "force_n": 6.4,
+        "moment_nm": 0.433,
+        "peak_tension_kpa": 35.5,
+        "shear_kpa": 6.9
+      },
+      {
+        "case": "gravity + 1.5 g along +Z",
+        "force_n": 1.77,
+        "moment_nm": 0.086,
+        "peak_tension_kpa": 7.4,
+        "shear_kpa": 0
+      },
+      {
+        "case": "gravity + 1.5 g along -Z",
+        "force_n": 8.87,
+        "moment_nm": 0.43,
+        "peak_tension_kpa": 28.1,
+        "shear_kpa": 0
+      },
+      {
+        "case": "gravity + 1.5 N pressing phone",
+        "force_n": 4.27,
+        "moment_nm": 0.01,
+        "peak_tension_kpa": 0,
+        "shear_kpa": 0.7
+      },
+      {
+        "case": "gravity + 1.5 N pressing wallet",
+        "force_n": 4.27,
+        "moment_nm": 0.015,
+        "peak_tension_kpa": 0,
+        "shear_kpa": 0.7
+      }
+    ],
+    "not_checked": [],
+    "blocked": [
+      "Build the part in use() from build() (the same bodies, moved into the pose it is used in): its 95946 mm^3 is not the 42885 mm^3 build() exports, so nothing checked in use() is the part that prints."
+    ],
+    "ready": false
+  },
+  "ready": false,
+  "next": "Read renders.perspective before the next cad_run or any other change: say what it shows is wrong against what you are making (the bought product you named, or the object in the photos), then fix that. Not ready yet, so final: true would be refused. To make it ready: Build the part in use() from build() (the same bodies, moved into the pose it is used in): its 95946 mm^3 is not the 42885 mm^3 build() exports, so nothing checked in use() is the part that prints.",
+  "printed": "leaf length 8.20 mm, thickness 2.20, height 12.0; EI=21296 N mm2\nseated: theta 0.0296 rad, strain 0.40 %, pad force per side 1.90 N\ninsertion peak: theta 0.106 rad, strain 1.43 %, tab force per side 8.9 N (tab arm 31 mm)\nhard stop theta ~0.156 rad, strain 2.09 %\nlever bar top z 23.05, phone z 12.20..20.45, lip underside 21.05\nstalk tilt from vertical 26.3 deg; socket axis 30.0 deg; angle between them (swing needed) 3.7 deg; base yaw 22.6 deg\nscreen normal elevation 18.7 deg\nlowest point of the cradle above the dash: 18.8 mm",
+  "status": "completed",
+  "final": false,
+  "role": "check",
+  "completed_at": "2026-11-14T17:51:07.093Z",
+  "lineage_id": "b2d73c19f23ca6b45a7c96a332b3055fbb75259460c4dd65d59c534912791f81",
+  "result_manifest": "@RUN@/cad-result.json",
+  "script": "@RUN@/chk_cradle_seated.py",
+  "parameters": "@RUN@/chk_cradle_seated.parameters.json",
+  "inputs": {},
+  "input_manifest": "@RUN@/chk_cradle_seated.inputs.json",
+  "input_hashes": {},
+  "snapshot_bytes_added": 0,
+  "snapshot_bytes_reused": 0,
+  "queue_wait_ms": 1,
+  "stl": "@RUN@/chk_cradle_seated.stl",
+  "step": "@RUN@/chk_cradle_seated.step",
+  "seconds": 13.026936392999954
+}

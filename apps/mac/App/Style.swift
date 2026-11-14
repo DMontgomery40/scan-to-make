@@ -36,9 +36,11 @@ struct StatusCapsule: View {
     var done = false
     /// It opens the status menu: a chevron says so.
     var menu = false
+    /// A symbol in place of the stage's (#788: a draft's warning triangle).
+    var symbol: String? = nil
     var body: some View {
         HStack(spacing: 4) {
-            Label(text ?? stage.label, systemImage: done ? "checkmark.circle.fill" : stage.symbol).labelStyle(.titleAndIcon)
+            Label(text ?? stage.label, systemImage: done ? "checkmark.circle.fill" : symbol ?? stage.symbol).labelStyle(.titleAndIcon)
             if menu { Image(systemName: "chevron.down").font(.caption2.weight(.bold)).opacity(0.7) }
         }
             .font(.caption.weight(.semibold))

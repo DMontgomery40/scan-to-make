@@ -19,6 +19,7 @@ import {
   shownSlice,
   startingChoices,
   designerSettingsWords,
+  DRAFT_PRINT_NOTE,
 } from "./domain";
 import { Action, Modal } from "./ui";
 import type { ColourMapping, Estimate, Filament, Printer, Project } from "./types";
@@ -269,6 +270,12 @@ export function PrintSheet({
       onClose={onClose}
       wide
     >
+      {/* #788: a draft prints, but the sheet says what wasn't checked before anything is sent. */}
+      {project.current?.draft && (
+        <p className="notice" data-testid="print-draft-note">
+          {DRAFT_PRINT_NOTE}
+        </p>
+      )}
       <div className="print-layout">
         <div>
           {/* What will print (Nov 5): the printer MCP's pictures of the exact sliced file Print sends, never a

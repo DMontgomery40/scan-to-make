@@ -293,9 +293,22 @@ export function validateAnswer(
   }
   return out;
 }
+/** #788: the one plain line every layout shows for a draft design (contracts `DRAFT_LINE`). */
+export const DRAFT_LINE = "Not finished: the design engine couldn't check everything";
+/** #788: what Print's sheet adds for a draft design (contracts `DRAFT_PRINT_NOTE`). */
+export const DRAFT_PRINT_NOTE = "This part wasn't fully checked: the design engine couldn't check everything.";
+/** #788: more reasons than this are behind Show all. */
+export const DRAFT_COLLAPSE_AFTER = 2;
+/** #788: the reasons a draft shows, as given: all when expanded or few, else the first ones. Anything not words is left out. */
+export const draftReasons = (draft: { reasons?: unknown }, expanded: boolean): string[] => {
+  const all = Array.isArray(draft.reasons) ? draft.reasons.filter((r): r is string => typeof r === "string" && !!r.trim()) : [];
+  return expanded ? all : all.slice(0, DRAFT_COLLAPSE_AFTER);
+};
 export const words = (p: Project) =>
   p.status?.text ??
   p.progress ??
+  // #788: a draft is never presented as finished, also by a companion that wrote no line.
+  (p.state === "ready" && p.current?.draft ? DRAFT_LINE : undefined) ??
   // #616: a companion that knows designs writes "New one ready · printed …" itself; this is for one that wrote nothing.
   twoTruthsLine(p) ??
   {

@@ -220,7 +220,9 @@ class ProjectWords(project: Project, sending: Boolean = false, localScan: Boolea
                 s = question(project); b = false; a = listOf(ProjectAction.OpenCamera, ProjectAction.AttachPhotos, ProjectAction.BestGuess)
                 l = "Needs you · " + (project.openAsk?.question ?: project.question?.closeup?.let { "a close-up of $it" } ?: "a close-up")
             }
-            Project.State.Ready -> { s = "Ready to print"; b = false; a = made; l = listOfNotNull("Ready to print", size).joinToString(" · ") }
+            // #788: a draft is never presented as finished; Print and Ask for changes stay.
+            Project.State.Ready -> if (project.current?.draft != null) { s = Project.Draft.LINE; b = false; a = made; l = Project.Draft.LINE }
+                else { s = "Ready to print"; b = false; a = made; l = listOfNotNull("Ready to print", size).joinToString(" · ") }
             Project.State.Printing -> {
                 if (project.printConfirmation != null) { s = "Your printer needs your confirmation."; b = true; a = emptyList(); l = "Your printer needs a yes" }
                 else if (phase == ProjectPhase.Printing) {

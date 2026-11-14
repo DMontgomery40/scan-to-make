@@ -3550,6 +3550,9 @@ export class ObjectService {
       reason: result.reason === undefined ? undefined : this.#publicText(result.reason),
       closeup: result.closeup === undefined ? undefined : this.#publicText(result.closeup)};
     let current: StmObject['current'] | undefined, seats: Seat[] | undefined, seatNote: string | undefined;
+    // #788: this pass's result was a draft (the code engine's last valid run, with no run it let the worker make final).
+    const passDraft: NonNullable<StmObject['current']>['draft'] = result.model && result.draft
+      ? (result.draft.reasons?.length ? {reasons: result.draft.reasons} : {}) : undefined;
     if (result.model) {
       const currentDir = join(dir, 'current'), rendersDir = join(currentDir, 'renders');
       await rm(rendersDir, {recursive: true, force: true});
@@ -3589,7 +3592,13 @@ export class ObjectService {
       current = {model: join('current', result.parts ? 'model.3mf' : 'model.stl'), renders, ...(sizeMm ? {sizeMm} : {}), ...(summary ? {summary} : {}),
         ...(result.parts && result.partColours?.length ? {filaments: result.partColours} : {}),
         ...(result.changes?.length ? {changes: result.changes} : {}), ...(result.supports ? {supports: result.supports} : {}), engine, ...(design ? {design} : {}),
-        ...(seats?.length ? {seats} : {})};
+        ...(seats?.length ? {seats} : {}),
+        // #788: the MCP's reasons, as given (made safe to show by the runner). A pass that changed nothing leaves the model
+        // as it was: a draft stays a draft, with this pass's reasons when it brought any (the engine's latest verdict on the
+        // same mesh); a finished design is never made a draft by it (the pass keeps the reasons, below).
+        ...(passDraft && result.status === 'done' ? {draft: passDraft}
+          // #790 (c): a final run on the same mesh clears it; the engine's latest verdict wins both ways.
+          : result.status === 'unchanged' && before.current?.draft && !result.finalRun ? {draft: passDraft ?? before.current.draft} : {})};
     }
     const ask = result.status === 'needs_closeup' ? await this.#ask(id, result) : undefined;
     const state: StmObject['state'] = result.status === 'needs_closeup' ? 'needs-closeup'
@@ -3610,12 +3619,16 @@ export class ObjectService {
     const pass = beforeSeal.passes.find(p => p.startedAtMs === startedAtMs);
     // A pass that said it changed nothing keeps the design it started from, even when its file was written again.
     const kept = result.status === 'unchanged' ? beforeSeal.versions?.at(-1) : undefined;
+    // #788: the newest design stays the same design, and says what the project's draft now says (or, #790 (c), that it
+    // is no longer a draft).
+    const keptResult = kept?.result.draft && current ? (({draft: _draft, ...rest}) => current.draft ? {...rest, draft: current.draft} : rest)(kept.result) : undefined;
     const version = kept ?? (current && (result.status === 'done' || result.status === 'unchanged') ? await sealVersion(beforeSeal, dir, current, {startedAtMs, endedAtMs: now, ...(pass?.note ? {note: pass.note} : {})}) : undefined);
     const changed = !!version && !beforeSeal.versions?.some(v => v.id === version.id);
     const updated = await store.update(id, o => ({...(changed ? (({outcome: _outcome, ...rest}) => rest)(o) : o),
       state: state === 'ready' && !changed && o.outcome === 'works' ? 'confirmed' : state, progress: undefined,
       ...(current ? {current} : {}),
       ...(version && changed ? {versions: [...(o.versions ?? []), version]} : {}),
+      ...(kept && keptResult ? {versions: (o.versions ?? []).map(v => v.id === kept.id ? {...v, result: keptResult} : v)} : {}),
       // A copy's new model is no longer the kept designer file: its plate selection (and sliced plate) went with it.
       ...(current && o.kind !== 'published' && o.publishedSelection ? {publishedSelection: undefined} : {}),
       ...(!o.title && result.title ? {title: result.title} : {}),
@@ -3628,6 +3641,8 @@ export class ObjectService {
         ...(state === 'failed' || seatNote ? {activity: this.#activity(p.activity, [...(seatNote ? [{atMs: Date.now(), kind: 'message' as const, text: seatNote}] : []),
           ...(state === 'failed' ? [{atMs: Date.now(), kind: 'message' as const, text: failure}] : [])])} : {}),
         ...(result.summary ? {summary: result.summary} : {}), ...(ask ? {question: ask.question} : {}), seconds: result.stats.seconds, toolCalls: result.stats.toolCalls,
+        // #788: why this pass's result was a draft, kept also when the project's design stayed finished (unchanged).
+        ...(passDraft ? {draft: passDraft} : {}),
         ...(result.sessionId ? {sessionId: result.sessionId} : {}), ...(result.sessionCwd ? {sessionCwd: result.sessionCwd} : {}), checkpoints: result.checkpoints,
         ...(result.resume ? {resume: result.resume} : {}),
         ...(result.stats.costUsd !== undefined ? {costUsd: result.stats.costUsd} : {}), dir: result.passDir}))}));
@@ -3635,7 +3650,8 @@ export class ObjectService {
     if (saving?.endedAtMs !== undefined) void this.#deps.passTimings?.record(kind, result.engine ?? 'blender', 'saving', (saving.endedAtMs - saving.startedAtMs) / 1000).catch(() => undefined);
     const size = sizeText(updated.current?.sizeMm);
     const printedBefore = changed && (updated.versions ?? []).slice(0, -1).some(v => v.printedAtMs !== undefined || updated.prints?.some(p => p.versionId === v.id && printedOut(p)));
-    if (state === 'ready') await this.#emit({id: randomUUID(), type: 'pass.ready', projectId: id, ...(size || printedBefore ? {detail: {...(size ? {size} : {}), ...(printedBefore ? {printedBefore} : {})}} : {})});
+    const draft = !!updated.current?.draft;
+    if (state === 'ready') await this.#emit({id: randomUUID(), type: 'pass.ready', projectId: id, ...(size || printedBefore || draft ? {detail: {...(size ? {size} : {}), ...(printedBefore ? {printedBefore} : {}), ...(draft ? {draft} : {})}} : {})});
     else if (state === 'needs-closeup') await this.#emit({id: randomUUID(), type: 'pass.ask', projectId: id, ...(ask ? {data: {askId: ask.id}} : {}),
       detail: {question: ask?.question ?? `Can you take a close-up of ${result.closeup ?? 'a part of the object'}?`}});
     else await this.#emit({id: randomUUID(), type: 'pass.failed', projectId: id, detail: {reason: updated.failure ?? 'The touch-up stopped without a model.'}});

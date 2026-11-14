@@ -1434,3 +1434,41 @@ test("#775 review (#320): a checkout-only install still offers Update; its print
   assert.deepEqual(older.others.map((other) => [other.words, other.label]),
     [["P1S also runs your own copy (1.1.80)", "Use Counterpart’s bambu-printer-mcp for P1S instead of your own copy (1.1.80)"]]);
 });
+
+// #788: a code design pass that ended with no final run keeps its last valid run as a draft. The same fixture as the
+// contracts, Kit, the Mac and Android: the plain line, the printer MCP's reasons as given (two, then Show all), Print
+// and Ask for changes where they are, and Print's sheet says the part wasn't fully checked.
+const draftDoc = JSON.parse(readFileSync(new URL("../../../packages/contracts/fixtures/project-draft.json", import.meta.url), "utf8")) as {
+  line: string; printNote: string; collapseAfter: number;
+  projects: Record<"round4" | "older" | "finished", { project: Project; draft: boolean; reasons: string[] }>;
+};
+test("project-draft.json: a draft says it isn't finished, with the engine's reasons as given; a finished design doesn't", async () => {
+  const { DRAFT_LINE, DRAFT_PRINT_NOTE, DRAFT_COLLAPSE_AFTER, draftReasons } = await import("../src/domain");
+  assert.equal(DRAFT_LINE, draftDoc.line);
+  assert.equal(DRAFT_PRINT_NOTE, draftDoc.printNote);
+  assert.equal(DRAFT_COLLAPSE_AFTER, draftDoc.collapseAfter);
+  const projects = Object.values(draftDoc.projects).map((entry) => entry.project);
+  for (const [name, entry] of Object.entries(draftDoc.projects)) {
+    const p = entry.project;
+    assert.deepEqual(p.current?.draft?.reasons ?? [], entry.reasons, name);
+    assert.deepEqual(showingDesign(p, p.versions?.at(-1)?.id).current?.draft, p.current?.draft, `${name}: the sealed design too`);
+    const { status: _status, ...older } = p;
+    assert.equal(words(older as Project) === draftDoc.line, entry.draft, `${name}: a companion that wrote no line`);
+    const html = pageOf(p, undefined, projects);
+    assert.equal(html.includes(draftDoc.line.replaceAll("'", "&#x27;")), entry.draft, `${name}: the line on the page`);
+    assert.ok(buttonTag(html, "Ask for changes"), `${name}: another pass is asked for as always`);
+  }
+  const round4 = draftDoc.projects.round4;
+  assert.deepEqual(draftReasons(round4.project.current!.draft!, false), round4.reasons.slice(0, 2));
+  assert.deepEqual(draftReasons(round4.project.current!.draft!, true), round4.reasons);
+  const html = pageOf(round4.project, undefined, projects);
+  assert.equal(html.split(draftDoc.line.replaceAll("'", "&#x27;")).length - 1, 1, "one plain line, not two");
+  for (const reason of round4.reasons.slice(0, 2)) assert.ok(html.includes(reason.replaceAll("'", "&#x27;")), reason);
+  assert.ok(!html.includes(round4.reasons[2]!.replaceAll("'", "&#x27;")), "the third is behind Show all");
+  assert.match(html, /Show all 3/);
+  assert.doesNotMatch(pageOf(draftDoc.projects.older.project, undefined, projects), /Show all/, "no reasons from an older MCP");
+  const { PrintSheet } = await import("../src/PrintSheet");
+  const sheet = (p: Project) => renderToStaticMarkup(createElement(PrintSheet, { project: p, printers: [], apply() {}, onClose() {} }));
+  assert.ok(sheet(round4.project).includes(draftDoc.printNote.replaceAll("'", "&#x27;")));
+  assert.ok(!sheet(draftDoc.projects.finished.project).includes(draftDoc.printNote.replaceAll("'", "&#x27;")));
+});

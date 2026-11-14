@@ -321,6 +321,8 @@ fun PrintSheetScreen(id: String, close: () -> Unit, printing: () -> Unit) {
                     }
                 } ?: Text("No estimate from the printer yet.", color = Palette.secondary)
             }
+            // #788: a draft prints, but the sheet says what wasn't checked before anything is sent.
+            if (project.current?.draft != null) Text("⚠ " + Project.Draft.PRINT_NOTE, Modifier.testTag("print-draft-note"), color = Palette.needsYou, fontSize = 14.sp)
             if (uncertain) Row(verticalAlignment = Alignment.CenterVertically) {
                 Checkbox(checked, { checked = it })
                 Text("The last send of this plate may have reached the printer. I checked: it isn't printing this.", fontSize = 14.sp)

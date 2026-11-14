@@ -219,6 +219,10 @@ public struct ProjectWords: Equatable, Sendable {
             case .needsCloseup:
                 (status, busy, actions) = (Self.question(project), false, [.openCamera, .attachPhotos, .bestGuess])
                 line = "Needs you · " + (project.openAsk?.question ?? project.question?.closeup.map { "a close-up of \($0)" } ?? "a close-up")
+            case .ready where project.current?.draft != nil:
+                // #788: a draft is never presented as finished; Print and Ask for changes stay.
+                (status, busy, actions) = (Project.DesignDraft.line, false, made)
+                line = Project.DesignDraft.line
             case .ready:
                 (status, busy, actions) = ("Ready to print", false, made)
                 line = ["Ready to print", size].compactMap { $0 }.joined(separator: " · ")
