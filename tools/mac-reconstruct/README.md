@@ -14,6 +14,29 @@ macOS command-line tools for rebuilding and checking scans on the Mac.
   photos `.high` failed 6 of 6 times; `.normal` placed 27–28); `--honor-box` is for diagnostics only. Apple's capture box was fitted to the script on David's sign and cut off the letters; the masks still separate the object from the room. On David's rig scan, `.sequential` with
   `.high` placed 5–7 of 24 photos in three runs, against 9 of 24 unordered. The companion runs it at `full` on every
   image a walk-around sent (`ReconstructInput.objectCapture`).
+- **A flat green or yellow-green backdrop is keyed out** (`HandheldKit/BackdropKey.swift`, `--backdrop auto`, the
+  default), on any scan that has one: a green screen, or the lime panel on David's scan rig (nothing assumes the rig).
+  Apple's masking kept the rig's panel, which filled the DAD sign's counters and the gaps between its letters with
+  green surface (Nov 8 and Nov 14). A pixel is of the colour when it is saturated yellow-green to green with almost no
+  blue (the panel measured RGB ≈ 160,147,31 in warm light to 202,211,67 in daylight; the sign's wood base, black
+  letters and grey plate all fail it). Grass, leaves and a yellow-green wall pass that too, so a photo shows a backdrop
+  only when its largest region of the colour (depth cells mostly that colour, connected) is a deliberate panel: at least
+  2% of the photo, its cells at least 80% that colour on average (flat, not broken up), the middle 80% of their hues
+  within 15° (one paint, not many greens), and its median depth at least 0.12 m behind the nearest surface in the
+  LiDAR depth. Measured on every capture on David's Mac (Nov 14): the rig's panel at fill 0.73–0.99 and hue spread
+  1–13.5° per photo; no photo of any other capture reached 2% of the colour. When a quarter of the photos or more show one, the folder goes in as `PhotogrammetrySample`s
+  (`loadCaptureSample`: the same image, metadata, depth and gravity Apple's folder input reads) and each such photo
+  gets an object mask: Vision's foreground minus the backdrop, cleaned by a 4 px opening. A supplied mask switches
+  Apple's own masking off for that photo, so the mask leaves out the room too.
+  Within such a photo, another region of the colour covering at least 2% of it whose median depth sits within 0.12 m of
+  the nearest surface is part of the object and stays. Smaller regions are keyed by colour: the LiDAR depth is
+  upsampled from far fewer points and reads a letter's counter at the letter's own depth. The trade-off is a green
+  screen's: a small feature of the object in the backdrop's own colour (under 2% of the photo, or touching the panel in
+  the photo) is keyed with it.
+  `--backdrop off` keeps the folder input untouched; `--backdrop samples` goes through samples with no key (on Nov 14
+  it matched the folder input: 194.3 × 25.3 × 102.2 against 194.6 × 24.7 × 102.5 mm).
+  `mac-reconstruct backdrop <images-folder> [--save-masks <dir>]` prints what the key sees in each photo and saves the
+  masks. The rig's stand under the plate then comes along with the plate; `--remove-support` handles that (below).
 - `mac-reconstruct stl <model.usdz> <output.stl> [--render <png>] [--remove-support]` writes the model's triangles as a
   binary STL in millimetres (PhotogrammetrySession writes metres, `metersPerUnit = 1`), each mesh placed by its
   composed transform. The companion uses it to keep a scan as the project's model without a touch-up.
@@ -23,7 +46,8 @@ macOS command-line tools for rebuilding and checking scans on the Mac.
   everything up to 0.5 mm above it goes, the largest part standing on it is kept, and the support's own low scraps
   outside that part's footprint go too. It only counts as a support when most of it, and at least 50 cm², lies
   outside the footprint of what stands on it, so an object's own step (a sign's plank under its letters) is never
-  cut. The cut is then closed (`HandheldKit/Cap.swift`): each opening it left on the plane is filled flat by ear
+  cut. When nothing is found it tries again without loose pieces floating wholly below the largest one, then over the
+  model's whole height (a rig's stand under its plate pushes the plate out of the bottom half). The cut is then closed (`HandheldKit/Cap.swift`): each opening it left on the plane is filled flat by ear
   clipping its own edge, holes kept (a hollow foot gets a ring, not a disc), with no new corners, so the kept triangles
   are unchanged and a scan that was watertight stays watertight. The result is levelled on the plane, turned so its
   long side runs along x, and drawn for the project page. The `{"done":…}` line then carries `"support"`, with

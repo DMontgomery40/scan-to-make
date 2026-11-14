@@ -248,6 +248,30 @@ final class HandheldKitTests: XCTestCase {
         XCTAssertEqual(unpairedEdges(cut.corners), 0, "watertight and consistently wound")
     }
 
+    /// A loose piece floating below the plate (a chunk of the rig's stand, Nov 14) doesn't hide the plate: the plate and
+    /// the chunk both go and the object stays.
+    func testALoosePieceBelowThePlateDoesNotHideIt() throws {
+        let object = box(SIMD3(-30, -15, 0), SIMD3(30, 15, 40))
+        let chunk = box(SIMD3(-15, -15, -150), SIMD3(15, 15, -100))
+        let cut = try XCTUnwrap(removeSupport(tilted(object + disc(radius: 100, top: 0, thickness: 8) + chunk, degrees: 5)))
+        let s = size(cut.corners)
+        XCTAssertEqual(s.x, 60, accuracy: 1.5); XCTAssertEqual(s.y, 30, accuracy: 1.5)
+        XCTAssertEqual(s.z, 39.5, accuracy: 0.6)
+        XCTAssertEqual(unpairedEdges(cut.corners), 0, "watertight and consistently wound")
+    }
+
+    /// The rig's stand joined under the plate (David's Nov 8 scan, backdrop keyed): the plate is no longer in the
+    /// model's bottom half, and it is still found; plate and stand go, the object stays.
+    func testARigStandUnderThePlateDoesNotHideIt() throws {
+        let object = box(SIMD3(-30, -15, 0), SIMD3(30, 15, 40))
+        let stand = box(SIMD3(-10, -10, -150), SIMD3(10, 10, -8))
+        let cut = try XCTUnwrap(removeSupport(tilted(object + disc(radius: 100, top: 0, thickness: 8) + stand, degrees: 5)))
+        let s = size(cut.corners)
+        XCTAssertEqual(s.x, 60, accuracy: 1.5); XCTAssertEqual(s.y, 30, accuracy: 1.5)
+        XCTAssertEqual(s.z, 39.5, accuracy: 0.6)
+        XCTAssertEqual(unpairedEdges(cut.corners), 0, "watertight and consistently wound")
+    }
+
     /// A hollow object (a tube 60 mm across with a 40 mm bore, closed at the top) on a plate: the cut leaves a ring with
     /// a hole in it. Only the ring is filled; the bore stays open underneath, so the volume leaves it out.
     func testAHollowObjectsCutIsARingNotADisc() throws {
