@@ -112,6 +112,49 @@ final class BackdropKeyTests: XCTestCase {
         XCTAssertFalse(kept(frame, 100, 40))
     }
 
+    /// Review of #801 (F2): a deep lime crate, no backdrop. Its far face is 0.3 m behind its front edge, which used to be
+    /// enough to call it a backdrop and key the crate's own back away. Its border meets its own walls and the table at
+    /// about its own depth, with nothing in front: never a backdrop.
+    func testADeepObjectOfTheColourWithNoBackdropIsNeverKeyed() throws {
+        let w = 120, h = 80, dw = 60, dh = 40
+        let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
+                            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)!
+        ctx.setFillColor(CGColor(red: 166/255, green: 139/255, blue: 116/255, alpha: 1)); ctx.fill(CGRect(x: 0, y: 0, width: w, height: h))
+        ctx.setFillColor(CGColor(red: 160/255, green: 170/255, blue: 40/255, alpha: 1)); ctx.fill(CGRect(x: 40, y: 20, width: 60, height: 50))
+        // Depth rows top to bottom (cell row 0 is the image's top): the crate (cell rows 5…29, x 20…49) from 0.5 m at its
+        // far top edge to 0.2 m at its near bottom edge; the table below it carries on from 0.2 m to 0.15 m; the room
+        // either side and above, 1.5 m away.
+        var metres = [Float](repeating: 1.5, count: dw * dh)
+        for y in 5..<30 { for x in 20..<50 { metres[y * dw + x] = 0.5 - 0.3 * Float(y - 5) / 24 } }
+        for y in 30..<dh { for x in 0..<dw { metres[y * dw + x] = 0.2 - 0.05 * Float(y - 30) / 9 } }
+        let frame = try BackdropKey.key(image: try pixelBuffer(from: ctx.makeImage()!), depth: DepthImage(width: dw, height: dh, metres: metres))
+        XCTAssertGreaterThan(frame.panelShare, 0.2, "one big, flat region of the colour")
+        XCTAssertGreaterThanOrEqual((frame.backdropDepth ?? 0) - (frame.nearestDepth ?? 1), BackdropKey.minimumGap, "deep enough to pass the old test")
+        XCTAssertFalse(frame.isBackdrop, "front step \(String(describing: frame.frontStep))")
+        XCTAssertEqual(frame.keep.onCount, frame.keep.width * frame.keep.height, "the crate keeps its back")
+    }
+
+    /// Review of #801 (F5): the object mask on a synthetic keyed photo. The panel's area and the room outside Vision's
+    /// foreground go; the object's body stays; a 3-pixel wire on it, thinner than the opening, goes with the panel's
+    /// rim (the trade-off the opening makes); no foreground at all gives no mask.
+    func testTheObjectMaskKeepsTheObjectAndDropsThinLeftovers() {
+        let w = 120, h = 80
+        var keep = GrayImage(width: w, height: h, fill: 255)
+        for y in 0..<h { for x in 70..<w { keep[x, y] = 0 } }             // the keyed panel, right side
+        for y in 0..<h { keep[96, y] = 255; keep[97, y] = 255 }           // its far rim, unkeyed, inside the foreground
+        var foreground = GrayImage(width: w, height: h)
+        for y in 20..<60 { for x in 20..<100 { foreground[x, y] = 255 } } // the object and the panel behind it
+        for y in 5..<20 { for x in 40..<43 { foreground[x, y] = 255 } }   // a wire 3 pixels thick standing on it
+        let mask = BackdropKey.objectMask(keep: keep, foreground: foreground)!
+        XCTAssertEqual(mask[40, 40], 255, "the object's body")
+        XCTAssertEqual(mask[90, 40], 0, "the panel")
+        XCTAssertEqual(mask[97, 40], 0, "the panel's rim")
+        XCTAssertEqual(mask[69, 40], 255, "the object's edge against the panel")
+        XCTAssertEqual(mask[10, 40], 0, "the room outside the foreground")
+        XCTAssertEqual(mask[41, 10], 0, "a feature thinner than 2 × cleanup + 1 pixels goes too")
+        XCTAssertNil(BackdropKey.objectMask(keep: keep, foreground: GrayImage(width: w, height: h)), "no foreground, no mask")
+    }
+
     func testAYellowOrGreenObjectWithNothingBehindItIsNeverKeyed() throws {
         let (image, depth) = try scene(panel: (160, 147, 31), panelDepth: 0.19)   // the colour is part of the object
         let frame = try BackdropKey.key(image: image, depth: depth)

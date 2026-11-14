@@ -37,10 +37,11 @@ public struct SupportCut: Equatable {
 /// The result is turned so the plane is level and moved so the cut is at z = 0: the object stands where it stood.
 ///
 /// When that finds nothing, it tries again with what a scan rig adds under its plate: first without loose pieces
-/// floating wholly below the largest piece, then looking for the plane over the model's whole height instead of its
-/// bottom half. With the backdrop keyed out (BackdropKey) Apple keeps the rig's stand under the plate, which pushes
-/// the plate out of the bottom half: on David's Nov 14 scan as a loose chunk, on his Nov 8 scan joined to the plate.
-/// Step 4 still has to hold, so an object's own high step is never taken for a support.
+/// floating wholly below the largest piece, then looking for the plane in the model's lower 60% instead of its bottom
+/// half. With the backdrop keyed out (BackdropKey) Apple keeps the rig's stand under the plate, which pushes the plate
+/// just past the bottom half: on David's Nov 14 scan as a loose chunk, on his Nov 8 scan joined to the plate, at 52% of
+/// the model's height. A support sits low with the object standing on it; an object's own high step (a step stool's
+/// top, a shelf's top board) sits above 60% and is never searched (review of #801, F3). Step 4 still has to hold.
 public func removeSupport(_ corners: [SIMD3<Float>], clearance: Double = 0.5, band: Double = 2,
                           maximumTilt: Double = 15, minimumOutsideArea: Double = 5000) -> (corners: [SIMD3<Float>], cut: SupportCut)? {
     if let cut = removeSupportOnce(corners, clearance: clearance, band: band, maximumTilt: maximumTilt, minimumOutsideArea: minimumOutsideArea) {
@@ -53,12 +54,15 @@ public func removeSupport(_ corners: [SIMD3<Float>], clearance: Double = 0.5, ba
         : nil
     if found == nil {
         found = removeSupportOnce(trimmed, clearance: clearance, band: band, maximumTilt: maximumTilt,
-                                  minimumOutsideArea: minimumOutsideArea, searchedHeight: 1)
+                                  minimumOutsideArea: minimumOutsideArea, searchedHeight: retrySearchedHeight)
     }
     guard var cut = found else { return nil }
     cut.cut.trianglesBefore = corners.count / 3
     return cut
 }
+
+/// How much of the model's height, from the bottom, the second try searches for a support plane.
+let retrySearchedHeight = 0.6
 
 /// The triangles without the connected pieces (joined through shared corners) whose highest point is below the
 /// largest piece's lowest point.
