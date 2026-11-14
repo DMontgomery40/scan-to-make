@@ -578,6 +578,55 @@ final class LayoutParityUITests: XCTestCase {
         }
     }
 
+    /// #788: a code design pass that ended with no run the engine let the designer make final keeps its last valid run as
+    /// a draft. On the iPhone and the iPad: one plain line, the printer MCP's reasons as given (two, then Show All),
+    /// Ask for changes and Print where they always are, and Print's sheet says the part wasn't fully checked. An older
+    /// MCP's draft has the line and no reasons. Projects from packages/contracts/fixtures/project-draft.json.
+    func testADraftDesignSaysItIsNotFinishedWithTheEnginesReasonsWithProjectsPresent() {
+        let line = "Not finished: the design engine couldn't check everything"
+        let app = XCUIApplication()
+        app.launchArguments = ["-CounterpartFixtures", NSTemporaryDirectory() + "no-assets", "-CounterpartFixtureSet", "draft-design",
+                               "-CounterpartOpen", "counterpart://project/7a1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01"]
+        app.launch()
+        let note = app.descendants(matching: .any).matching(identifier: "draft-design-line").firstMatch
+        XCTAssertTrue(note.waitForExistence(timeout: 20), app.debugDescription)
+        XCTAssertEqual(note.label, line)
+        let reasons = app.descendants(matching: .any).matching(identifier: "draft-design-reason")
+        XCTAssertEqual(reasons.count, 2, "two reasons, the rest collapsed")
+        XCTAssertTrue(reasons.element(boundBy: 0).label.contains("Model the dash as world:dash in use()"), "the MCP's words as given")
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "788 draft, reasons collapsed"; shot.lifetime = .keepAlways; add(shot)
+        let more = app.buttons["draft-design-more"]
+        XCTAssertEqual(more.label, "Show All 3")
+        more.tap()
+        XCTAssertTrue(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "count == 3"), object: reasons)], timeout: 5) == .completed)
+        XCTAssertTrue(app.descendants(matching: .any)["ask-for-changes"].exists, "another pass is asked for as always")
+        let print = app.buttons["print"]
+        XCTAssertTrue(print.exists && print.isEnabled, "a draft still prints")
+        print.tap()
+        let printNote = app.descendants(matching: .any).matching(identifier: "print-draft-note").firstMatch
+        XCTAssertTrue(printNote.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertEqual(printNote.label, "This part wasn't fully checked: the design engine couldn't check everything.")
+        let sheet = XCTAttachment(screenshot: app.screenshot()); sheet.name = "788 draft, Print"; sheet.lifetime = .keepAlways; add(sheet)
+        app.terminate()
+        // An MCP from before engine round 4: the line, and no reasons to show.
+        app.launchArguments = ["-CounterpartFixtures", NSTemporaryDirectory() + "no-assets", "-CounterpartFixtureSet", "draft-design",
+                               "-CounterpartOpen", "counterpart://project/7a1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a02"]
+        app.launch()
+        XCTAssertTrue(note.waitForExistence(timeout: 20))
+        XCTAssertEqual(reasons.count, 0)
+        XCTAssertFalse(app.buttons["draft-design-more"].exists)
+        let older = XCTAttachment(screenshot: app.screenshot()); older.name = "788 draft, older MCP"; older.lifetime = .keepAlways; add(older)
+        app.terminate()
+        // No valid run at all: the pass still fails as it did before #788, and nothing says draft.
+        app.launchArguments = ["-CounterpartFixtures", NSTemporaryDirectory() + "no-assets", "-CounterpartFixtureSet", "draft-design",
+                               "-CounterpartOpen", "counterpart://project/7a1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a04"]
+        app.launch()
+        let title = app.buttons["project-title"]
+        XCTAssertTrue(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", "Cable clip"), object: title)], timeout: 20) == .completed)
+        XCTAssertFalse(note.exists, "no draft without a valid run")
+        let failed = XCTAttachment(screenshot: app.screenshot()); failed.name = "788 no valid run (as before)"; failed.lifetime = .keepAlways; add(failed)
+    }
+
     /// Design §3.3, David on his Leatherman "replica" (Nov 10): "if i don't see a fucking option here of what to do with
     /// this on the next build, that will confirm the root problem(s) are not solved". A copy whose scan is really the thing
     /// a case must fit: the page offers Make something else from this scan without scrolling, New opens holding that scan

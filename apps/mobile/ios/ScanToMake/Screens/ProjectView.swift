@@ -230,17 +230,21 @@ struct ProjectView: View {
                         // The status is one tap away: the capsule opens the same choices as ••• → Status.
                         // An earlier design on the stage shows its own state; the project's status menu waits for the newest (#616).
                         if viewingDesign != nil {
-                            StatusCapsule(phase: ProjectWords(object.showingDesign(viewingDesign)).phase)
+                            let shownPhase = ProjectWords(object.showingDesign(viewingDesign)).phase
+                            let draftWords = Project.DesignDraft.capsule(object.showingDesign(viewingDesign), phase: shownPhase)
+                            StatusCapsule(phase: shownPhase, text: draftWords, symbol: draftWords == nil ? nil : Project.DesignDraft.symbol)
                         } else if store.projectSettings {
                             Menu { statusChoices(object, words, inline: true) } label: {
-                                HStack(spacing: 4) { StatusCapsule(phase: words.phase); Image(systemName: "chevron.down").font(.caption2.weight(.bold)).foregroundStyle(.secondary) }
+                                HStack(spacing: 4) { StatusCapsule(phase: words.phase, text: Project.DesignDraft.capsule(object, phase: words.phase),
+                                              symbol: Project.DesignDraft.capsule(object, phase: words.phase) == nil ? nil : Project.DesignDraft.symbol); Image(systemName: "chevron.down").font(.caption2.weight(.bold)).foregroundStyle(.secondary) }
                             }
                             .disabled(away)
                         .accessibilityIdentifier("status-menu")
                             .accessibilityLabel("Status, \(words.phase.label)")
                             .accessibilityHint("Changes the project's status")
                         } else {
-                            StatusCapsule(phase: words.phase)
+                            StatusCapsule(phase: words.phase, text: Project.DesignDraft.capsule(object, phase: words.phase),
+                                              symbol: Project.DesignDraft.capsule(object, phase: words.phase) == nil ? nil : Project.DesignDraft.symbol)
                         }
                         Spacer()
                         Text(Format.when(object.updatedAt)).font(.caption).foregroundStyle(.secondary)
@@ -259,6 +263,8 @@ struct ProjectView: View {
                     if !fit.cardFirst { requestText(object, words) }
                 }
                 .padding(.horizontal, 20)
+
+                draftNote(object)
 
                 if (object.plates?.count ?? 0) > 1 {
                     ProjectPlatesView(project: object, busy: working || away, thumbnail: { plate in
@@ -513,6 +519,14 @@ struct ProjectView: View {
     // MARK: Answering a card
 
     /// The request under the title: what the person asked for, in their own words.
+    /// #788: the design on the stage is a draft: one plain line and the printer MCP's reasons as given, never as a
+    /// finished design. Print and Ask for changes stay where they are.
+    @ViewBuilder private func draftNote(_ object: Project) -> some View {
+        if let draft = object.showingDesign(viewingDesign).current?.draft {
+            DraftDesignNote(draft: draft).padding(.horizontal, 20)
+        }
+    }
+
     @ViewBuilder private func requestText(_ object: Project, _ words: ProjectWords) -> some View {
         if let request = object.instructions, !request.isEmpty, request != words.title {
             Text(request).font(.body).foregroundStyle(.secondary).textSelection(.enabled)
@@ -1722,3 +1736,4 @@ private struct AskSizeNumber: View {
             }
     }
 }
+

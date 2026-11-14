@@ -206,6 +206,12 @@ export interface StmObject {
     /** #769: the merged mesh beside a multi-part design's 3MF (`current/model.stl`, or a sealed design's
      * `versions/<id>/model.stl`), listed only while that file is there (read from disk as the project is read). */
     mergedMesh?: string;
+    /**
+     * #788: a draft, never a finished design: the code engine's last valid run of a pass that ended with no run the
+     * engine let the worker make final. `reasons` are the printer MCP's own words (`final_refused`, or its failing
+     * purpose requirements), shown as given; an MCP from before engine round 4 gives none.
+     */
+    draft?: {reasons?: string[]};
     /** A design in several colours: the colour (and material, when named) each of the 3MF's filaments
      * belongs in, in filament order, as the pass declared them. The 3MF itself carries none. */
     filaments?: {name?: string; colour?: string; material?: string}[];

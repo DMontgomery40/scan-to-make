@@ -57,19 +57,21 @@ struct ProjectDetail: View {
     }
 
     /// The state; with Project Settings, also the menu that sets it (Done for something printed elsewhere, PRD §5.4).
+    /// #788: a ready draft's capsule says it isn't finished.
+    private var draftCapsule: String? { words.stage == .ready && object.current?.draft != nil ? Project.DesignDraft.capsule : nil }
     @ViewBuilder private var statusCapsule: some View {
         if model.capabilities?.projectSettings == true {
             Menu {
                 ProjectStatusItems(object: object, model: model)
             } label: {
-                StatusCapsule(stage: words.stage, text: words.capsule, done: words.done, menu: true)
+                StatusCapsule(stage: words.stage, text: draftCapsule ?? words.capsule, done: words.done, menu: true, symbol: draftCapsule == nil ? nil : Project.DesignDraft.symbol)
             }
             .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
             .disabled(blocked)
             .help("Set the status: Not Printed, Printed, Done or Needs Changes")
             .accessibilityLabel("Status: \(words.capsule)")
         } else {
-            StatusCapsule(stage: words.stage, text: words.capsule, done: words.done)
+            StatusCapsule(stage: words.stage, text: draftCapsule ?? words.capsule, done: words.done, symbol: draftCapsule == nil ? nil : Project.DesignDraft.symbol)
         }
     }
     private var working: Bool { model.working.contains(object.id) }
@@ -142,6 +144,8 @@ struct ProjectDetail: View {
                         Spacer()
                     }
                 }
+                // #788: the design on the stage is a draft: the plain line and the printer MCP's reasons as given.
+                if let draft = stageObject.current?.draft { DraftDesignNote(draft: draft) }
                 if let line = model.notAnsweringLine {
                     Label(line, systemImage: "exclamationmark.triangle").font(.callout).foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)

@@ -71,6 +71,12 @@ struct PrintSheet: View {
                             Label(store.awayLine(projectId), systemImage: "wifi.exclamationmark").font(.subheadline).foregroundStyle(.secondary)
                                 .accessibilityIdentifier("print-away")
                         }
+                        // #788: a draft prints, but the sheet says what wasn't checked before anything is sent.
+                        if project?.current?.draft != nil {
+                            Label(Project.DesignDraft.printNote, systemImage: "exclamationmark.triangle")
+                                .font(.subheadline).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+                                .accessibilityIdentifier("print-draft-note")
+                        }
                         if let project, (project.plates?.count ?? 0) > 1 {
                             ProjectPlatePicker(project: project, busy: busy == "print" || choosingPlate) { plate in choosePlate(plate) }
                                 .font(.headline)

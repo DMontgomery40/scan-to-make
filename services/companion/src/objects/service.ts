@@ -3589,7 +3589,11 @@ export class ObjectService {
       current = {model: join('current', result.parts ? 'model.3mf' : 'model.stl'), renders, ...(sizeMm ? {sizeMm} : {}), ...(summary ? {summary} : {}),
         ...(result.parts && result.partColours?.length ? {filaments: result.partColours} : {}),
         ...(result.changes?.length ? {changes: result.changes} : {}), ...(result.supports ? {supports: result.supports} : {}), engine, ...(design ? {design} : {}),
-        ...(seats?.length ? {seats} : {})};
+        ...(seats?.length ? {seats} : {}),
+        // #788: the MCP's reasons, as given (made safe to show by the runner). A pass that changed nothing leaves the model,
+        // and so its draft, as it was.
+        ...(result.draft && result.status === 'done' ? {draft: result.draft.reasons?.length ? {reasons: result.draft.reasons} : {}}
+          : result.status === 'unchanged' && before.current?.draft ? {draft: before.current.draft} : {})};
     }
     const ask = result.status === 'needs_closeup' ? await this.#ask(id, result) : undefined;
     const state: StmObject['state'] = result.status === 'needs_closeup' ? 'needs-closeup'
@@ -3635,7 +3639,8 @@ export class ObjectService {
     if (saving?.endedAtMs !== undefined) void this.#deps.passTimings?.record(kind, result.engine ?? 'blender', 'saving', (saving.endedAtMs - saving.startedAtMs) / 1000).catch(() => undefined);
     const size = sizeText(updated.current?.sizeMm);
     const printedBefore = changed && (updated.versions ?? []).slice(0, -1).some(v => v.printedAtMs !== undefined || updated.prints?.some(p => p.versionId === v.id && printedOut(p)));
-    if (state === 'ready') await this.#emit({id: randomUUID(), type: 'pass.ready', projectId: id, ...(size || printedBefore ? {detail: {...(size ? {size} : {}), ...(printedBefore ? {printedBefore} : {})}} : {})});
+    const draft = !!updated.current?.draft;
+    if (state === 'ready') await this.#emit({id: randomUUID(), type: 'pass.ready', projectId: id, ...(size || printedBefore || draft ? {detail: {...(size ? {size} : {}), ...(printedBefore ? {printedBefore} : {}), ...(draft ? {draft} : {})}} : {})});
     else if (state === 'needs-closeup') await this.#emit({id: randomUUID(), type: 'pass.ask', projectId: id, ...(ask ? {data: {askId: ask.id}} : {}),
       detail: {question: ask?.question ?? `Can you take a close-up of ${result.closeup ?? 'a part of the object'}?`}});
     else await this.#emit({id: randomUUID(), type: 'pass.failed', projectId: id, detail: {reason: updated.failure ?? 'The touch-up stopped without a model.'}});

@@ -522,6 +522,18 @@ export type InheritedHistory = z.infer<typeof InheritedHistorySchema>;
 // own answer (`outcome`, `printedAtMs`) and its own pictures are added later. Paths are relative to the project folder
 // and live under `versions/<id>/`. The newest design is the last; there is no stored "current version".
 const relativePath = z.string().min(1).max(512).refine(path => !path.startsWith('/') && !path.split('/').includes('..'));
+/**
+ * #788: a draft design, never a finished one: the code engine's last valid run of a pass that ended with no run the
+ * engine let the worker make final. `reasons` are the printer MCP's own words (its `final_refused`, or its failing
+ * purpose requirements), shown as given and never interpreted; an MCP from before engine round 4 gives none. On
+ * `current.draft` and on the sealed design's `result.draft`. Every layout shows `DRAFT_LINE` with it.
+ */
+export const DesignDraftSchema = z.object({reasons: z.array(z.string().min(1).max(300)).max(12).optional()}).passthrough();
+export type DesignDraft = z.infer<typeof DesignDraftSchema>;
+/** #788: the one plain line every layout shows for a draft design. */
+export const DRAFT_LINE = "Not finished: the design engine couldn't check everything";
+/** #788: what a print's confirmation adds for a draft design. */
+export const DRAFT_PRINT_NOTE = "This part wasn't fully checked: the design engine couldn't check everything.";
 export const DesignVersionSchema = z.object({
   id: z.string().min(1).max(128),
   sealedAtMs: z.number().finite(),
@@ -533,7 +545,9 @@ export const DesignVersionSchema = z.object({
   result: z.object({model: relativePath, renders: z.array(relativePath), summary: z.string().optional(),
     sizeMm: z.tuple([z.number(), z.number(), z.number()]).optional(),
     /** #769: the merged mesh sealed beside a multi-part design's 3MF, listed only while the file is there. */
-    mergedMesh: relativePath.optional()}).passthrough(),
+    mergedMesh: relativePath.optional(),
+    /** #788: this design is a draft (above). */
+    draft: DesignDraftSchema.optional()}).passthrough(),
   picture: relativePath.optional(),
   pictures: z.record(z.string(), relativePath).optional(),
   pictureStates: z.record(z.string(), z.enum(['drawing', 'failed'])).optional(),

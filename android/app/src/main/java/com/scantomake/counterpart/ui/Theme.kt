@@ -114,11 +114,11 @@ fun Modifier.stage(): Modifier = background(Brush.verticalGradient(listOf(Palett
 
 /** A project's state: symbol and words on dark glass, in the state's colour. */
 @Composable
-fun StatusCapsule(phase: ProjectPhase, text: String? = null, modifier: Modifier = Modifier) {
+fun StatusCapsule(phase: ProjectPhase, text: String? = null, modifier: Modifier = Modifier, icon: androidx.compose.ui.graphics.vector.ImageVector? = null) {
     val tint = if (phase == ProjectPhase.Printed) Color.White.copy(alpha = 0.75f) else phase.tone.color()
     Row(modifier.clip(RoundedCornerShape(50)).background(Color.Black.copy(alpha = 0.55f)).padding(horizontal = 10.dp, vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically) {
-        Icon(phase.icon(), null, tint = tint, modifier = Modifier.size(14.dp))
+        Icon(icon ?: phase.icon(), null, tint = tint, modifier = Modifier.size(14.dp))
         Spacer(Modifier.width(5.dp))
         Text(text ?: phase.label, color = tint, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }

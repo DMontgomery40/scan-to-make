@@ -66,6 +66,203 @@ enum Fixtures {
 
     static func objects(now: Date = Date()) -> [[String: Any]] {
         if set == "empty" { return [] }
+        // `-CounterpartFixtureSet draft-design` (#788): packages/contracts/fixtures/project-draft.json's projects, as the
+        // companion serves them: a draft with an engine-round-4 MCP's reasons, a draft from an older MCP (no reasons), and
+        // a finished design beside them; and a pass with no valid run at all, which still fails as before.
+        if set == "draft-design" {
+            let data = Data(#"""
+[
+  {
+    "id": "7a1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01",
+    "title": "Dash mount",
+    "kind": "fit",
+    "instructions": "A phone mount for my Forester's dash.",
+    "state": "ready",
+    "status": {
+      "phase": "ready",
+      "text": "Not finished: the design engine couldn't check everything",
+      "symbol": "exclamationmark.triangle",
+      "tint": "orange"
+    },
+    "createdAtMs": 1794500000000,
+    "updatedAtMs": 1794510000000,
+    "photos": [],
+    "passes": [],
+    "current": {
+      "model": "current/model.stl",
+      "renders": [
+        "current/renders/1-contact.png",
+        "current/renders/2-use.png"
+      ],
+      "summary": "A dash mount for the phone.",
+      "sizeMm": [
+        146.2,
+        122.5,
+        23.8
+      ],
+      "engine": "code",
+      "draft": {
+        "reasons": [
+          "Model the dash as world:dash in use(): a solid slab where it really is, touching the part where it is taped, so the tape mount can be checked.",
+          "Turn the phone toward the user: its face is 41 deg off the line to their eye (allowed 25). Aim it the way the bought products do, with a joint or an angled base, and show it aimed in use().",
+          "Bring the phone within reach: it is 812 mm from the user (allowed 700)."
+        ]
+      }
+    },
+    "versions": [
+      {
+        "id": "20000000-0000-4000-8000-000000000001",
+        "sealedAtMs": 1794510000000,
+        "modelSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+        "result": {
+          "model": "versions/20000000-0000-4000-8000-000000000001/model.stl",
+          "renders": [
+            "versions/20000000-0000-4000-8000-000000000001/renders/1-contact.png",
+            "versions/20000000-0000-4000-8000-000000000001/renders/2-use.png"
+          ],
+          "summary": "A dash mount for the phone.",
+          "sizeMm": [
+            146.2,
+            122.5,
+            23.8
+          ],
+          "draft": {
+            "reasons": [
+              "Model the dash as world:dash in use(): a solid slab where it really is, touching the part where it is taped, so the tape mount can be checked.",
+              "Turn the phone toward the user: its face is 41 deg off the line to their eye (allowed 25). Aim it the way the bought products do, with a joint or an angled base, and show it aimed in use().",
+              "Bring the phone within reach: it is 812 mm from the user (allowed 700)."
+            ]
+          }
+        },
+        "picture": "versions/20000000-0000-4000-8000-000000000001/pictures/part.png"
+      }
+    ]
+  },
+  {
+    "id": "7a1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a02",
+    "title": "Bottle holder",
+    "kind": "fit",
+    "instructions": "A phone mount for my Forester's dash.",
+    "state": "ready",
+    "status": {
+      "phase": "ready",
+      "text": "Not finished: the design engine couldn't check everything",
+      "symbol": "exclamationmark.triangle",
+      "tint": "orange"
+    },
+    "createdAtMs": 1794500000000,
+    "updatedAtMs": 1794510000000,
+    "photos": [],
+    "passes": [],
+    "current": {
+      "model": "current/model.stl",
+      "renders": [
+        "current/renders/1-contact.png",
+        "current/renders/2-use.png"
+      ],
+      "summary": "A dash mount for the phone.",
+      "sizeMm": [
+        146.2,
+        122.5,
+        23.8
+      ],
+      "engine": "code",
+      "draft": {}
+    },
+    "versions": [
+      {
+        "id": "20000000-0000-4000-8000-000000000002",
+        "sealedAtMs": 1794510000000,
+        "modelSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+        "result": {
+          "model": "versions/20000000-0000-4000-8000-000000000002/model.stl",
+          "renders": [
+            "versions/20000000-0000-4000-8000-000000000002/renders/1-contact.png",
+            "versions/20000000-0000-4000-8000-000000000002/renders/2-use.png"
+          ],
+          "summary": "A dash mount for the phone.",
+          "sizeMm": [
+            146.2,
+            122.5,
+            23.8
+          ],
+          "draft": {}
+        },
+        "picture": "versions/20000000-0000-4000-8000-000000000002/pictures/part.png"
+      }
+    ]
+  },
+  {
+    "id": "7a1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a03",
+    "title": "Desk hook",
+    "kind": "fit",
+    "instructions": "A phone mount for my Forester's dash.",
+    "state": "ready",
+    "status": {
+      "phase": "ready",
+      "text": "Ready to print · 146 × 123 × 24 mm",
+      "detail": "146 × 123 × 24 mm",
+      "symbol": "checkmark.seal",
+      "tint": "accent"
+    },
+    "createdAtMs": 1794500000000,
+    "updatedAtMs": 1794510000000,
+    "photos": [],
+    "passes": [],
+    "current": {
+      "model": "current/model.stl",
+      "renders": [
+        "current/renders/1-contact.png",
+        "current/renders/2-use.png"
+      ],
+      "summary": "A dash mount for the phone.",
+      "sizeMm": [
+        146.2,
+        122.5,
+        23.8
+      ],
+      "engine": "code"
+    },
+    "versions": [
+      {
+        "id": "20000000-0000-4000-8000-000000000003",
+        "sealedAtMs": 1794510000000,
+        "modelSha256": "3333333333333333333333333333333333333333333333333333333333333333",
+        "result": {
+          "model": "versions/20000000-0000-4000-8000-000000000003/model.stl",
+          "renders": [
+            "versions/20000000-0000-4000-8000-000000000003/renders/1-contact.png",
+            "versions/20000000-0000-4000-8000-000000000003/renders/2-use.png"
+          ],
+          "summary": "A dash mount for the phone.",
+          "sizeMm": [
+            146.2,
+            122.5,
+            23.8
+          ]
+        },
+        "picture": "versions/20000000-0000-4000-8000-000000000003/pictures/part.png"
+      }
+    ]
+  }
+  ,{
+    "id": "7a1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a04",
+    "title": "Cable clip",
+    "kind": "fit",
+    "instructions": "A clip for the desk's cable tray.",
+    "state": "failed",
+    "failure": "no model was saved",
+    "status": {"phase": "failed", "text": "no model was saved", "symbol": "exclamationmark.triangle", "tint": "red"},
+    "createdAtMs": 1794500000000,
+    "updatedAtMs": 1794510000000,
+    "photos": [],
+    "passes": [{"startedAtMs": 1794500000000, "endedAtMs": 1794510000000, "status": "failed", "trigger": "new", "engine": "code"}]
+  }
+]
+
+"""#.utf8)
+            return (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] ?? []
+        }
         if set == "design-history" {
             let data = Data(#"""
 [

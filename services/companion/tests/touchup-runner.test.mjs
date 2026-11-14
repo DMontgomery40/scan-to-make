@@ -314,7 +314,7 @@ for (const [name,changes] of [['model turn',{num_turns:1}],['API work',{duration
 // protected receipt `cad-result.json` (cad/1): completed or not, final (the worker's selection) or not, its checks.
 // The worker can't write files, so Counterpart files the selected runs and keeps the latest as the model.
 const SOLID = 'solid x\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid x\n';
-async function cadRun(cadDir, folder, name, {at, stl = SOLID, step = true, inputs, renders = ['front', 'contact'], final = false, valid = true, status = 'completed', receipt = true} = {}) {
+async function cadRun(cadDir, folder, name, {at, stl = SOLID, step = true, inputs, renders = ['front', 'contact'], final = false, valid = true, status = 'completed', receipt = true, extra = {}} = {}) {
   const {mkdir} = await import('node:fs/promises');
   const dir = join(cadDir, folder);
   await mkdir(join(dir, `${name}.renders`), {recursive: true});
@@ -336,7 +336,7 @@ async function cadRun(cadDir, folder, name, {at, stl = SOLID, step = true, input
   }
   if (receipt) await writeFile(join(dir, 'cad-result.json'), JSON.stringify({status, final, valid, completed_at: new Date(at ?? Date.now()).toISOString(), lineage_id: 'sha',
     script: join(dir, `${name}.py`), parameters: join(dir, `${name}.parameters.json`), stl: join(dir, `${name}.stl`), step: step ? join(dir, `${name}.step`) : null,
-    ...(manifest ? {input_manifest: manifest} : {}), renders: views, checks: {watertight: valid, manifold: valid}}));
+    ...(manifest ? {input_manifest: manifest} : {}), renders: views, checks: {watertight: valid, manifold: valid}, ...extra}));
   return dir;
 }
 const codeWorker = (structured_output, extra = {}) => async () => ({toolCalls: 4, stderrTail: '', exitCode: 0, seconds: 9, publicText: text => text,
@@ -480,6 +480,112 @@ test('a collector that fails promotes nothing and says why on the pass', async (
   assert.equal(result.model, undefined, 'no model without its design source');
   assert.equal(result.design, undefined);
   assert.match(result.reason, /^Counterpart couldn't keep this pass's design/);
+});
+
+// #788: engine round 4 (#608) makes cad_run refuse final until the part's purpose checks pass. A pass whose worker
+// answered done with no final run keeps its last valid run as a draft, with the MCP's own reasons, never nothing.
+const round4 = fileURLToPath(new URL('./fixtures/cad-round4/', import.meta.url));
+/** A real round-4 receipt's own fields (the fixture, with this run's folder put in), over the helper's base receipt. */
+async function round4Receipt(fixture, dir) {
+  const receipt = JSON.parse((await readFile(join(round4, fixture), 'utf8')).replaceAll('@RUN@', dir));
+  const {mkdir} = await import('node:fs/promises');
+  await mkdir(join(dir, 'phone_mount.renders'), {recursive: true});
+  for (const [view, path] of Object.entries(receipt.renders)) await writeFile(path, view);
+  for (const file of ['py', 'parameters.json', 'step']) await writeFile(join(dir, `phone_mount.${file}`), file);
+  await writeFile(join(dir, 'phone_mount.stl'), SOLID);
+  await writeFile(join(dir, 'phone_mount.inputs.json'), '{}');
+  await writeFile(join(dir, 'cad-result.json'), JSON.stringify(receipt));
+  return receipt;
+}
+
+test('#788: a code pass answered done with only non-final runs keeps the last valid one as a draft, with the engine\'s reasons', async () => {
+  const {mkdir} = await import('node:fs/promises');
+  const root = await tempDir('touchup-code-draft-');
+  const pass = await prepareTouchupPass({root, objectId: 'obj', scan: [], photos: [], requirePhotos: false});
+  const cadDir = join(pass.dir, 'cad');
+  await mkdir(cadDir, {recursive: true});
+  const t0 = Date.parse('2026-11-12T19:00:00Z');
+  await cadRun(cadDir, 'cad-phone_mount-1', 'phone_mount', {at: t0});
+  await cadRun(cadDir, 'cad-phone_mount-2', 'phone_mount', {at: t0 + 1000, valid: false});
+  const run = join(cadDir, 'cad-phone_mount-3');
+  const receipt = await round4Receipt('final-refused.cad-result.json', run);
+  await cadRun(cadDir, 'cad-phone_mount-4', 'phone_mount', {at: Date.parse('2026-11-12T19:30:00Z'), status: 'failed'});
+  const result = await runTouchupWorker(codeInv(pass, codeWorker({status: 'done', summary: 'A dash mount for the phone.'})), pass);
+  assert.equal(result.status, 'done');
+  assert.equal(result.model, join(pass.outDir, 'touched.stl'));
+  assert.equal(await readFile(result.model, 'utf8'), SOLID);
+  assert.deepEqual(result.draft, {reasons: receipt.final_refused}, 'final_refused, word for word');
+  assert.equal(result.design.script, join(run, 'phone_mount.py'));
+  assert.equal(result.design.result, join(run, 'cad-result.json'));
+  // Filed as any pass's result is: one checkpoint (a scan pass with none would read as unchanged), its views as renders.
+  assert.deepEqual(result.checkpoints, [join(pass.checkpointsDir, '001.stl')]);
+  assert.ok(result.renders.some(path => path.endsWith('-use.png')), 'renders.use comes with it');
+  assert.equal(result.renders[0].split('/').at(-1), '1-contact.png');
+});
+
+test('#788: a draft from a run the worker never asked to make final gives the failing purpose requirements; an older MCP\'s gives none', async () => {
+  const {mkdir} = await import('node:fs/promises');
+  const root = await tempDir('touchup-code-draft-reqs-');
+  const pass = await prepareTouchupPass({root, objectId: 'obj', scan: [join(fixtures, 'scan.obj')], photos: [join(fixtures, 'photo.jpg')]});
+  const cadDir = join(pass.dir, 'cad');
+  await mkdir(cadDir, {recursive: true});
+  const receipt = await round4Receipt('not-ready.cad-result.json', join(cadDir, 'cad-phone_mount-1'));
+  const result = await runTouchupWorker(codeInv(pass, codeWorker({status: 'done', summary: 'Done.'})), pass);
+  assert.equal(result.status, 'done', 'a scan pass\'s draft is a change, not unchanged');
+  const failing = receipt.purpose.requirements.filter(item => item.status !== 'pass');
+  assert.equal(failing.length, 3);
+  assert.deepEqual(result.draft, {reasons: failing.map(item => item.fix)});
+  // An MCP from before round 4: no final_refused, no purpose. Still a draft, with no reasons.
+  const older = await prepareTouchupPass({root, objectId: 'older', scan: [], photos: [], requirePhotos: false});
+  await mkdir(join(older.dir, 'cad'), {recursive: true});
+  await cadRun(join(older.dir, 'cad'), 'cad-holder-1', 'holder', {at: Date.now() - 1000});
+  const plain = await runTouchupWorker(codeInv(older, codeWorker({status: 'done', summary: 'Done.'})), older);
+  assert.equal(plain.status, 'done');
+  assert.deepEqual(plain.draft, {});
+  assert.ok(plain.model);
+});
+
+test('#788: a final run still wins over a later non-final one, and is no draft', async () => {
+  const {mkdir} = await import('node:fs/promises');
+  const root = await tempDir('touchup-code-draft-final-');
+  const pass = await prepareTouchupPass({root, objectId: 'obj', scan: [], photos: [], requirePhotos: false});
+  const cadDir = join(pass.dir, 'cad');
+  await mkdir(cadDir, {recursive: true});
+  const t0 = Date.now() - 60_000;
+  const chosen = await cadRun(cadDir, 'cad-holder-1', 'holder', {at: t0, final: true});
+  await cadRun(cadDir, 'cad-holder-2', 'holder', {at: t0 + 1000, extra: {ready: false, final_requested: true, final_refused: ['Model the desk as world:desk in use().']}});
+  const result = await runTouchupWorker(codeInv(pass, codeWorker({status: 'done', summary: 'Done.'})), pass);
+  assert.equal(result.design.script, join(chosen, 'holder.py'));
+  assert.equal(result.draft, undefined);
+});
+
+test('#788: with no valid run at all the pass still fails with no model; a locate pass, a question, a limit or a failure never draft', async () => {
+  const {mkdir} = await import('node:fs/promises');
+  const root = await tempDir('touchup-code-draft-none-');
+  const pass = await prepareTouchupPass({root, objectId: 'none', scan: [], photos: [], requirePhotos: false});
+  const cadDir = join(pass.dir, 'cad');
+  await mkdir(cadDir, {recursive: true});
+  const t0 = Date.now() - 60_000;
+  await cadRun(cadDir, 'cad-holder-1', 'holder', {at: t0, valid: false});
+  await cadRun(cadDir, 'cad-holder-2', 'holder', {at: t0 + 1000, stl: 'not an stl'});
+  await cadRun(cadDir, 'cad-holder-3', 'holder', {at: t0 + 2000, status: 'failed'});
+  const none = await runTouchupWorker(codeInv(pass, codeWorker({status: 'done', summary: 'Done.'})), pass);
+  assert.equal(none.status, 'failed');
+  assert.equal(none.reason, 'no model was saved');
+  assert.equal(none.model, undefined);
+  assert.equal(none.draft, undefined);
+  for (const ending of [{answer: {status: 'done', summary: 'It sits at the back.'}, opts: {locate: true}, status: 'done'},
+    {answer: {status: 'needs_closeup', summary: 'Which size?', closeup: 'the cap'}, status: 'needs_closeup'},
+    {answer: undefined, extra: {stopReason: 'Stopped at the 120 tool-call limit', limit: {kind: 'tool-calls', value: 120}}, status: 'capped'},
+    {answer: {status: 'failed', summary: 'The engine stopped.'}, status: 'failed'}]) {
+    const other = await prepareTouchupPass({root, objectId: ending.status + (ending.opts ? '-locate' : ''), scan: [], photos: [], requirePhotos: false});
+    await mkdir(join(other.dir, 'cad'), {recursive: true});
+    await cadRun(join(other.dir, 'cad'), 'cad-holder-1', 'holder', {at: t0});
+    const result = await runTouchupWorker(codeInv(other, codeWorker(ending.answer, ending.extra)), other, ending.opts);
+    assert.equal(result.status, ending.status);
+    assert.equal(result.model, undefined, `${ending.status}${ending.opts ? ' (locate)' : ''}: no draft`);
+    assert.equal(result.draft, undefined);
+  }
 });
 
 // Review of #439, F6: the saved script keeps the extension the MCP gave it.

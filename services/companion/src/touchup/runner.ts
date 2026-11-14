@@ -39,6 +39,8 @@ export interface TouchupResult {
   supports?: TouchupSupports;
   /** The design source: Fusion's archive and parameters (fusion_mcp_export), or a code pass's script and parameters. */
   design?: DesignSource;
+  /** #788: the model is a draft, the last valid run of a code pass with no final run; `reasons` are the MCP's words. */
+  draft?: {reasons?: string[]};
   reason?: string;
   /** CLI loader rejection, recognized from its terminal event before any model turn. */
   resumeUnavailable?: boolean;
@@ -304,7 +306,11 @@ export async function runTouchupWorker(inv: TouchupInvocation, pass: TouchupPass
   // source here, on every ending (a limit or a crash keeps its last run, as any pass keeps its last checkpoint).
   let code: Awaited<ReturnType<typeof collectCodeRuns>> | undefined, collectFailed: string | undefined;
   if (inv.engine === 'code') {
-    try { code = await collectCodeRuns(pass, isValidStl); }
+    // #788: only an answer that would end as done may keep a draft; a question, a limit, a failure or a locate never does.
+    const said = resultEvent?.structured_output?.status;
+    const draft = !opts.locate && stopReason === undefined && !run.error && !!resultEvent && !resultEvent.is_error && !!resultEvent.structured_output
+      && said !== 'failed' && said !== 'needs_closeup';
+    try { code = await collectCodeRuns(pass, isValidStl, {draft}); }
     catch (error) { code = {}; collectFailed = error instanceof Error ? error.message : String(error); }
   }
   const touched = join(pass.outDir, 'touched.stl');
@@ -340,6 +346,8 @@ export async function runTouchupWorker(inv: TouchupInvocation, pass: TouchupPass
   if (seats) Object.assign(base, {seats});
   const summary = {...(answer?.summary ? {summary: publicText(answer.summary)} : {}), ...structured(answer, publicText)};
   const f3d = join(pass.outDir, 'touched.f3d'), parameters = join(pass.outDir, 'touched.parameters.json');
+  // A draft's reasons are the MCP's words, made safe to show and otherwise as given.
+  const draft = code?.draft ? {draft: code.draft.reasons ? {reasons: code.draft.reasons.map(reason => publicText(reason))} : {}} : {};
   const design = code ? (code.design ? {design: code.design} : {}) : await stat(f3d).then(info => info.isFile(), () => false)
     ? {design: {f3d, ...(await stat(parameters).then(info => info.isFile(), () => false) ? {parameters} : {})}} : {};
   Object.assign(base, design);
@@ -367,5 +375,5 @@ export async function runTouchupWorker(inv: TouchupInvocation, pass: TouchupPass
   // A make job (no scan) has nothing to be unchanged.
   if (pass.scanPaths.length > 0 && validCheckpoints.length === 0) return {status: 'unchanged', ...summary, model, ...base};
   if (opts.inputStlSha256 && await sha256(model) === opts.inputStlSha256) return {status: 'unchanged', ...summary, model, ...base};
-  return {status: 'done', ...summary, model, ...base};
+  return {status: 'done', ...summary, model, ...base, ...(model === touched ? draft : {})};
 }

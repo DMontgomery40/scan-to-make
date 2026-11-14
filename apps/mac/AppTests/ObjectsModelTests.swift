@@ -624,6 +624,34 @@ private func project(_ item: [String: Any]) throws -> Project {
         XCTAssertEqual(patches[project.id], ["status": .string("works"), "versionId": .string(printed.id)])
     }
 
+    /// #788 on the Mac, from the shared fixture every client reads: a draft design (the design engine's last valid run of
+    /// a pass with no final run) is ready to print but its line says it isn't finished, with the printer MCP's reasons
+    /// word for word on the design (also on its sealed design); an older MCP's draft has no reasons; a finished one is none.
+    func testADraftDesignIsNeverPresentedAsFinishedWithProjectsPresent() async throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let data = try Data(contentsOf: root.appending(path: "packages/contracts/fixtures/project-draft.json"))
+        let fixture = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let entries = try XCTUnwrap(fixture["projects"] as? [String: [String: Any]])
+        let companion = FakeObjects()
+        await companion.set(try ["round4", "older", "finished"].map { name in
+            var project = try XCTUnwrap(entries[name]?["project"] as? [String: Any]); project["directory"] = "/tmp/\(name)"; return project
+        })
+        await companion.setCapabilities(.init(objectsCreate: true, projectSettings: true))
+        let model = ObjectsModel(companion: companion)
+        await model.refresh()
+        XCTAssertEqual(Project.DesignDraft.line, fixture["line"] as? String)
+        XCTAssertEqual(Project.DesignDraft.printNote, fixture["printNote"] as? String)
+        for name in ["round4", "older", "finished"] {
+            let entry = try XCTUnwrap(entries[name]), id = try XCTUnwrap((entry["project"] as? [String: Any])?["id"] as? String)
+            let project = try XCTUnwrap(model.objects.first { $0.id == id })
+            let draft = entry["draft"] as? Bool == true
+            XCTAssertEqual(project.words.stage, .ready, "\(name): Print and Ask for changes stay")
+            XCTAssertEqual(project.words.status == Project.DesignDraft.line, draft, "\(name): \(project.words.status)")
+            XCTAssertEqual(project.current?.draft?.reasons, draft ? entry["reasons"] as? [String] : nil, name)
+            XCTAssertEqual(project.showingDesign(project.versions?.last?.id).current?.draft, project.current?.draft, "\(name): the sealed design too")
+        }
+    }
+
     func testMakeSomethingElseFromACopysScanWithProjectsPresent() async throws {
         let companion = FakeObjects()
         await companion.set([item("source", "ready", ["kind": "copy", "title": "Leatherman Wave+ replica", "scan": "scan.usdz"]),
