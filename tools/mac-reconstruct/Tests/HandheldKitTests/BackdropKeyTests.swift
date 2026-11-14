@@ -1,5 +1,6 @@
 import XCTest
 import CoreGraphics
+import AppKit
 @testable import HandheldKit
 
 /// The rig backdrop key (BackdropKey): David's lime panel on the Nov 14 DAD scan, and the cases that must not be keyed.
@@ -7,13 +8,39 @@ final class BackdropKeyTests: XCTestCase {
     /// A 120×80 photo: the panel's colour on the right half, a black letter and the wood base on the left, measured
     /// colours from the Nov 14 photos. Depth (60×40): the letter and base at 0.17 m, the panel at `panelDepth`.
     private func scene(panel: (CGFloat, CGFloat, CGFloat), panelDepth: Float, panelWidth: Int = 60,
-                       greenPart: Bool = false, counter: Bool = false) throws -> (CVPixelBuffer, DepthImage) {
+                       greenPart: Bool = false, counter: Bool = false, background: Background = .panel) throws -> (CVPixelBuffer, DepthImage) {
         let w = 120, h = 80
         let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
                             space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)!
         ctx.setFillColor(CGColor(red: 166/255, green: 139/255, blue: 116/255, alpha: 1)); ctx.fill(CGRect(x: 0, y: 0, width: w, height: h))  // plate
         ctx.setFillColor(CGColor(red: panel.0/255, green: panel.1/255, blue: panel.2/255, alpha: 1))
         ctx.fill(CGRect(x: w - panelWidth, y: 0, width: panelWidth, height: h))
+        var seed: UInt32 = 12345
+        func random() -> CGFloat { seed = seed &* 1_664_525 &+ 1_013_904_223; return CGFloat(seed >> 8) / CGFloat(1 << 24) }
+        switch background {
+        case .panel: break
+        case .unevenlyLit:   // one paint, lit brighter on one side: the same hue throughout
+            for x in (w - panelWidth)..<w {
+                let light = 0.6 + 0.4 * CGFloat(x - (w - panelWidth)) / CGFloat(panelWidth)
+                ctx.setFillColor(CGColor(red: panel.0 * light / 255, green: panel.1 * light / 255, blue: panel.2 * light / 255, alpha: 1))
+                ctx.fill(CGRect(x: x, y: 0, width: 1, height: h))
+            }
+        case .lawn:   // many greens and yellow-greens, light and shade, a brown patch here and there
+            for bx in stride(from: w - panelWidth, to: w, by: 4) {
+                for by in stride(from: 0, to: h, by: 4) {
+                    let brown = random() < 0.25
+                    let colour = NSColor(hue: brown ? 0.08 : 0.2 + 0.2 * random(), saturation: 0.45 + 0.45 * random(),
+                                         brightness: brown ? 0.3 : 0.3 + 0.5 * random(), alpha: 1)
+                    ctx.setFillColor(colour.cgColor); ctx.fill(CGRect(x: bx, y: by, width: 4, height: 4))
+                }
+            }
+        case .leaves:   // one green, but speckled with dark gaps pixel by pixel, never a solid surface
+            for x in (w - panelWidth)..<w {
+                for y in 0..<h where random() < 0.4 {
+                    ctx.setFillColor(CGColor(red: 0.1, green: 0.12, blue: 0.08, alpha: 1)); ctx.fill(CGRect(x: x, y: y, width: 1, height: 1))
+                }
+            }
+        }
         ctx.setFillColor(CGColor(red: 35/255, green: 27/255, blue: 18/255, alpha: 1)); ctx.fill(CGRect(x: 50, y: 20, width: 30, height: 40))   // letter, overlapping the panel
         ctx.setFillColor(CGColor(red: 152/255, green: 119/255, blue: 82/255, alpha: 1)); ctx.fill(CGRect(x: 10, y: 60, width: 100, height: 10)) // wood base
         if counter {   // the panel seen through a hole in the letter, too small for the depth map: it reads the letter's 0.17 m
@@ -27,6 +54,8 @@ final class BackdropKeyTests: XCTestCase {
         for y in 10..<30 { for x in 25..<40 { metres[y * 60 + x] = 0.17 } }   // the letter in front of the panel
         return (try pixelBuffer(from: ctx.makeImage()!), DepthImage(width: 60, height: 40, metres: metres))
     }
+
+    enum Background { case panel, unevenlyLit, lawn, leaves }
 
     // CGContext rows run bottom-up; GrayImage row 0 is the buffer's top row.
     private func kept(_ frame: BackdropKey.Frame, _ x: Int, _ yFromBottom: Int) -> Bool { frame.keep[x, frame.keep.height - 1 - yFromBottom] > 127 }
@@ -65,6 +94,22 @@ final class BackdropKeyTests: XCTestCase {
         XCTAssertTrue(frame.isBackdrop)
         XCTAssertFalse(kept(frame, 61, 37), "the counter is open")
         XCTAssertTrue(kept(frame, 55, 37), "the letter round it stays")
+    }
+
+    /// Review of #793: the key is for a deliberate backdrop, not for whatever green is behind a scan. A walk-around on a
+    /// lawn or in front of a hedge, both well behind the object, never turns it on; a panel lit unevenly still does.
+    func testTexturedGreenBehindAWalkAroundNeverKeysAFlatPanelDoes() throws {
+        for background in [Background.lawn, .leaves] {
+            let (image, depth) = try scene(panel: (110, 170, 40), panelDepth: 0.9, background: background)
+            let frame = try BackdropKey.key(image: image, depth: depth)
+            XCTAssertGreaterThan(frame.share, BackdropKey.minimumShare, "\(background): plenty of the colour")
+            XCTAssertFalse(frame.isBackdrop, "\(background): fill \(frame.fill), hue spread \(frame.hueSpread)")
+            XCTAssertEqual(frame.keep.onCount, frame.keep.width * frame.keep.height, "\(background): nothing keyed")
+        }
+        let (image, depth) = try scene(panel: (160, 147, 31), panelDepth: 0.41, background: .unevenlyLit)
+        let frame = try BackdropKey.key(image: image, depth: depth)
+        XCTAssertTrue(frame.isBackdrop, "fill \(frame.fill), hue spread \(frame.hueSpread)")
+        XCTAssertFalse(kept(frame, 100, 40))
     }
 
     func testAYellowOrGreenObjectWithNothingBehindItIsNeverKeyed() throws {

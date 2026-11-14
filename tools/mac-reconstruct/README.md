@@ -14,25 +14,26 @@ macOS command-line tools for rebuilding and checking scans on the Mac.
   photos `.high` failed 6 of 6 times; `.normal` placed 27–28); `--honor-box` is for diagnostics only. Apple's capture box was fitted to the script on David's sign and cut off the letters; the masks still separate the object from the room. On David's rig scan, `.sequential` with
   `.high` placed 5–7 of 24 photos in three runs, against 9 of 24 unordered. The companion runs it at `full` on every
   image a walk-around sent (`ReconstructInput.objectCapture`).
-- **A scan rig's backdrop is keyed out** (`HandheldKit/BackdropKey.swift`, `--backdrop auto`, the default). David's rig
-  carries a lime panel on the arm, behind the object in every photo; Apple's masking kept it, and the panel filled the
-  DAD sign's counters and the gaps between its letters with green surface (Nov 8 and Nov 14). Each photo is checked for
-  a saturated yellow-green to green with almost no blue (the panel measured RGB ≈ 160,147,31 in warm light to
-  202,211,67 in daylight; the sign's wood base, black letters and grey plate all fail it) covering at least 2% of the
-  photo and sitting at least 0.12 m behind the nearest surface in the LiDAR depth (panel ≈ 0.41 m, sign ≈ 0.17 m), so
-  a green or yellow object is never keyed. Within such a photo, a region of the colour covering at least 2% of it
-  whose median depth sits within 0.12 m of the nearest surface is part of the object and stays (a green part of the
-  object in the same photo as the panel). Smaller regions are keyed by colour: the LiDAR depth is upsampled from far
-  fewer points and reads a letter's counter at the letter's own depth (keying those by depth per pixel closed the A's
-  counters on the Nov 8 scan again). A green part of the object smaller than that, or touching the panel in the
-  photo, goes with the panel. When a quarter of the photos or more show it, the folder goes in as
-  `PhotogrammetrySample`s (`loadCaptureSample`: the same image, metadata, depth and gravity Apple's folder input reads)
-  and each keyed photo gets an object mask: Vision's foreground minus the backdrop, cleaned by a 4 px opening. A
-  supplied mask switches Apple's own masking off for that photo, so the mask must leave out the room too; the key
-  alone brought in the room, the table and the rig's stand. On Nov 14 (68 photos) the keyed model has no green and a
-  more open A; on Nov 8 (59 photos) the A's two counters and the right D's counter, fused solid without the key, are
-  open. `--backdrop off` keeps the folder input untouched; `--backdrop samples` goes through samples with no key (on
-  Nov 14 it matched the folder input: 194.3 × 25.3 × 102.2 against 194.6 × 24.7 × 102.5 mm).
+- **A flat green or yellow-green backdrop is keyed out** (`HandheldKit/BackdropKey.swift`, `--backdrop auto`, the
+  default), on any scan that has one: a green screen, or the lime panel on David's scan rig (nothing assumes the rig).
+  Apple's masking kept the rig's panel, which filled the DAD sign's counters and the gaps between its letters with
+  green surface (Nov 8 and Nov 14). A pixel is of the colour when it is saturated yellow-green to green with almost no
+  blue (the panel measured RGB ≈ 160,147,31 in warm light to 202,211,67 in daylight; the sign's wood base, black
+  letters and grey plate all fail it). Grass, leaves and a yellow-green wall pass that too, so a photo shows a backdrop
+  only when its largest region of the colour (depth cells mostly that colour, connected) is a deliberate panel: at least
+  2% of the photo, its cells at least 90% that colour on average (flat, not broken up), the middle 80% of their hues
+  within 10° (one paint, not many greens), and its median depth at least 0.12 m behind the nearest surface in the
+  LiDAR depth. When a quarter of the photos or more show one, the folder goes in as `PhotogrammetrySample`s
+  (`loadCaptureSample`: the same image, metadata, depth and gravity Apple's folder input reads) and each such photo
+  gets an object mask: Vision's foreground minus the backdrop, cleaned by a 4 px opening. A supplied mask switches
+  Apple's own masking off for that photo, so the mask leaves out the room too.
+  Within such a photo, another region of the colour covering at least 2% of it whose median depth sits within 0.12 m of
+  the nearest surface is part of the object and stays. Smaller regions are keyed by colour: the LiDAR depth is
+  upsampled from far fewer points and reads a letter's counter at the letter's own depth. The trade-off is a green
+  screen's: a small feature of the object in the backdrop's own colour (under 2% of the photo, or touching the panel in
+  the photo) is keyed with it.
+  `--backdrop off` keeps the folder input untouched; `--backdrop samples` goes through samples with no key (on Nov 14
+  it matched the folder input: 194.3 × 25.3 × 102.2 against 194.6 × 24.7 × 102.5 mm).
   `mac-reconstruct backdrop <images-folder> [--save-masks <dir>]` prints what the key sees in each photo and saves the
   masks. The rig's stand under the plate then comes along with the plate; `--remove-support` handles that (below).
 - `mac-reconstruct stl <model.usdz> <output.stl> [--render <png>] [--remove-support]` writes the model's triangles as a

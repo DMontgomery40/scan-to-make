@@ -120,6 +120,9 @@ if args.first == "backdrop" {
             if frame.isBackdrop { keyed += 1 }
             var line: [String: Any] = ["photo": file.lastPathComponent, "share": (frame.share * 1000).rounded() / 1000,
                                        "keyed": frame.isBackdrop, "gravity": sample.gravity != nil, "depth": sample.depthDataMap != nil]
+            line["panelShare"] = (frame.panelShare * 1000).rounded() / 1000
+            line["fill"] = (frame.fill * 1000).rounded() / 1000
+            if frame.hueSpread.isFinite { line["hueSpread"] = (Double(frame.hueSpread) * 10).rounded() / 10 }
             if let d = frame.backdropDepth { line["backdropM"] = (Double(d) * 1000).rounded() / 1000 }
             if let d = frame.nearestDepth { line["nearestM"] = (Double(d) * 1000).rounded() / 1000 }
             if let save, frame.isBackdrop, let mask = try BackdropKey.objectMask(image: sample.image, frame: frame) {
