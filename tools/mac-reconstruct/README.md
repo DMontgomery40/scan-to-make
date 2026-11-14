@@ -22,11 +22,16 @@ macOS command-line tools for rebuilding and checking scans on the Mac.
   letters and grey plate all fail it). Grass, leaves and a yellow-green wall pass that too, so a photo shows a backdrop
   only when its largest region of the colour (depth cells mostly that colour, connected) is a deliberate panel: at least
   2% of the photo, its cells at least 80% that colour on average (flat, not broken up), the middle 80% of their hues
-  within 15° (one paint, not many greens), and its median depth at least 0.12 m behind the nearest surface in the
-  LiDAR depth. Measured on every capture on David's Mac (Nov 14): the rig's panel at fill 0.73–0.99 and hue spread
+  within 15° (one paint, not many greens), its median depth at least 0.12 m behind the nearest surface in the
+  LiDAR depth, and something clearly in front of it: across its border, the nearer surfaces next to it sit at least
+  0.06 m nearer (the median step, sampled past the depth map's blurred edge). A deep object of the colour with no
+  backdrop (a lime crate) fails that last test: its far face meets its own walls and the table at about its own depth. Measured on every capture on David's Mac (Nov 14): the rig's panel at fill 0.73–0.99 and hue spread
   1–13.5° per photo; no photo of any other capture reached 2% of the colour. When a quarter of the photos or more show one, the folder goes in as `PhotogrammetrySample`s
   (`loadCaptureSample`: the same image, metadata, depth and gravity Apple's folder input reads) and each such photo
-  gets an object mask: Vision's foreground minus the backdrop, cleaned by a 4 px opening. A supplied mask switches
+  gets an object mask: Vision's foreground minus the backdrop, cleaned by a 4 px opening, which also drops any feature
+  of the object thinner than 9 px (about half a millimetre at 0.17 m). The masks are made once, in the first pass, and
+  kept as PNGs in a temporary folder for the build; a photo that can't be read is skipped, never the rebuild, and a
+  keyed photo Vision finds no foreground in logs `{"warning":"no-object-mask"}` and keeps Apple's own masking. A supplied mask switches
   Apple's own masking off for that photo, so the mask leaves out the room too.
   Within such a photo, another region of the colour covering at least 2% of it whose median depth sits within 0.12 m of
   the nearest surface is part of the object and stays. Smaller regions are keyed by colour: the LiDAR depth is
@@ -47,7 +52,8 @@ macOS command-line tools for rebuilding and checking scans on the Mac.
   outside that part's footprint go too. It only counts as a support when most of it, and at least 50 cm², lies
   outside the footprint of what stands on it, so an object's own step (a sign's plank under its letters) is never
   cut. When nothing is found it tries again without loose pieces floating wholly below the largest one, then over the
-  model's whole height (a rig's stand under its plate pushes the plate out of the bottom half). The cut is then closed (`HandheldKit/Cap.swift`): each opening it left on the plane is filled flat by ear
+  model's lower 60% (a rig's stand under its plate pushes the plate just past the bottom half; an object's own high
+  step, a stool's top or a shelf's top board, sits above that and is never cut). The cut is then closed (`HandheldKit/Cap.swift`): each opening it left on the plane is filled flat by ear
   clipping its own edge, holes kept (a hollow foot gets a ring, not a disc), with no new corners, so the kept triangles
   are unchanged and a scan that was watertight stays watertight. The result is levelled on the plane, turned so its
   long side runs along x, and drawn for the project page. The `{"done":…}` line then carries `"support"`, with

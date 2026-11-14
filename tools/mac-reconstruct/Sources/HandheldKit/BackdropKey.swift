@@ -36,6 +36,10 @@ public enum BackdropKey {
     /// mixed light at the low and high ends); no photo of any other capture on David's Mac reached 2% of the colour.
     /// Grass and leaves sit far outside: many greens (spread over 30°) or speckled cells (fill about 0.7).
     public static let minimumFill = 0.8
+    /// A backdrop has something in front of it: across the panel's border, the nearer surfaces next to it (the object,
+    /// the plate) sit at least this much nearer, as the median step (metres). A deep object of the colour (a lime crate,
+    /// no backdrop) fails it: its far face meets its own walls and the table at about its own depth (review of #801, F2).
+    public static let minimumFrontStep: Float = 0.06
     public static let maximumHueSpread: Float = 15
     /// A region of the colour this big (share of the photo) at the object's depth is part of the object and stays.
     /// Smaller ones, which the depth map can't measure (a letter's counter, the slot between letters), are backdrop.
@@ -53,13 +57,40 @@ public enum BackdropKey {
         public var hueSpread: Float = .infinity
         public var backdropDepth: Float?
         public var nearestDepth: Float?
+        /// The median depth step from the panel's border to the nearer surfaces just outside it (metres); nil when fewer
+        /// than four border cells have a nearer neighbour, so nothing stands in front of it.
+        public var frontStep: Float?
         /// Whether this photo shows a deliberate backdrop: a flat, uniform panel of the colour, behind the object.
         public var isBackdrop: Bool {
             guard share >= BackdropKey.minimumShare, panelShare >= BackdropKey.minimumPanelShare,
                   fill >= BackdropKey.minimumFill, hueSpread <= BackdropKey.maximumHueSpread else { return false }
-            guard let backdropDepth, let nearestDepth else { return false }
-            return backdropDepth - nearestDepth >= BackdropKey.minimumGap
+            guard let backdropDepth, let nearestDepth, let frontStep else { return false }
+            return backdropDepth - nearestDepth >= BackdropKey.minimumGap && frontStep >= BackdropKey.minimumFrontStep
         }
+    }
+
+    /// Across the region's border, how much nearer the surfaces just outside it are: per border cell and direction, the
+    /// depth two cells inside the region against three cells outside (past the depth map's blurred edge), where the
+    /// outside is not of the colour and is nearer. The median of those steps; nil with fewer than four.
+    static func frontStep(_ region: [Int], cells: Cells, colour: [Bool], depth: DepthImage) -> Float? {
+        var inside = [Bool](repeating: false, count: cells.width * cells.height)
+        for c in region { inside[c] = true }
+        func at(_ x: Int, _ y: Int) -> Int? { x >= 0 && y >= 0 && x < cells.width && y < cells.height ? y * cells.width + x : nil }
+        func reading(_ c: Int) -> Float? { let d = depth.metres[c]; return d > 0 && d.isFinite ? d : nil }
+        var steps: [Float] = []
+        for c in region {
+            let cx = c % cells.width, cy = c / cells.width
+            for (dx, dy) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+                guard let next = at(cx + dx, cy + dy), !inside[next],
+                      let out = at(cx + 3 * dx, cy + 3 * dy), !colour[out], let near = reading(out) else { continue }
+                let deep = at(cx - 2 * dx, cy - 2 * dy).flatMap { inside[$0] ? $0 : nil } ?? c
+                guard let far = reading(deep), near < far else { continue }
+                steps.append(far - near)
+            }
+        }
+        guard steps.count >= 4 else { return nil }
+        steps.sort()
+        return steps[steps.count / 2]
     }
 
     /// The hue of a pixel of the colour, in degrees (green is 120, yellow 60).
@@ -153,6 +184,7 @@ public enum BackdropKey {
             let hues = panel.map { cells.hue[$0] }.filter { !$0.isNaN }.sorted()
             if !hues.isEmpty { result.hueSpread = hues[min(hues.count - 1, hues.count * 9 / 10)] - hues[hues.count / 10] }
             result.backdropDepth = medianDepth(panel)
+            result.frontStep = frontStep(panel, cells: cells, colour: colour, depth: depth)
         }
         guard result.isBackdrop else { return result }
         // Which regions of the colour are the object's own (review of #793): a green or yellow part of the object in the
@@ -190,17 +222,27 @@ public enum BackdropKey {
     /// room, the table and the rig's stand, not just the panel (on Nov 14, the key alone brought all three in).
     /// Nil when Vision finds no foreground; the photo then keeps Apple's own masking.
     public static func objectMask(image: CVPixelBuffer, frame: Frame) throws -> GrayImage? {
-        guard frame.isBackdrop else { return nil }
+        guard frame.isBackdrop, let foreground = try foreground(of: image) else { return nil }
+        return objectMask(keep: frame.keep, foreground: foreground.resized(width: frame.keep.width, height: frame.keep.height))
+    }
+
+    /// Vision's foreground, every instance it finds, as a mask (255 = foreground); nil when it finds none.
+    static func foreground(of image: CVPixelBuffer) throws -> GrayImage? {
         let request = VNGenerateForegroundInstanceMaskRequest()
         let handler = VNImageRequestHandler(cvPixelBuffer: image, options: [:])
         try handler.perform([request])
         guard let observation = request.results?.first, !observation.allInstances.isEmpty else { return nil }
         let scaled = try observation.generateScaledMaskForImage(forInstances: observation.allInstances, from: handler)
-        let foreground = GrayImage(buffer: scaled).resized(width: frame.keep.width, height: frame.keep.height).thresholded()
-        var mask = frame.keep
+        return GrayImage(buffer: scaled).thresholded()
+    }
+
+    /// The object mask from the key's keep mask and the foreground (same size): kept and foreground, then an opening
+    /// drops what the key leaves as thin lines and specks (the panel's rim, glare on it). It keeps anything at least
+    /// 2 × `cleanup` + 1 pixels thick, which every part of the DAD sign is at 4032 × 3024 (a 9-pixel feature is about
+    /// half a millimetre at 0.17 m); thinner features of the object go with them. Nil when nothing is left.
+    public static func objectMask(keep: GrayImage, foreground: GrayImage) -> GrayImage? {
+        var mask = keep
         for i in mask.pixels.indices where foreground.pixels[i] < 128 { mask.pixels[i] = 0 }
-        // An opening drops what the key leaves as thin lines and specks (the panel's rim, glare on it) and keeps
-        // anything thicker than `cleanup` pixels, which every part of the object is at 4032 × 3024.
         mask = opened(mask, by: cleanup)
         return mask.onCount > 0 ? mask : nil
     }
