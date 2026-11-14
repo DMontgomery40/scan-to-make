@@ -39,7 +39,10 @@ public enum BackdropKey {
     /// A backdrop has something in front of it: across the panel's border, the nearer surfaces next to it (the object,
     /// the plate) sit at least this much nearer, as the median step (metres). A deep object of the colour (a lime crate,
     /// no backdrop) fails it: its far face meets its own walls and the table at about its own depth (review of #801, F2).
-    public static let minimumFrontStep: Float = 0.06
+    /// Measured on the DAD rig photos that pass every other test: median 0.10 m, with Nov 8's dim photos down to
+    /// 0.05; 0.04 keeps all but 3 of Nov 14's 60 and 4 of Nov 8's 49. A continuous surface measures about 0.04 or
+    /// less across the sampled five cells.
+    public static let minimumFrontStep: Float = 0.04
     public static let maximumHueSpread: Float = 15
     /// A region of the colour this big (share of the photo) at the object's depth is part of the object and stays.
     /// Smaller ones, which the depth map can't measure (a letter's counter, the slot between letters), are backdrop.

@@ -141,14 +141,15 @@ final class BackdropKeyTests: XCTestCase {
         let w = 120, h = 80
         var keep = GrayImage(width: w, height: h, fill: 255)
         for y in 0..<h { for x in 70..<w { keep[x, y] = 0 } }             // the keyed panel, right side
-        for y in 0..<h { keep[70, y] = 255; keep[71, y] = 255 }           // its rim, left by the key's edge allowance
+        for y in 0..<h { keep[96, y] = 255; keep[97, y] = 255 }           // its far rim, unkeyed, inside the foreground
         var foreground = GrayImage(width: w, height: h)
         for y in 20..<60 { for x in 20..<100 { foreground[x, y] = 255 } } // the object and the panel behind it
         for y in 5..<20 { for x in 40..<43 { foreground[x, y] = 255 } }   // a wire 3 pixels thick standing on it
         let mask = BackdropKey.objectMask(keep: keep, foreground: foreground)!
         XCTAssertEqual(mask[40, 40], 255, "the object's body")
         XCTAssertEqual(mask[90, 40], 0, "the panel")
-        XCTAssertEqual(mask[71, 40], 0, "the panel's rim")
+        XCTAssertEqual(mask[97, 40], 0, "the panel's rim")
+        XCTAssertEqual(mask[69, 40], 255, "the object's edge against the panel")
         XCTAssertEqual(mask[10, 40], 0, "the room outside the foreground")
         XCTAssertEqual(mask[41, 10], 0, "a feature thinner than 2 × cleanup + 1 pixels goes too")
         XCTAssertNil(BackdropKey.objectMask(keep: keep, foreground: GrayImage(width: w, height: h)), "no foreground, no mask")

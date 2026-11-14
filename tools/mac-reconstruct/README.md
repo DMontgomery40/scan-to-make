@@ -24,7 +24,7 @@ macOS command-line tools for rebuilding and checking scans on the Mac.
   2% of the photo, its cells at least 80% that colour on average (flat, not broken up), the middle 80% of their hues
   within 15° (one paint, not many greens), its median depth at least 0.12 m behind the nearest surface in the
   LiDAR depth, and something clearly in front of it: across its border, the nearer surfaces next to it sit at least
-  0.06 m nearer (the median step, sampled past the depth map's blurred edge). A deep object of the colour with no
+  0.04 m nearer (DAD rig photos: median 0.10 m) (the median step, sampled past the depth map's blurred edge). A deep object of the colour with no
   backdrop (a lime crate) fails that last test: its far face meets its own walls and the table at about its own depth. Measured on every capture on David's Mac (Nov 14): the rig's panel at fill 0.73–0.99 and hue spread
   1–13.5° per photo; no photo of any other capture reached 2% of the colour. When a quarter of the photos or more show one, the folder goes in as `PhotogrammetrySample`s
   (`loadCaptureSample`: the same image, metadata, depth and gravity Apple's folder input reads) and each such photo
