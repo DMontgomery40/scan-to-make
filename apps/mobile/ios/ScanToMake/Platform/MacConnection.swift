@@ -281,6 +281,7 @@ typealias MacError = CompanionError
         let drafts = (try? NativeCaptureCoordinator.shared.drafts()) ?? []
         let active = NativeCaptureCoordinator.status()["activeRunID"] as? String
         var newest: [String: StoppedScan?] = [:]
+        let removed = Self.removedStoppedScans
         // Newest first (the store sorts by creation time).
         for draft in drafts {
             guard let run = draft["runID"] as? String, UUID(uuidString: run) != nil, run == run.lowercased(), run != active,
@@ -288,6 +289,7 @@ typealias MacError = CompanionError
                   let status = draft["status"] as? String else { continue }
             let folder = URL.documentsDirectory.appending(path: "NativeCaptures/\(run)", directoryHint: .isDirectory)
             let stopped = ["stopped", "failed", "interrupted"].contains(status)
+            if stopped && removed.contains(run) { continue }
             let photos = stopped ? Self.imageNames(in: folder.appending(path: "Images", directoryHint: .isDirectory)).count : 0
             if stopped && photos == 0 { continue }
             guard newest[project] == nil else { continue }
@@ -301,13 +303,15 @@ typealias MacError = CompanionError
     enum KeptScan: Equatable { case finished(run: String), stopped(run: String, photos: Int) }
 
     /// `drafts` newest first, as the capture store lists them; `photos` counts a run's kept images.
-    static func keptScan(for project: String, drafts: [[String: Any]], active: String?, photos: (String) -> Int) -> KeptScan? {
+    /// `removed`: stopped runs taken off their project with Remove; they stay on the phone and are never sent.
+    static func keptScan(for project: String, drafts: [[String: Any]], active: String?, removed: Set<String> = [],
+                         photos: (String) -> Int) -> KeptScan? {
         for draft in drafts {
             guard let run = draft["runID"] as? String, UUID(uuidString: run) != nil, run == run.lowercased(), run != active,
                   (draft["origin"] as? [String: Any])?["projectId"] as? String == project,
                   let status = draft["status"] as? String else { continue }
             if status == "ready" { return .finished(run: run) }
-            guard ["stopped", "failed", "interrupted"].contains(status) else { continue }
+            guard ["stopped", "failed", "interrupted"].contains(status), !removed.contains(run) else { continue }
             let kept = photos(run)
             if kept > 0 { return .stopped(run: run, photos: kept) }
         }
@@ -317,9 +321,32 @@ typealias MacError = CompanionError
     func keptScan(_ id: String) -> KeptScan? {
         let drafts = (try? NativeCaptureCoordinator.shared.drafts()) ?? []
         let active = NativeCaptureCoordinator.status()["activeRunID"] as? String
-        return Self.keptScan(for: id, drafts: drafts, active: active) { run in
+        return Self.keptScan(for: id, drafts: drafts, active: active, removed: Self.removedStoppedScans) { run in
             Self.imageNames(in: URL.documentsDirectory.appending(path: "NativeCaptures/\(run)/Images", directoryHint: .isDirectory)).count
         }
+    }
+
+    /// Stopped runs taken off their project on New with Remove (review of #795): a stray few photos never lock a draft
+    /// or go with its Send. Kept on the phone; nothing deletes a capture.
+    static var removedStoppedScans: Set<String> { Set(UserDefaults.standard.stringArray(forKey: removedStoppedKey) ?? []) }
+    static func removeStoppedScan(run: String) {
+        UserDefaults.standard.set((removedStoppedScans.union([run])).sorted(), forKey: removedStoppedKey)
+    }
+    private static let removedStoppedKey = "CounterpartRemovedStoppedScans"
+
+    /// Whether a kept scan is named to the Mac as soon as it's attached: a stopped one with enough photos. One with
+    /// fewer waits for Send, so Remove can still take it off and the project designs from the words (review of #795).
+    static func declaresAtOnce(_ kept: KeptScan?) -> Bool {
+        if case .stopped(_, let photos)? = kept { return isEnough(stoppedPhotos: photos) }
+        return false
+    }
+
+    /// The photos of the run a capture just stopped, comparing the project's kept scan before and after it: nil when
+    /// that run kept none, so an older stopped run is never sent again in its place (review of #795).
+    static func justStopped(before: KeptScan?, after: KeptScan?) -> Int? {
+        guard case .stopped(let run, let photos)? = after else { return nil }
+        if case .stopped(let earlier, _)? = before, earlier == run { return nil }
+        return photos
     }
 
     /// Whether a send cut short (Send was pressed, `sendRequested`) has a scan on this phone to finish with: an in-hand

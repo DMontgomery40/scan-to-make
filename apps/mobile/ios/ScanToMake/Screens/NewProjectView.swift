@@ -35,6 +35,8 @@ struct NewObjectView: View {
     @State private var measuredMiddle = ""
     @State private var measuredShortest = ""
     @State private var captureWarning: String?
+    /// A stopped scan with too few photos to send by itself, attached here: Remove takes it off (review of #795).
+    @State private var removableStop: String?
     /// One of the finished scan's own frames, shown beside its question.
     @State private var scanPicture: URL?
     @FocusState private var describing: Bool
@@ -377,6 +379,14 @@ struct NewObjectView: View {
                 if picked != nil {
                     Button("Remove") { picked = nil; scanUse = nil }.font(.subheadline)
                         .disabled(working != nil).accessibilityIdentifier("scan-use-remove")
+                } else if let run = removableStop {
+                    // A few stray photos from a stopped scan: take them off and the project designs from the words.
+                    Button("Remove") {
+                        MacConnection.removeStoppedScan(run: run)
+                        removableStop = nil; attached = nil; captureWarning = nil; scanUse = nil
+                        store.refreshStoppedScans()
+                    }
+                    .font(.subheadline).disabled(working != nil).accessibilityIdentifier("scan-use-remove")
                 }
             }
             ScanUseRow(symbol: "doc.on.doc", title: ScanLineage.copyChoice,
@@ -647,20 +657,23 @@ struct NewObjectView: View {
         switch store.mac.keptScan(id) {
         case .finished:
             captureWarning = store.mac.localScanWarning(id)
+            removableStop = nil
             return .walkAround
-        case .stopped(_, let photos) where includingStopped:
+        case .stopped(let run, let photos) where includingStopped:
             captureWarning = MacConnection.stoppedScanWords(photos: photos)
+            removableStop = MacConnection.isEnough(stoppedPhotos: photos) ? nil : run
             return .walkAround
         case .stopped, nil:
             return nil
         }
     }
 
-    /// A stopped scan is named to the Mac at once (its photos follow on Send): the Mac then starts this project only
-    /// with them, from any client, and says the scan is still on the phone until they come. Scan again names the new
-    /// run's photos instead.
+    /// A stopped scan with enough photos is named to the Mac at once (its photos follow on Send): the Mac then starts
+    /// this project only with them, from any client, and says the scan is still on the phone until they come. Scan
+    /// again names the new run's photos instead. One with fewer is named on Send, so Remove can still take it off.
     private func declareStoppedScan(_ object: Project) {
-        guard case .stopped(let run, _) = store.mac.keptScan(object.id) else { return }
+        let kept = store.mac.keptScan(object.id)
+        guard MacConnection.declaresAtOnce(kept), case .stopped(let run, _)? = kept else { return }
         let mac = store.mac
         Task { try? await mac.declareKeptScan(object.id, run: run) }
     }

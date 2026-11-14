@@ -996,6 +996,34 @@ private actor HeldDownload {
         XCTAssertFalse(MacConnection.resumesSend(handheldFinished: false, kept: nil), "nothing on this phone to send")
     }
 
+    /// Review of #795: a stray stopped scan (1–19 photos) is attached but not named to the Mac until Send, so Remove can
+    /// take it off; removed, it is never sent and an older finished scan, if any, is the project's again. Enough photos
+    /// are named at once. Kept, a small one is still what Send sends.
+    func testASmallStoppedScanWaitsForSendAndCanBeRemoved() {
+        let small = "cccccccc-0000-4000-8000-000000000003", older = "dddddddd-0000-4000-8000-000000000004"
+        XCTAssertFalse(MacConnection.declaresAtOnce(.stopped(run: small, photos: 2)))
+        XCTAssertTrue(MacConnection.declaresAtOnce(.stopped(run: small, photos: 68)))
+        XCTAssertFalse(MacConnection.declaresAtOnce(.finished(run: small)), "a finished scan goes with its own upload")
+        XCTAssertFalse(MacConnection.declaresAtOnce(nil))
+        XCTAssertEqual(MacConnection.keptScan(for: "dad", drafts: [draft(small, "stopped")], active: nil) { _ in 2 },
+                       .stopped(run: small, photos: 2), "kept, Send sends it")
+        XCTAssertNil(MacConnection.keptScan(for: "dad", drafts: [draft(small, "stopped")], active: nil, removed: [small]) { _ in 2 },
+                     "removed: the project designs from the words")
+        XCTAssertEqual(MacConnection.keptScan(for: "dad", drafts: [draft(small, "stopped"), draft(older, "ready")], active: nil,
+                                              removed: [small]) { _ in 2 }, .finished(run: older))
+    }
+
+    /// Review of #795: Stop on the project page sends only the run it just stopped. A capture that kept no photos
+    /// finds the older stopped run still there, and must not send it again in its place.
+    func testStopWithNoPhotosNeverResendsAnOlderStoppedScan() {
+        let a = "aaaaaaaa-0000-4000-8000-000000000001", b = "bbbbbbbb-0000-4000-8000-000000000002"
+        XCTAssertNil(MacConnection.justStopped(before: .stopped(run: a, photos: 30), after: .stopped(run: a, photos: 30)))
+        XCTAssertEqual(MacConnection.justStopped(before: .stopped(run: a, photos: 30), after: .stopped(run: b, photos: 25)), 25)
+        XCTAssertEqual(MacConnection.justStopped(before: nil, after: .stopped(run: b, photos: 3)), 3)
+        XCTAssertNil(MacConnection.justStopped(before: nil, after: .finished(run: b)))
+        XCTAssertNil(MacConnection.justStopped(before: .finished(run: a), after: nil))
+    }
+
     /// What the New sheet says under a stopped scan it attached: enough photos are simply sent; a few are sent with a
     /// warning, never kept back.
     func testAStoppedScanSaysWhatItKeptAndWhetherThatIsEnough() {
