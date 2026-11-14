@@ -33,7 +33,6 @@ import { hostEnvironment } from './printing/mcp-install.js';
 import { IcloudEnrolment } from './icloud-enrolment.js';
 import {startLocalControl} from './local-control.js';
 import {diagnosticsBundle, directorySource} from './diagnostics.js';
-import {homedir} from 'node:os';
 import {createControlDispatcher, companionVersion} from './local-control-services.js';
 import type {CaptureServices} from './capture-http.js';
 import {RuntimeSettings} from './runtime-settings.js';
@@ -53,6 +52,7 @@ import {BlenderAddonRepair, BlenderSetupUnavailableError, type BlenderSetupRepor
 import {mcpPackageName} from './printing/print-settings.js';
 import {loadPrinterCatalog,type PrinterCatalog} from './objects/printers.js';
 import {PrinterSetup,findMcpFolders} from './printing/setup.js';
+import {homedir} from 'node:os';
 
 // Presence is explicit opt-in. Invalid/empty configuration must fail, never fall back.
 const directory = process.env.SCAN_TO_MAKE_REMOTE_AUTH_DIR;
