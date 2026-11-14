@@ -756,6 +756,31 @@ test('#788: an unchanged pass with a final run clears a draft, on the project an
   assert.equal(f.events.findLast(event => event.type === 'pass.ready').detail?.draft, undefined);
 });
 
+// Train review F6: a done pass whose model bytes match the newest design seals no new design (sealVersion returns
+// it), so the newest design must take the project's draft state too, or picking it shows the wrong words.
+test('#788: a done pass with the same model bytes brings the newest design\'s draft state with it, both ways', async t => {
+  const reasons = ['Model the desk as world:desk in use().'];
+  const f = await setup(t, [
+    {engine: 'code', result: {summary: 'A hook.'}},
+    {engine: 'code', result: {summary: 'The same hook, not finished.', draft: {reasons}}},
+    {engine: 'code', result: {summary: 'The same hook, finished.', finalRun: true}},
+  ]);
+  const object = await f.service.create('A hook for under the desk', 'fit');
+  await f.service.start(object.id);
+  await f.service.settled(object.id);
+  await f.service.correct(object.id, 'Check it again');
+  const drafted = await f.service.settled(object.id);
+  assert.equal(drafted.passes.at(-1).status, 'done');
+  assert.equal(drafted.versions.length, 1, 'the same bytes are the same design');
+  assert.deepEqual(drafted.current.draft, {reasons});
+  assert.deepEqual(drafted.versions.at(-1).result.draft, {reasons}, 'the newest design says it is a draft too');
+  await f.service.correct(object.id, 'Finish it');
+  const finished = await f.service.settled(object.id);
+  assert.equal(finished.versions.length, 1);
+  assert.equal(finished.current.draft, undefined);
+  assert.equal(finished.versions.at(-1).result.draft, undefined, 'and is no longer one');
+});
+
 // Review of #790 (P1): the same on a finished design never makes it a draft. The pass ends unchanged and keeps the
 // engine's reasons on its own record, so the conversation can say why nothing changed.
 test('#788: an unchanged pass with no final run on a finished design leaves it finished and keeps the reasons on the pass', async t => {

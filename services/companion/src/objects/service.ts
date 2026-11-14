@@ -3619,16 +3619,19 @@ export class ObjectService {
     const pass = beforeSeal.passes.find(p => p.startedAtMs === startedAtMs);
     // A pass that said it changed nothing keeps the design it started from, even when its file was written again.
     const kept = result.status === 'unchanged' ? beforeSeal.versions?.at(-1) : undefined;
-    // #788: the newest design stays the same design, and says what the project's draft now says (or, #790 (c), that it
-    // is no longer a draft).
-    const keptResult = kept?.result.draft && current ? (({draft: _draft, ...rest}) => current.draft ? {...rest, draft: current.draft} : rest)(kept.result) : undefined;
     const version = kept ?? (current && (result.status === 'done' || result.status === 'unchanged') ? await sealVersion(beforeSeal, dir, current, {startedAtMs, endedAtMs: now, ...(pass?.note ? {note: pass.note} : {})}) : undefined);
     const changed = !!version && !beforeSeal.versions?.some(v => v.id === version.id);
+    // #788: a design sealed before (an unchanged pass, or train review F6: a done pass whose model bytes match it, which
+    // sealVersion returns as it was) stays the same design, and says what the project's draft now says: set, replaced
+    // or (#790 (c)) cleared.
+    const existing = version && !changed ? beforeSeal.versions?.find(v => v.id === version.id) : undefined;
+    const syncedResult = existing && current && JSON.stringify(existing.result.draft) !== JSON.stringify(current.draft)
+      ? (({draft: _draft, ...rest}) => current.draft ? {...rest, draft: current.draft} : rest)(existing.result) : undefined;
     const updated = await store.update(id, o => ({...(changed ? (({outcome: _outcome, ...rest}) => rest)(o) : o),
       state: state === 'ready' && !changed && o.outcome === 'works' ? 'confirmed' : state, progress: undefined,
       ...(current ? {current} : {}),
       ...(version && changed ? {versions: [...(o.versions ?? []), version]} : {}),
-      ...(kept && keptResult ? {versions: (o.versions ?? []).map(v => v.id === kept.id ? {...v, result: keptResult} : v)} : {}),
+      ...(existing && syncedResult ? {versions: (o.versions ?? []).map(v => v.id === existing.id ? {...v, result: syncedResult} : v)} : {}),
       // A copy's new model is no longer the kept designer file: its plate selection (and sliced plate) went with it.
       ...(current && o.kind !== 'published' && o.publishedSelection ? {publishedSelection: undefined} : {}),
       ...(!o.title && result.title ? {title: result.title} : {}),
