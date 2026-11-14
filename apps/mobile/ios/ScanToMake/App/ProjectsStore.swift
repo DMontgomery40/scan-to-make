@@ -273,6 +273,8 @@ import CounterpartKit
             remember(listed: latest)
             refreshStoppedScans()
             for project in projects where corrections.pending(project.id) != nil { sendQueuedNote(project) }
+            // The Mac answered: any stopped scan it hasn't acknowledged yet is declared now (review of #801).
+            if !MacConnection.pendingDeclares().isEmpty { let mac = mac; Task { await mac.retryPendingDeclares() } }
         } catch let failure as CompanionError {
             guard !Task.isCancelled, reads.isCurrent(ticket), failure.code != "cancelled" else { return }
             // The list couldn't be read: the banner says why, whatever the reason.
