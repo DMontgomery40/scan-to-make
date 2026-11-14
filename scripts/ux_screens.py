@@ -849,7 +849,9 @@ def select(args, out: Path, keys: list[str], ctx: dict) -> tuple[list[dict], set
             items = [i for i in items if any(i['name'].endswith('-' + w.lstrip('=')) for w in args.screens.split(','))]
     if getattr(args, 'pages', None):  # --pages N: at most N scrolled pages per screen (the stage is on the first)
         items = [{**i, 'pages': min(i['pages'], args.pages)} for i in items]
-    done = {(d['device'], d['name']) for d in read_jsonl(out / 'done.jsonl')}
+    # A screen is done only for the build that captured it: after a new commit the same folder captures it again.
+    source = ctx['info'].get('source')
+    done = {(d['device'], d['name']) for d in read_jsonl(out / 'done.jsonl') if not source or d.get('source') == source}
     if args.redo: done -= {(k, i['name']) for k in keys for i in items}
     return items, done
 
