@@ -524,7 +524,7 @@ export type InheritedHistory = z.infer<typeof InheritedHistorySchema>;
 const relativePath = z.string().min(1).max(512).refine(path => !path.startsWith('/') && !path.split('/').includes('..'));
 /**
  * #788: a draft design, never a finished one: the code engine's last valid run of a pass that ended with no run the
- * engine let the worker make final. `reasons` are the printer MCP's own words (its `final_refused`, or its failing
+ * engine let the worker make final. `reasons` are the printer MCP's own words (its `draft_reasons`, its `final_refused`, or its failing
  * purpose requirements), shown as given and never interpreted; an MCP from before engine round 4 gives none. On
  * `current.draft` and on the sealed design's `result.draft`. Every layout shows `DRAFT_LINE` with it.
  */
