@@ -79,6 +79,40 @@ The lead owns release decisions (David, Nov 10: "NO PUBLISHING IS YOURS TOO ... 
   - iPad: **202611121212**. It has been off the Mac's network since Nov 12 20:4xZ, and the watcher (`~/scan-to-make-work/install-when-reachable-202611130318/`) gives up at 2026-11-14 18:00Z. Re-arm it or install by hand when the iPad is back.
   - MCPs in the app: 1.1.94 / 1.2.76.
 
+### Running the team from T3: IDs and traps (as of Nov 14)
+
+Read operations.md, "Agents, models and machines", first. This adds the concrete IDs and what the last lead learned the hard way.
+
+**Environments** (check them with `t3_environment_links`):
+
+| Machine | `environmentId` | Used for |
+|---|---|---|
+| Mac mini | `11412686-e469-46d5-8f3a-5aaa68539c60` | builds, installs, devices, the Mac gate, notarization |
+| agents-171 | `47bda6d1-e923-4d84-80b2-3c70505a578f` | reviews, the companion/Linux/Android jobs; scratch goes in `~/stm-gates`, not `/tmp` |
+| agents-136 | `9ac19334-ae37-45a2-b26d-c20726031d9e` | MCP engine work (`~/bambu-printer-mcp`, `~/mcp-3D-printer-server`, `~/sonnet-test`) |
+| agents-173 | `ccf8b95b-985b-4d23-9c87-0ba61503ef31` | the last lead's thread; no gates here |
+
+**Projects used** (find them with `t3_project_list` per environment):
+- Mac: `mcp:7464dfa2-762b-4d22-987c-e39640f5159d` (builders and gates); `mcp:6e1f3fde-6b5e-42ca-8aa3-b3bc71fd95f1` (the install checkout `~/fleet/scan-to-make`); `mcp:d1cb4caf-25df-43ab-93ae-bd7e6f68d0c2` (MCP releases).
+- agents-171: `7b644e30-126c-489b-97b6-ac9483f88c40`.
+- agents-136: `4f80db3e-151c-45c7-bf54-b028d79dc3ef`.
+
+**Targets.** Call `orchestrator_capabilities` once first.
+- Builders: `claudeAgent` / `claude-opus-5-5` / `{effort:"high"}`.
+- Reviews: `muse` / `muse-wonder-full-1.0` / `{reasoningEffort:"high"}`.
+- Installs and releases: `codex` / `gpt-6.1-sol` / `{reasoningEffort:"high"}`.
+
+**Traps:**
+1. **A `delegate_task` to a linked environment can't use `isolation:"worktree"`.** The brief must have the child make its own worktree:
+   - on Linux, under `~/stm-gates`;
+   - on the Mac, from `~/fleet/stm-lane-a` or `-b`;
+   - never in `~/fleet/scan-to-make`, which is the install checkout.
+2. **A delegate's completion wakes you, but delegates often end a turn with "waiting on …" and carry on later.** That wake is interim, so `t3_thread_read` the thread; the real report arrives as a later wake.
+3. **`t3_thread_send` to a finished thread starts a new run but does not wake you.** Set a fallback timer: Bash `sleep 1500` with `run_in_background` (timeout up to 3000000 ms). A foreground `sleep` is blocked. A session restart kills these timers, so re-check your threads after one.
+4. **Local Claude sessions** on the same machine aren't T3 threads. Find them with `ListAgents`, message them with `SendMessage` (`notify_when_idle: true`). "Fix Green Screen Background Removal" on agents-173 is one.
+5. **Plain `ssh mac` has no TCC permissions.** `~/.ssh/config` line 1 includes a Spillover file, so `ci_local.py`'s fan-out dies over ssh, and the keychain, notarization and Local Network need the Mac's T3 environment. Read-only ssh (git, ls, a `devicectl` copy of the phone's trace) is fine.
+6. **#610 is updated with** `gh issue edit 610 --body-file <file>`, after `date -u`.
+
 **How the last lead worked:** see the sections below and [operations.md](../operations.md), covering trains, `ci_local.py` plus `branch_check.py --merge`, installs only from clean main, and Mac gates through a T3 agent. The pinned [#610](https://github.com/DMontgomery40/scan-to-make/issues/610) is the live list, so keep it current.
 
 ## Before that (2026-11-13, 03:30Z): evening — train 12e (#769 second fix, Printer software, printer names)
