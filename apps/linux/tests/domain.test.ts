@@ -1472,3 +1472,21 @@ test("project-draft.json: a draft says it isn't finished, with the engine's reas
   assert.ok(sheet(round4.project).includes(draftDoc.printNote.replaceAll("'", "&#x27;")));
   assert.ok(!sheet(draftDoc.projects.finished.project).includes(draftDoc.printNote.replaceAll("'", "&#x27;")));
 });
+
+// #799, PRD §6.1: Export Diagnostics is in Settings → About on Linux, as Settings → Advanced on the Mac. The native
+// side (not the window) reads the companion's diagnostics.bundle, asks where to save and writes the ZIP.
+test("Export Diagnostics is reachable in Settings → About and runs the native export", () => {
+  const settings = readFileSync(new URL("../src/Settings.tsx", import.meta.url), "utf8");
+  const about = settings.slice(settings.indexOf('{tab === "About" && ('));
+  assert.ok(about.indexOf("<Diagnostics />") > 0 && about.indexOf("<Diagnostics />") < about.indexOf("</section>"), "in the About tab");
+  assert.match(settings, /Export Diagnostics…/);
+  assert.match(settings, /await exportDiagnostics\(\)/);
+  const bridge = readFileSync(new URL("../src/bridge.ts", import.meta.url), "utf8");
+  assert.match(bridge, /invoke<[^>]*>\("export_diagnostics"\)/);
+  const main = readFileSync(new URL("../src-tauri/src/main.rs", import.meta.url), "utf8");
+  const handlers = main.slice(main.indexOf("generate_handler!["));
+  assert.ok(handlers.slice(0, handlers.indexOf("]")).includes("export_diagnostics"), "registered with Tauri");
+  assert.match(main, /request\(&app, "diagnostics\.bundle", json!\(\{\}\)\)/);
+  const tauri = readFileSync(new URL("../src-tauri/src/protocol.rs", import.meta.url), "utf8");
+  assert.match(tauri, /"diagnostics\.bundle" => 47_000/);
+});

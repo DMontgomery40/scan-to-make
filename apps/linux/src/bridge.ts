@@ -25,6 +25,12 @@ export const reconstructionPreview = async (id: string, reviewId: string) =>
     await invoke<ArrayBuffer>("read_reconstruction_preview", { id, reviewId }),
   );
 export const openLink = (url: string) => invoke<void>("open_link", { url });
+/** Settings → About → Export Diagnostics… (#799): the native side asks where to save, reads the companion's
+ * diagnostics.bundle and writes the ZIP; the window never sees the files. */
+export const exportDiagnostics = () =>
+  invoke<{ saved: boolean; name?: string; companion?: boolean }>(
+    "export_diagnostics",
+  );
 export const openProject = (
   id: string,
   application: "folder" | "blender" | "bambu-studio" | "orca",

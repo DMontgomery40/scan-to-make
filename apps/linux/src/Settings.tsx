@@ -3,7 +3,7 @@ import { deviceConnected } from "./device-presence";
 import { useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
 import { mcpUpdateNotice, mcpPhase, type McpPhase } from "./domain";
-import { call, host, storeCredential, openLink } from "./bridge";
+import { call, host, storeCredential, openLink, exportDiagnostics } from "./bridge";
 import type { ObtainStep } from "./types";
 import { invoke } from "@tauri-apps/api/core";
 import { Action, Modal } from "./ui";
@@ -134,6 +134,7 @@ export function Settings({
               >
                 Open guide
               </Action>
+              <Diagnostics />
               <p>
                 Scan rig by Kass 3D. Vernier caliper by 3D Print Masters
                 Hub. Their original files and licenses stay with their model
@@ -144,6 +145,35 @@ export function Settings({
         </section>
       </div>
     </Modal>
+  );
+}
+/** #799, PRD §6.1: Export Diagnostics on Linux, beside the guide; the same companion part the Mac's ZIP holds. */
+function Diagnostics() {
+  const [saved, setSaved] = useState("");
+  return (
+    <>
+      <h3>Diagnostics</h3>
+      <p>
+        A ZIP of the companion’s event log, your printers, their printer
+        software and its own diagnostics, with tokens, keys and email
+        addresses removed. Nothing is sent anywhere.
+      </p>
+      <Action
+        run={async () => {
+          setSaved("");
+          const result = await exportDiagnostics();
+          if (result.saved)
+            setSaved(
+              result.companion
+                ? `Saved ${result.name ?? "the ZIP"}.`
+                : `Saved ${result.name ?? "the ZIP"}, without the companion’s part: it didn’t answer. Its notes.txt says so.`,
+            );
+        }}
+      >
+        Export Diagnostics…
+      </Action>
+      {saved && <p role="status">{saved}</p>}
+    </>
   );
 }
 function General() {

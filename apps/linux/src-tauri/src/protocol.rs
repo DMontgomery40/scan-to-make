@@ -102,6 +102,8 @@ pub fn deadline(method: &str, params: &Value) -> u64 {
         "objects.pausePrint" | "objects.resumePrint" | "objects.cancelPrint" => 132_000,
         // The companion starts the printer MCP to ask cad_status (40 s); Set Up returns while it installs.
         "cad.status" | "cad.setup" => 42_000,
+        // Export Diagnostics may start each printer's MCP to ask for its own bundle (45 s on the companion).
+        "diagnostics.bundle" => 47_000,
         "events.wait" => {
             params
                 .get("timeoutMs")
@@ -229,6 +231,7 @@ mod tests {
         assert_eq!(deadline("objects.addFile", &json!({})), 122000, "an import outlives the companion's 120 s, never 12 s");
         assert_eq!(deadline("confirmations.answer", &json!({})), 12000);
         assert_eq!(deadline("events.wait", &json!({"timeoutMs":999999})), 32000);
+        assert_eq!(deadline("diagnostics.bundle", &json!({})), 47000, "past the companion's 45 s");
     }
 }
 #[cfg(test)]
