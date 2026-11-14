@@ -32,8 +32,11 @@ public enum BackdropKey {
     /// or leaves), and the middle 80% of its cells' mean hues spans at most `maximumHueSpread` degrees (one paint, not
     /// many greens).
     public static let minimumPanelShare = 0.02
-    public static let minimumFill = 0.9
-    public static let maximumHueSpread: Float = 10
+    /// Measured (Nov 14): the rig's panel, photo by photo, at fill 0.73–0.99 and hue spread 1–13.5° (Nov 8's dim,
+    /// mixed light at the low and high ends); no photo of any other capture on David's Mac reached 2% of the colour.
+    /// Grass and leaves sit far outside: many greens (spread over 30°) or speckled cells (fill about 0.7).
+    public static let minimumFill = 0.8
+    public static let maximumHueSpread: Float = 15
     /// A region of the colour this big (share of the photo) at the object's depth is part of the object and stays.
     /// Smaller ones, which the depth map can't measure (a letter's counter, the slot between letters), are backdrop.
     public static let objectRegionShare = 0.02

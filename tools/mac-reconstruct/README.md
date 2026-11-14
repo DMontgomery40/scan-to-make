@@ -21,9 +21,10 @@ macOS command-line tools for rebuilding and checking scans on the Mac.
   blue (the panel measured RGB ≈ 160,147,31 in warm light to 202,211,67 in daylight; the sign's wood base, black
   letters and grey plate all fail it). Grass, leaves and a yellow-green wall pass that too, so a photo shows a backdrop
   only when its largest region of the colour (depth cells mostly that colour, connected) is a deliberate panel: at least
-  2% of the photo, its cells at least 90% that colour on average (flat, not broken up), the middle 80% of their hues
-  within 10° (one paint, not many greens), and its median depth at least 0.12 m behind the nearest surface in the
-  LiDAR depth. When a quarter of the photos or more show one, the folder goes in as `PhotogrammetrySample`s
+  2% of the photo, its cells at least 80% that colour on average (flat, not broken up), the middle 80% of their hues
+  within 15° (one paint, not many greens), and its median depth at least 0.12 m behind the nearest surface in the
+  LiDAR depth. Measured on every capture on David's Mac (Nov 14): the rig's panel at fill 0.73–0.99 and hue spread
+  1–13.5° per photo; no photo of any other capture reached 2% of the colour. When a quarter of the photos or more show one, the folder goes in as `PhotogrammetrySample`s
   (`loadCaptureSample`: the same image, metadata, depth and gravity Apple's folder input reads) and each such photo
   gets an object mask: Vision's foreground minus the backdrop, cleaned by a 4 px opening. A supplied mask switches
   Apple's own masking off for that photo, so the mask leaves out the room too.
