@@ -338,26 +338,61 @@ final class ModelPosterTests: XCTestCase {
     }
 
     /// The 20 s deadline is per operation: it starts when the operation runs, not while it waits for a slot. A real
-    /// timeout still fails.
+    /// timeout still fails. Margins are seconds, not milliseconds (#810 review R5: the gate Mac's load average reaches
+    /// 600): the queued operation is resumed T/2 after it started, so a correct deadline has T/2 = 3 s of slack, and a
+    /// deadline counted from the queue (T after it queued, before the slot freed) has already fired.
     @MainActor func testQueuedDeadlineStartsWhenTheOperationRunsNotWhileItWaits() async {
-        let timeout = Duration.milliseconds(400)
+        let timeout = Duration.seconds(6)
         let work = MediaWork<Int>(label: "mesh", limit: 1, timeout: timeout)
         var hung: CheckedContinuation<Int?, Never>?, queued: CheckedContinuation<Int?, Never>?
-        let enqueued = ContinuousClock.now
+        var dequeuedAt: ContinuousClock.Instant?
         let stuck = Task { await work.run(key: "stuck") { await withCheckedContinuation { hung = $0 } } }
         await Self.waitUntil { hung != nil }
-        let waiting = Task { await work.run(key: "waiting") { await withCheckedContinuation { queued = $0 } } }
+        let waiting = Task { await work.run(key: "waiting") {
+            dequeuedAt = .now
+            return await withCheckedContinuation { queued = $0 }
+        } }
         await Self.waitUntil { work.queuedCount == 1 }
+        let queuedBy = ContinuousClock.now // no earlier than the request queued
         // The stuck operation times out at T and frees the slot; the waiter runs then.
         let stuckValue = await stuck.value
         XCTAssertNil(stuckValue, "A real timeout still fails")
         await Self.waitUntil { queued != nil }
-        // 1.5 T after it queued: past a deadline counted from the queue, inside one counted from the run.
-        try? await Task.sleep(until: enqueued.advanced(by: timeout * 1.5), clock: .continuous)
+        guard let dequeuedAt else { return XCTFail("The queued operation never ran") }
+        let resumeAt = dequeuedAt.advanced(by: timeout / 2)
+        // The test proves something only if a deadline counted from the queue would have fired by now.
+        XCTAssertGreaterThan(resumeAt, queuedBy.advanced(by: timeout), "Too slow a start to tell the two deadlines apart")
+        try? await Task.sleep(until: resumeAt, clock: .continuous)
         queued?.resume(returning: 7)
         let value = await waiting.value
         XCTAssertEqual(value, 7, "The queued operation's deadline must start when it runs")
         hung?.resume(returning: 0)
+    }
+
+    /// A running load whose page closes frees its slot at once: the next queued model starts and loads (#810 review R4,
+    /// cancel → finish → pump).
+    @MainActor func testCancellingARunningLoadStartsTheNextQueuedKey() async {
+        let work = MediaWork<Int>(label: "mesh", limit: 1)
+        var held: CheckedContinuation<Int?, Never>?
+        var nextRan = false
+        let running = Task { await work.run(key: "closed-page") { await withCheckedContinuation { held = $0 } } }
+        await Self.waitUntil { held != nil }
+        let next = Task { await work.run(key: "next") { nextRan = true; return 2 } }
+        await Self.waitUntil { work.queuedCount == 1 }
+        XCTAssertFalse(nextRan, "One key in flight is the limit")
+        running.cancel()
+        let runningValue = await running.value
+        XCTAssertNil(runningValue, "The cancelled load settles with nil without waiting for its operation")
+        await Self.waitUntil { nextRan }
+        if !nextRan { held?.resume(returning: 1); held = nil } // a broken slot release must fail, not hang the suite
+        let nextValue = await next.value
+        XCTAssertEqual(nextValue, 2, "Its freed slot starts the next queued key")
+        XCTAssertTrue(nextRan)
+        XCTAssertEqual(work.queuedCount, 0)
+        held?.resume(returning: 1) // the framework's late completion cannot publish into the next generation
+        await Task.yield()
+        let after = await work.run(key: "closed-page") { 3 }
+        XCTAssertEqual(after, 3, "The cancelled key starts fresh")
     }
 
     /// Cancel, a freed slot, a scene deferral and a late cancel all race: every waiter resolves exactly once (a second
