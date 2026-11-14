@@ -950,4 +950,50 @@ private actor HeldDownload {
         do { _ = try await waiter.value; XCTFail("a cancelled caller gets no result") } catch { XCTAssertTrue(error is CancellationError, "\(error)") }
         XCTAssertLessThan(ContinuousClock.now - cancelledAt, .seconds(2))
     }
+
+    // MARK: A scan stopped after it kept photos (#791)
+
+    private func draft(_ run: String, _ status: String, project: String = "dad") -> [String: Any] {
+        ["runID": run, "status": status, "origin": ["projectId": project]]
+    }
+
+    /// David, Nov 14: 68 photos, Done never enabled (only 2 from above), Stop, and the Mac got a project with no scan:
+    /// "where the fuck is the scan then ?". A stopped run that kept photos is the project's scan, to send.
+    func testAStoppedScanThatKeptPhotosIsTheProjectsScanToSend() {
+        let stopped = "3b072103-c190-41b9-8158-03177424d0c5"
+        let kept = MacConnection.keptScan(for: "dad", drafts: [draft(stopped, "stopped")], active: nil) { _ in 68 }
+        XCTAssertEqual(kept, .stopped(run: stopped, photos: 68))
+        for status in ["failed", "interrupted"] {
+            XCTAssertEqual(MacConnection.keptScan(for: "dad", drafts: [draft(stopped, status)], active: nil) { _ in 12 },
+                           .stopped(run: stopped, photos: 12), status)
+        }
+    }
+
+    /// Newest run first, as the store lists them: a finished scan after a stopped one wins, a stopped one after a
+    /// finished one wins, a stopped run with no photos is passed over, the run still capturing and other projects' runs
+    /// don't count.
+    func testTheNewestRunThatKeptSomethingIsTheOneSent() {
+        let a = "aaaaaaaa-0000-4000-8000-000000000001", b = "bbbbbbbb-0000-4000-8000-000000000002"
+        XCTAssertEqual(MacConnection.keptScan(for: "dad", drafts: [draft(b, "ready"), draft(a, "stopped")], active: nil) { _ in 9 },
+                       .finished(run: b))
+        XCTAssertEqual(MacConnection.keptScan(for: "dad", drafts: [draft(b, "stopped"), draft(a, "ready")], active: nil) { _ in 9 },
+                       .stopped(run: b, photos: 9))
+        XCTAssertEqual(MacConnection.keptScan(for: "dad", drafts: [draft(b, "stopped"), draft(a, "ready")], active: nil) { $0 == b ? 0 : 9 },
+                       .finished(run: a))
+        XCTAssertNil(MacConnection.keptScan(for: "dad", drafts: [draft(b, "stopped")], active: b) { _ in 9 })
+        XCTAssertNil(MacConnection.keptScan(for: "dad", drafts: [draft(b, "stopped", project: "other")], active: nil) { _ in 9 })
+        XCTAssertNil(MacConnection.keptScan(for: "dad", drafts: [draft("Not-A-UUID", "stopped")], active: nil) { _ in 9 })
+    }
+
+    /// What the New sheet says under a stopped scan it attached: enough photos are simply sent; a few are sent with a
+    /// warning, never kept back.
+    func testAStoppedScanSaysWhatItKeptAndWhetherThatIsEnough() {
+        XCTAssertTrue(MacConnection.isEnough(stoppedPhotos: 68))
+        XCTAssertFalse(MacConnection.isEnough(stoppedPhotos: 19))
+        XCTAssertEqual(MacConnection.stoppedScanWords(photos: 68), "The scan stopped at 68 photos. Your Mac builds the model from them.")
+        XCTAssertEqual(MacConnection.stoppedScanWords(photos: 5),
+                       "The scan stopped at 5 photos. That may be too few: your Mac will try, or scan it again.")
+        XCTAssertEqual(MacConnection.stoppedScanWords(photos: 1),
+                       "The scan stopped at 1 photo. That may be too few: your Mac will try, or scan it again.")
+    }
 }
