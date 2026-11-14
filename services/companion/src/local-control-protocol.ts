@@ -130,6 +130,8 @@ export const parameters = {
   'cad.status': empty,
   'cad.setup': empty,
   'settings.get': empty,
+  // Export Diagnostics (#799): the companion's own state, redacted, and each printer MCP's own bundle.
+  'diagnostics.bundle': empty,
   'settings.set': CompanionSettingsPatchSchema,
   'objects.answerPrintConfirmation': z.strictObject({id: z.uuid(), confirmationId: z.uuid(), answer: z.union([
     // Any elicitation primitive; checked field by field against the pending question's own schema.

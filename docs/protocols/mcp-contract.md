@@ -19,6 +19,7 @@ Every MCP name that app code (`services/companion/src`, `services/printer-handof
 | `camera_snapshot` `camera_stream_start` `camera_frame` `camera_stream_stop` | printer camera |
 | `counterpart_print_record` `counterpart_print_assess` | camera evidence of a print (#630; bambu-printer-mcp #144, mcp-3D-printer-server #100). The MCP saves frames against the exact slice and asks for a look in `counterpart_print_progress`'s `physical.assessment`; it decides which frame and when. The companion reads that frame (and one baseline) with `counterpart_print_record` as MCP images, has the person's Claude login look at the two pictures, and submits `counterpart_print_assess` bound to the record's job, artifact and image hashes. It acts only on `physical.status` `suspect_no_extrusion` and, for the frame the record calls `first_layer`, on plastic seen. An MCP without the tools: no check, no first-layer claim |
 | `bambu_network_bridge_status` | Bambu network bridge readiness (setup) |
+| `counterpart_diagnostics` | Export Diagnostics (#799; bambu-printer-mcp #161, mcp-3D-printer-server #117, not yet published): the MCP's own redacted bundle for a tester's report. The companion's `diagnostics.bundle` asks each printer's session for it, with only `max_bytes` (the MCPs' 3 MiB shared between the printers, 1.5 MiB at most each, 8 printers at most), when that session lists the tool and its `counterpart_printer_info` says `capabilities.diagnostics: true`. It adds every file under `mcp/<printer>-<package>/` with the name the MCP gave it (a name that is absolute or has `..` is left out with a note), its `notes` to the bundle's notes, and redacts all of it again. It reads `package`, `version`, `files` (`name`, `content`, `truncated`) and `notes`, and knows no MCP file, path or log. An MCP without it gets one line: "<package> <version> is too old to add its own diagnostics; update it in Settings → Printers." |
 | `blender_mcp_status` `blender_mcp_call` `execute_blender_code` `get_addon_status` | the Blender bridge |
 | `fusion_mcp_status` `fusion_mcp_call` `fusion_mcp_new_design` `fusion_mcp_export` | the Fusion bridge |
 | `blender_mcp_setup` | the Blender add-on's check and update (`update`), done by the MCP (moved, **§8.0 #11**) |
@@ -42,7 +43,7 @@ Every MCP name that app code (`services/companion/src`, `services/printer-handof
 | `bed_leveling` `bed_type` `flow_calibration` `layer_inspect` `vibration_calibration` | `print_3mf` start options |
 | `bambu_network` `bambu_connect` | Bambu connection modes |
 | `hardened_steel` `stainless_steel` `tungsten_carbide` | nozzle materials known to the app, **§8.0 #6** |
-| `timeout_ms` `max_bytes` `max_width` `min_change` `changed_only` `idle_timeout_ms` `since_seq` `wait_ms` `fps` | camera |
+| `timeout_ms` `max_bytes` `max_width` `min_change` `changed_only` `idle_timeout_ms` `since_seq` `wait_ms` `fps` | camera; `max_bytes` is also `counterpart_diagnostics`' size cap |
 | `duration_ms` | how long `counterpart_discover_printers` listens |
 | `request_id` `approve_url` `status` `env` `message` | a setup field's `obtain` (mcp-3d-printer-server 1.2.51+: OctoPrint's key, approved in OctoPrint): `printers.obtain` calls the tool the field names, with the form's `host` and `port` and `app`, shows its `message` and `approve_url`, calls again with `request_id` and `wait_ms` while `status` is `pending`, and fills only that field's own variable from `env`. The tool name is the MCP's; app code names none |
 | `angle_x` `angle_y` `angle_z` `scale_x` `scale_y` `scale_z` | rotate and scale |
@@ -78,6 +79,7 @@ Keys of the `z.object` schemas in `services/printer-handoff/src/counterpart.ts`.
 | `contract` `server` `name` `version` `printer` `kind` `model` `displayName` `serial` `host` `id` `capabilities` `progress` `layers` `camera` `cameraStream` `filaments` `pause` `resume` `cancel` `print3mf` `gcode` `slicing` `supports` `copies` `orient` `controls` `route` `mode` `choices` `options` `label` `available` `reason` `type` `url` `savedTo` |
 | `observedAt` `state` `job` `elapsedSec` `remainingSec` `layer` `totalLayers` `stage` `temps` `nozzle` `bed` `chamber` `actual` `target` `activeFilament` `slot` `material` `color` `problems` `code` `severity` `message` |
 | `physical` `status` `evidence` `assessment` `required` `frameId` `referenceFrameIds` `expectedHeightMm` `expectedFootprintMm` `record` `dispatch` `sha256` `frames` `role` `imageContentIndex` |
+| `diagnostics` `package` `files` `content` `truncated` `notes` |
 
 ## Not MCP
 

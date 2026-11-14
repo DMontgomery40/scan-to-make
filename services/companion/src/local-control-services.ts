@@ -59,6 +59,8 @@ export interface ControlServices {
   mcpUpdates?: import('./printing/mcp-updates.js').McpUpdater;
   /** Settings → Printers: both MCPs (Download), finding and adding printers. Present without a printer. */
   printerSetup?: import('./printing/setup.js').PrinterSetup;
+  /** Export Diagnostics' companion part (#799): never throws; what can't be read is a note in it. */
+  diagnostics?: () => Promise<import('./diagnostics.js').DiagnosticsBundle>;
   /** Nearby pairing requests waiting for Allow (MAC-5), when the server has nearby pairing on. */
   nearby?: {pending(): NearbyRequest[]; answer(id: string, allow: boolean): Promise<boolean>};
 }
@@ -270,6 +272,11 @@ export function createControlDispatcher(services: ControlServices) {
           if (!services.fusionStatus) throw new ControlFailure('unavailable');
           parameters[method].parse(raw);
           return await services.fusionStatus();
+        }
+        case 'diagnostics.bundle': {
+          if (!services.diagnostics) throw new ControlFailure('unavailable');
+          parameters[method].parse(raw);
+          return await services.diagnostics();
         }
         case 'cad.status': case 'cad.setup': {
           if (!services.cadSettings) throw new ControlFailure('unavailable');
