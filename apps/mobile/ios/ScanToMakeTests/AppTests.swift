@@ -1024,6 +1024,52 @@ private actor HeldDownload {
         XCTAssertNil(MacConnection.justStopped(before: .finished(run: a), after: nil))
     }
 
+    /// Review of #801 (F4): the newest run decides. A newest stopped run that kept no photos, or was removed, never
+    /// hands Send or resume an older stopped run it superseded; only an older finished scan.
+    func testTheNewestStoppedRunDecidesNeverAnOlderStoppedOne() {
+        let newest = "eeeeeeee-0000-4000-8000-000000000005", older = "ffffffff-0000-4000-8000-000000000006"
+        let finished = "aaaaaaaa-0000-4000-8000-000000000001"
+        XCTAssertNil(MacConnection.keptScan(for: "dad", drafts: [draft(newest, "stopped"), draft(older, "stopped")], active: nil) {
+            $0 == newest ? 0 : 40 }, "no photos in the newest: the older stop isn't sent instead")
+        XCTAssertNil(MacConnection.keptScan(for: "dad", drafts: [draft(newest, "stopped"), draft(older, "stopped")], active: nil,
+                                            removed: [newest]) { _ in 40 }, "removed newest: nor here")
+        XCTAssertEqual(MacConnection.keptScan(for: "dad", drafts: [draft(newest, "stopped"), draft(older, "stopped"), draft(finished, "ready")],
+                                              active: nil, removed: [newest]) { _ in 40 }, .finished(run: finished), "an older finished scan still counts")
+    }
+
+    /// Review of #801 (F1): a stopped scan's declare is recorded and retried until the Mac acknowledges it. The first try
+    /// fails (the Mac is asleep): it stays. The next succeeds: it's done. A run no longer the project's kept scan, one
+    /// with too few photos, and one the Mac refuses are dropped without retrying forever.
+    func testAStoppedScansDeclareIsRetriedUntilTheMacHasIt() async throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "declares-\(UUID().uuidString)"))
+        let run = "3b072103-c190-41b9-8158-03177424d0c5", other = "bbbbbbbb-0000-4000-8000-000000000002"
+        var kept: [String: MacConnection.KeptScan] = ["dad": .stopped(run: run, photos: 68)]
+        var declared: [String] = []
+        MacConnection.setPendingDeclare(project: "dad", run: run, defaults)
+
+        await MacConnection.retryDeclares(defaults, kept: { kept[$0] }, declare: { _, _ in throw CompanionError.unreachable })
+        XCTAssertEqual(MacConnection.pendingDeclares(defaults), ["dad": run], "the Mac didn't answer: kept for next time")
+        await MacConnection.retryDeclares(defaults, kept: { kept[$0] }, declare: { project, run in declared.append("\(project) \(run)") })
+        XCTAssertEqual(declared, ["dad \(run)"])
+        XCTAssertEqual(MacConnection.pendingDeclares(defaults), [:], "acknowledged")
+
+        MacConnection.setPendingDeclare(project: "dad", run: run, defaults)
+        kept["dad"] = .stopped(run: other, photos: 30)
+        await MacConnection.retryDeclares(defaults, kept: { kept[$0] }, declare: { _, _ in XCTFail("superseded: not declared") })
+        XCTAssertEqual(MacConnection.pendingDeclares(defaults), [:])
+
+        MacConnection.setPendingDeclare(project: "dad", run: run, defaults)
+        kept["dad"] = .stopped(run: run, photos: 5)
+        await MacConnection.retryDeclares(defaults, kept: { kept[$0] }, declare: { _, _ in XCTFail("too few: waits for Send") })
+        XCTAssertEqual(MacConnection.pendingDeclares(defaults), [:])
+
+        MacConnection.setPendingDeclare(project: "dad", run: run, defaults)
+        kept["dad"] = .stopped(run: run, photos: 68)
+        await MacConnection.retryDeclares(defaults, kept: { kept[$0] }, declare: { _, _ in
+            throw CompanionError(code: "invalid-state", message: "The scan can only be added before the touch-up starts.") })
+        XCTAssertEqual(MacConnection.pendingDeclares(defaults), [:], "the Mac refused: the project has moved on")
+    }
+
     /// What the New sheet says under a stopped scan it attached: enough photos are simply sent; a few are sent with a
     /// warning, never kept back.
     func testAStoppedScanSaysWhatItKeptAndWhetherThatIsEnough() {

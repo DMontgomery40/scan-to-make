@@ -112,6 +112,7 @@ typealias MacError = CompanionError
             sent = try await start(id)
         }
         Self.clearPending(id)
+        Self.setPendingDeclare(project: id, run: nil)   // the send declared it itself
         return sent
     }
 
@@ -280,22 +281,23 @@ typealias MacError = CompanionError
         #endif
         let drafts = (try? NativeCaptureCoordinator.shared.drafts()) ?? []
         let active = NativeCaptureCoordinator.status()["activeRunID"] as? String
-        var newest: [String: StoppedScan?] = [:]
         let removed = Self.removedStoppedScans
-        // Newest first (the store sorts by creation time).
+        // Each project's kept scan by the same rule Send uses (keptScan): the newest run decides.
+        var projects: [String] = []
         for draft in drafts {
-            guard let run = draft["runID"] as? String, UUID(uuidString: run) != nil, run == run.lowercased(), run != active,
-                  let project = (draft["origin"] as? [String: Any])?["projectId"] as? String,
-                  let status = draft["status"] as? String else { continue }
-            let folder = URL.documentsDirectory.appending(path: "NativeCaptures/\(run)", directoryHint: .isDirectory)
-            let stopped = ["stopped", "failed", "interrupted"].contains(status)
-            if stopped && removed.contains(run) { continue }
-            let photos = stopped ? Self.imageNames(in: folder.appending(path: "Images", directoryHint: .isDirectory)).count : 0
-            if stopped && photos == 0 { continue }
-            guard newest[project] == nil else { continue }
-            newest[project] = stopped ? StoppedScan(run: run, photos: photos) : .some(nil)
+            if let project = (draft["origin"] as? [String: Any])?["projectId"] as? String, !projects.contains(project) { projects.append(project) }
         }
-        return newest.compactMapValues { $0 }
+        var stopped: [String: StoppedScan] = [:]
+        for project in projects {
+            if case .stopped(let run, let photos)? = Self.keptScan(for: project, drafts: drafts, active: active, removed: removed, photos: Self.photoCount) {
+                stopped[project] = StoppedScan(run: run, photos: photos)
+            }
+        }
+        return stopped
+    }
+
+    static func photoCount(_ run: String) -> Int {
+        imageNames(in: URL.documentsDirectory.appending(path: "NativeCaptures/\(run)/Images", directoryHint: .isDirectory)).count
     }
 
     /// The scan on this phone that a project sends: its newest run that kept something, a finished one or one stopped
@@ -304,14 +306,19 @@ typealias MacError = CompanionError
 
     /// `drafts` newest first, as the capture store lists them; `photos` counts a run's kept images.
     /// `removed`: stopped runs taken off their project with Remove; they stay on the phone and are never sent.
+    /// The newest run decides (review of #801): a newest stopped run that was removed or kept no photos falls back only
+    /// to an older finished scan, never to an older stopped run it superseded.
     static func keptScan(for project: String, drafts: [[String: Any]], active: String?, removed: Set<String> = [],
                          photos: (String) -> Int) -> KeptScan? {
+        var newestStoppedSeen = false
         for draft in drafts {
             guard let run = draft["runID"] as? String, UUID(uuidString: run) != nil, run == run.lowercased(), run != active,
                   (draft["origin"] as? [String: Any])?["projectId"] as? String == project,
                   let status = draft["status"] as? String else { continue }
             if status == "ready" { return .finished(run: run) }
-            guard ["stopped", "failed", "interrupted"].contains(status), !removed.contains(run) else { continue }
+            guard ["stopped", "failed", "interrupted"].contains(status), !newestStoppedSeen else { continue }
+            newestStoppedSeen = true
+            guard !removed.contains(run) else { continue }
             let kept = photos(run)
             if kept > 0 { return .stopped(run: run, photos: kept) }
         }
@@ -321,9 +328,7 @@ typealias MacError = CompanionError
     func keptScan(_ id: String) -> KeptScan? {
         let drafts = (try? NativeCaptureCoordinator.shared.drafts()) ?? []
         let active = NativeCaptureCoordinator.status()["activeRunID"] as? String
-        return Self.keptScan(for: id, drafts: drafts, active: active, removed: Self.removedStoppedScans) { run in
-            Self.imageNames(in: URL.documentsDirectory.appending(path: "NativeCaptures/\(run)/Images", directoryHint: .isDirectory)).count
-        }
+        return Self.keptScan(for: id, drafts: drafts, active: active, removed: Self.removedStoppedScans, photos: Self.photoCount)
     }
 
     /// Stopped runs taken off their project on New with Remove (review of #795): a stray few photos never lock a draft
@@ -369,7 +374,6 @@ typealias MacError = CompanionError
             .filter { $0.wholeMatch(of: pattern) != nil && !$0.contains("..") }.sorted()
     }
 
-    /// Sends a stopped scan's photos as they are; the Mac rebuilds from what's there and says plainly if it's too few.
     /// Names a kept scan's photos to the Mac without sending any (#791), the same list `sendCapture` declares, so the
     /// Mac starts the project only with them. Nothing on a Mac that can't rebuild from photos.
     func declareKeptScan(_ id: String, run: String) async throws {
@@ -384,6 +388,56 @@ typealias MacError = CompanionError
         ["version": 1, "images": images, "depthRequired": false, "source": "object-capture"]
     }
 
+    // MARK: Declaring a stopped scan until the Mac has it (review of #801, F1)
+
+    /// Stopped scans of 20 photos or more whose photo list the Mac hasn't acknowledged yet, by project. Declaring is what
+    /// stops any client (the Mac, Android, Linux) starting the project from its words alone, so it must not be lost when
+    /// the Mac is asleep or the app is suspended at Stop: it's kept here and tried again whenever the Mac answers.
+    static func pendingDeclares(_ defaults: UserDefaults = .standard) -> [String: String] {
+        (defaults.dictionary(forKey: pendingDeclaresKey) as? [String: String]) ?? [:]
+    }
+    static func setPendingDeclare(project: String, run: String?, _ defaults: UserDefaults = .standard) {
+        var pending = pendingDeclares(defaults)
+        pending[project] = run
+        defaults.set(pending, forKey: pendingDeclaresKey)
+    }
+    private static let pendingDeclaresKey = "CounterpartPendingScanDeclares"
+
+    /// Tries every pending declare once. One is done when the Mac acknowledges it, when the Mac refuses it (the project
+    /// has moved on), or when the project's kept scan is no longer that run with enough photos (sent, superseded,
+    /// removed); one the Mac didn't answer stays for the next try.
+    static func retryDeclares(_ defaults: UserDefaults = .standard, kept: (String) -> KeptScan?,
+                              declare: (String, String) async throws -> Void) async {
+        for (project, run) in pendingDeclares(defaults).sorted(by: { $0.key < $1.key }) {
+            guard case .stopped(run, let photos)? = kept(project), isEnough(stoppedPhotos: photos) else {
+                setPendingDeclare(project: project, run: nil, defaults); continue
+            }
+            do {
+                try await declare(project, run)
+                setPendingDeclare(project: project, run: nil, defaults)
+            } catch let failure as CompanionError where !failure.isUnreachable && !failure.needsPairing {
+                setPendingDeclare(project: project, run: nil, defaults)
+            } catch {
+                // The Mac didn't answer: kept for the next time it does.
+            }
+        }
+    }
+
+    /// A stopped scan with enough photos was attached to this project: record it at once (it survives the app being
+    /// suspended), then `retryPendingDeclares` tells the Mac. Whether there was one to record.
+    @discardableResult func recordStoppedDeclare(_ id: String) -> Bool {
+        let kept = keptScan(id)
+        guard Self.declaresAtOnce(kept), case .stopped(let run, _)? = kept else { return false }
+        Self.setPendingDeclare(project: id, run: run)
+        return true
+    }
+
+    func retryPendingDeclares() async {
+        guard !Self.pendingDeclares().isEmpty else { return }
+        await Self.retryDeclares(kept: { [self] in keptScan($0) }, declare: { [self] in try await declareKeptScan($0, run: $1) })
+    }
+
+    /// Sends a stopped scan's photos as they are; the Mac rebuilds from what's there and says plainly if it's too few.
     func sendStoppedScan(_ id: String, run: String) async throws -> StmObject {
         try await start(id, captureManifest: try await sendStoppedCapture(id, run: run))
     }

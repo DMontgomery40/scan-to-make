@@ -304,7 +304,11 @@ struct NewObjectView: View {
             // A draft from an earlier sheet keeps its project and its finished scan.
             useJobDefault()
             _ = try? await savedDraft()
-            if let created, attached == nil { attached = await savedCapture(created.id) }
+            if let created, attached == nil {
+                attached = await savedCapture(created.id)
+                // Reopened with a stopped scan attached: it's declared here too, not only when the capture returns.
+                if attached != nil { declareStoppedScan(created.id) }
+            }
             #if DEBUG
             // `-CounterpartNewScan walk-around` (scripts/ux_screens.py): New as it looks after a scan, which a simulator can't take.
             if attached == nil, UserDefaults.standard.string(forKey: "CounterpartNewScan") == "walk-around" { attached = .walkAround }
@@ -669,13 +673,12 @@ struct NewObjectView: View {
     }
 
     /// A stopped scan with enough photos is named to the Mac at once (its photos follow on Send): the Mac then starts
-    /// this project only with them, from any client, and says the scan is still on the phone until they come. Scan
-    /// again names the new run's photos instead. One with fewer is named on Send, so Remove can still take it off.
-    private func declareStoppedScan(_ object: Project) {
-        let kept = store.mac.keptScan(object.id)
-        guard MacConnection.declaresAtOnce(kept), case .stopped(let run, _)? = kept else { return }
+    /// this project only with them, from any client, and says the scan is still on the phone until they come. Recorded
+    /// first, so a Mac that is asleep or an app suspended at Stop is retried when the Mac next answers (review of #801).
+    /// Scan again names the new run's photos instead. One with fewer is named on Send, so Remove can still take it off.
+    private func declareStoppedScan(_ id: String) {
         let mac = store.mac
-        Task { try? await mac.declareKeptScan(object.id, run: run) }
+        if mac.recordStoppedDeclare(id) { Task { await mac.retryPendingDeclares() } }
     }
 
     /// Scans for this draft and comes back here with the scan attached; Send sends it with the rest.
@@ -698,7 +701,7 @@ struct NewObjectView: View {
                 // "Keep for later" in the capture still comes back here with the scan attached, not to a
                 // project page that can only offer Scan again. So does Stop, once the scan kept photos (#791).
                 attached = saved
-                declareStoppedScan(object)
+                declareStoppedScan(object.id)
             }
             if attached != nil { useJobDefault(); store.refreshStoppedScans() }
         }
