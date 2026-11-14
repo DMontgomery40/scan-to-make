@@ -172,7 +172,14 @@ struct ProjectView: View {
             throw CompanionError(code: "missing-capture", message: "This project's saved scan is no longer on this phone. Start a new project to scan it again.")
         }
         if handheld { return await HandheldCapture.run(objectId: object.id) ? try await finishSending(object) : nil }
-        guard try await store.mac.scan(object.id) != nil else { return nil }
+        guard try await store.mac.scan(object.id) != nil else {
+            // Stop after enough photos means done: they're sent, as Done's would be (#791). Fewer stay on the page's
+            // "Scan stopped · N photos kept" card, with Send to your Mac.
+            if case .stopped(_, let photos) = store.mac.keptScan(object.id), MacConnection.isEnough(stoppedPhotos: photos) {
+                return try await finishSending(object)
+            }
+            return nil
+        }
         captureWarning = store.mac.localScanWarning(object.id)
         return try await finishSending(object)
     }
