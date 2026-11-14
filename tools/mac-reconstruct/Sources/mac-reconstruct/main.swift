@@ -42,7 +42,8 @@ func emit(_ value: [String: Any]) {
 func fail(_ message: String) -> Never { emit(["error": message]); exit(1) }
 
 let usage = """
-usage: mac-reconstruct <images-folder> <output.usdz> [reduced|medium|full|raw] [--feature normal|high] [--honor-box]
+usage: mac-reconstruct <images-folder> <output.usdz> [reduced|medium|full|raw] [--feature normal|high] [--honor-box] [--backdrop auto|off|samples]
+       mac-reconstruct backdrop <images-folder> [--save-masks <dir>]
        mac-reconstruct stl <model.usdz> <output.stl> [--render <overview.png>] [--remove-support]
        mac-reconstruct samples <images-folder> <output.usdz> [reduced|medium|full|raw] [--masks <dir> | --no-masks] [--save-masks <dir> [--masks-only]]
        mac-reconstruct picture <output.png> [--model <file> [--z-up] [--tint RRGGBB]] [--object <scan.usdz> --seat m00,…,m33 …] [--photo <file>] [--pixels N]
@@ -98,6 +99,38 @@ if args.first == "stl" {
         exit(0)
     } catch { fail(String(describing: error)) }
 }
+// mac-reconstruct backdrop <images-folder> [--save-masks <dir>]
+//     What the backdrop key sees in each photo of an Object Capture folder, one JSON line per photo (share of the
+//     photo in the backdrop colour, its depth and the nearest surface's, whether it is keyed), then a summary. With
+//     --save-masks, writes each keyed photo's keep mask (white = kept) as <dir>/<photo-name>.png.
+if args.first == "backdrop" {
+    var rest = Array(args.dropFirst())
+    var save: URL? = nil
+    if let i = rest.firstIndex(of: "--save-masks"), i + 1 < rest.count {
+        save = URL(fileURLWithPath: rest[i + 1], isDirectory: true); rest.removeSubrange(i...(i + 1))
+    }
+    guard rest.count == 1 else { FileHandle.standardError.write(Data(usage.utf8)); exit(2) }
+    do {
+        let files = try photos(in: URL(fileURLWithPath: rest[0], isDirectory: true))
+        if let save { try FileManager.default.createDirectory(at: save, withIntermediateDirectories: true) }
+        var keyed = 0
+        for file in files {
+            let sample = try loadCaptureSample(file)
+            let frame = try BackdropKey.key(image: sample.image, depth: sample.depthDataMap.flatMap { DepthImage(buffer: $0) })
+            if frame.isBackdrop { keyed += 1 }
+            var line: [String: Any] = ["photo": file.lastPathComponent, "share": (frame.share * 1000).rounded() / 1000,
+                                       "keyed": frame.isBackdrop, "gravity": sample.gravity != nil, "depth": sample.depthDataMap != nil]
+            if let d = frame.backdropDepth { line["backdropM"] = (Double(d) * 1000).rounded() / 1000 }
+            if let d = frame.nearestDepth { line["nearestM"] = (Double(d) * 1000).rounded() / 1000 }
+            if let save, frame.isBackdrop, let mask = try BackdropKey.objectMask(image: sample.image, frame: frame) {
+                try mask.writePNG(to: save.appendingPathComponent(file.deletingPathExtension().lastPathComponent + ".png"))
+            }
+            emit(line)
+        }
+        emit(["done": files.count, "keyed": keyed])
+        exit(0)
+    } catch { fail(String(describing: error)) }
+}
 let samplesMode = args.first == "samples"
 if samplesMode { args.removeFirst() }
 func option(_ name: String) -> String? {
@@ -114,6 +147,11 @@ let noDepth = args.contains("--no-depth"); args.removeAll { $0 == "--no-depth" }
 // An Object Capture folder only: the two settings that differ from Apple's defaults (the companion's retry uses --feature).
 let featureOption = option("--feature")
 let honorBox = args.contains("--honor-box"); args.removeAll { $0 == "--honor-box" }
+// An Object Capture folder only: --backdrop auto (default) keys out a rig's coloured backdrop when the photos show
+// one (BackdropKey); off keeps Apple's folder input untouched; samples (diagnostic) rebuilds through samples
+// without any key, to compare the two input paths.
+let backdropOption = option("--backdrop") ?? "auto"
+if !["auto", "off", "samples"].contains(backdropOption) { FileHandle.standardError.write(Data(usage.utf8)); exit(2) }
 let featureSensitivities: [String: PhotogrammetrySession.Configuration.FeatureSensitivity] = ["normal": .normal, "high": .high]
 if samplesMode && (featureOption != nil || honorBox) { FileHandle.standardError.write(Data(usage.utf8)); exit(2) }
 if let featureOption, featureSensitivities[featureOption] == nil { FileHandle.standardError.write(Data(usage.utf8)); exit(2) }
@@ -219,10 +257,46 @@ do {
         // the scanned object." Say how many do, so the size's source is on record.
         let files = try photos(in: input)
         guard !files.isEmpty else { fail("No photos in \(input.path).") }
+        // A rig's backdrop: which photos show it. Keyed photos go in as samples with the key as their object mask;
+        // the rest keep Apple's own masking. Decided over the whole scan so one stray frame never switches the path.
+        var keyedPhotos = Set<String>()
+        if backdropOption == "auto" {
+            for (index, file) in files.enumerated() {
+                let sample = try loadCaptureSample(file)
+                let frame = try BackdropKey.key(image: sample.image, depth: sample.depthDataMap.flatMap { DepthImage(buffer: $0) })
+                if frame.isBackdrop { keyedPhotos.insert(file.lastPathComponent) }
+                emit(["stage": "backdrop", "done": index + 1, "total": files.count])
+            }
+            if keyedPhotos.count * 4 < files.count { keyedPhotos.removeAll() }   // under a quarter: no backdrop
+            emit(["backdrop": keyedPhotos.count])
+        }
         emit(["images": files.count, "depth": files.filter { embeddedDepth(in: $0) != nil }.count, "stage": "reconstructing",
               "featureSensitivity": featureOption ?? "high",
               "ignoreBoundingBox": configuration.ignoreBoundingBox])
-        session = try PhotogrammetrySession(input: input, configuration: configuration)
+        if keyedPhotos.isEmpty && backdropOption != "samples" {
+            session = try PhotogrammetrySession(input: input, configuration: configuration)
+        } else {
+            let samples = AnySequence<PhotogrammetrySample> {
+                var iterator = files.makeIterator()
+                return AnyIterator<PhotogrammetrySample> {
+                    while let file = iterator.next() {
+                        do {
+                            var sample = try loadCaptureSample(file)
+                            if noDepth { sample.depthDataMap = nil }
+                            if keyedPhotos.contains(file.lastPathComponent) {
+                                let frame = try BackdropKey.key(image: sample.image, depth: sample.depthDataMap.flatMap { DepthImage(buffer: $0) })
+                                if let mask = try BackdropKey.objectMask(image: sample.image, frame: frame) { sample.objectMask = mask.pixelBuffer() }
+                            }
+                            return sample
+                        } catch {
+                            emit(["skipped": file.lastPathComponent, "reason": String(describing: error)])
+                        }
+                    }
+                    return nil
+                }
+            }
+            session = try PhotogrammetrySession(input: samples, configuration: configuration)
+        }
     }
     try session.process(requests: [.modelFile(url: output, detail: detail)])
     for try await out in session.outputs {

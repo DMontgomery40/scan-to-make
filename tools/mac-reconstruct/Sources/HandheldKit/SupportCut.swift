@@ -35,8 +35,61 @@ public struct SupportCut: Equatable {
 ///    (Apple's own `Request.Geometry` box can't do this: on David's DAD sign, a box whose floor sat just above the plate
 ///    clipped the model at the floor and left it open, 3,302 open edges, and kept the plate's scraps above the floor.)
 /// The result is turned so the plane is level and moved so the cut is at z = 0: the object stands where it stood.
+///
+/// When that finds nothing, it tries again with what a scan rig adds under its plate: first without loose pieces
+/// floating wholly below the largest piece, then looking for the plane over the model's whole height instead of its
+/// bottom half. With the backdrop keyed out (BackdropKey) Apple keeps the rig's stand under the plate, which pushes
+/// the plate out of the bottom half: on David's Nov 14 scan as a loose chunk, on his Nov 8 scan joined to the plate.
+/// Step 4 still has to hold, so an object's own high step is never taken for a support.
 public func removeSupport(_ corners: [SIMD3<Float>], clearance: Double = 0.5, band: Double = 2,
                           maximumTilt: Double = 15, minimumOutsideArea: Double = 5000) -> (corners: [SIMD3<Float>], cut: SupportCut)? {
+    if let cut = removeSupportOnce(corners, clearance: clearance, band: band, maximumTilt: maximumTilt, minimumOutsideArea: minimumOutsideArea) {
+        return cut
+    }
+    let trimmed = withoutPiecesBelow(corners)
+    guard !trimmed.isEmpty else { return nil }
+    var found = trimmed.count < corners.count
+        ? removeSupportOnce(trimmed, clearance: clearance, band: band, maximumTilt: maximumTilt, minimumOutsideArea: minimumOutsideArea)
+        : nil
+    if found == nil {
+        found = removeSupportOnce(trimmed, clearance: clearance, band: band, maximumTilt: maximumTilt,
+                                  minimumOutsideArea: minimumOutsideArea, searchedHeight: 1)
+    }
+    guard var cut = found else { return nil }
+    cut.cut.trianglesBefore = corners.count / 3
+    return cut
+}
+
+/// The triangles without the connected pieces (joined through shared corners) whose highest point is below the
+/// largest piece's lowest point.
+func withoutPiecesBelow(_ corners: [SIMD3<Float>]) -> [SIMD3<Float>] {
+    let count = corners.count / 3
+    guard count > 0 else { return corners }
+    var parent = Array(0..<count)
+    func root(_ x: Int) -> Int { var x = x; while parent[x] != x { parent[x] = parent[parent[x]]; x = parent[x] }; return x }
+    var ids: [SIMD3<UInt32>: Int] = [:]
+    for t in 0..<count {
+        for corner in corners[(3 * t)..<(3 * t + 3)] {
+            let key = SIMD3<UInt32>((corner.x + 0).bitPattern, (corner.y + 0).bitPattern, (corner.z + 0).bitPattern)
+            if let other = ids[key] { let a = root(other), b = root(t); if a != b { parent[a] = b } } else { ids[key] = t }
+        }
+    }
+    var area: [Int: Double] = [:], low: [Int: Float] = [:], high: [Int: Float] = [:]
+    for t in 0..<count {
+        let a = corners[3 * t], b = corners[3 * t + 1], c = corners[3 * t + 2], r = root(t)
+        area[r, default: 0] += Double(simd_length(simd_cross(b - a, c - a)) / 2)
+        low[r] = min(low[r] ?? .infinity, a.z, b.z, c.z); high[r] = max(high[r] ?? -.infinity, a.z, b.z, c.z)
+    }
+    guard let main = area.max(by: { $0.value < $1.value })?.key, let floor = low[main] else { return corners }
+    var out: [SIMD3<Float>] = []
+    out.reserveCapacity(corners.count)
+    for t in 0..<count where high[root(t)]! >= floor { out += corners[(3 * t)..<(3 * t + 3)] }
+    return out
+}
+
+private func removeSupportOnce(_ corners: [SIMD3<Float>], clearance: Double, band: Double,
+                               maximumTilt: Double, minimumOutsideArea: Double,
+                               searchedHeight: Double = 0.5) -> (corners: [SIMD3<Float>], cut: SupportCut)? {
     let count = corners.count / 3
     guard count > 0 else { return nil }
     let points = corners.map { SIMD3<Double>(Double($0.x), Double($0.y), Double($0.z)) }
@@ -55,7 +108,7 @@ public func removeSupport(_ corners: [SIMD3<Float>], clearance: Double = 0.5, ba
 
     // 1. Upward faces in the bottom half; each in turn (a fixed stride, so runs agree) proposes its own plane.
     let upward = cos(25 * Double.pi / 180), agree = cos(15 * Double.pi / 180)
-    let candidates = (0..<count).filter { areas[$0] > 0 && normals[$0].z >= upward && centroids[$0].z <= low + (high - low) / 2 }
+    let candidates = (0..<count).filter { areas[$0] > 0 && normals[$0].z >= upward && centroids[$0].z <= low + (high - low) * searchedHeight }
     guard !candidates.isEmpty else { return nil }
     let step = max(1, candidates.count / 400)
     var best: (score: Double, point: SIMD3<Double>, normal: SIMD3<Double>)?
