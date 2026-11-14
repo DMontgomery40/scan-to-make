@@ -601,6 +601,8 @@ test('handheld photos are only taken before the touch-up starts, and not next to
 test('mac-reconstruct output becomes progress words and plain errors', async t => {
   assert.equal(progressWords({stage: 'downloading'}), 'Getting your Mac ready to build from photos. This happens once.');
   assert.equal(progressWords({stage: 'masking', done: 3, total: 90}), 'Finding the object in your photos (3 of 90).');
+  assert.equal(progressWords({stage: 'backdrop', done: 12, total: 68}), 'Checking your photos for a backdrop to take out (12 of 68).');
+  assert.equal(progressWords({backdrop: 62}), undefined);
   assert.equal(progressWords({progress: 0.416}), 'Building the model from your photos (42%).');
   assert.equal(progressWords({skipped: 4}), undefined);
 
