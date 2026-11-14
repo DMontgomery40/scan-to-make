@@ -35,10 +35,8 @@ struct NewObjectView: View {
     @State private var measuredMiddle = ""
     @State private var measuredShortest = ""
     @State private var captureWarning: String?
-    /// A stopped scan with too few photos to send by itself, attached here: Remove takes it off (review of #795).
-    @State private var removableStop: String?
-    /// How many photos the attached scan kept when it was stopped: said under its question, beside Remove (#795).
-    @State private var stoppedPhotos: Int?
+    /// The attached scan, if it was stopped: its line under the question, and the run Remove takes off (#795).
+    @State private var stop = ScanStop()
     /// One of the finished scan's own frames, shown beside its question.
     @State private var scanPicture: URL?
     @FocusState private var describing: Bool
@@ -56,6 +54,21 @@ struct NewObjectView: View {
 
     /// A scan finished for this draft, kept on this phone until Send.
     enum Attached: Equatable { case walkAround, inHand }
+
+    /// What New knows about a stopped scan it holds (#795): how many photos it kept, said under its question, and the
+    /// run Remove takes off when they may be too few. Kept together so a new scan clears both: a Remove left over from
+    /// a 12-photo stop beside a scan that finished took the old run off and cleared the sheet while the new one still sent.
+    @MainActor struct ScanStop: Equatable {
+        private(set) var photos: Int?
+        private(set) var removableRun: String?
+        /// A scan that finished, in hand or walked around, or none: nothing to say and nothing for Remove.
+        mutating func clear() { self = ScanStop() }
+        /// A scan stopped after keeping `photos`: Remove is offered only when they may be too few.
+        mutating func stopped(run: String, photos: Int) {
+            self.photos = photos
+            removableRun = MacConnection.isEnough(stoppedPhotos: photos) ? nil : run
+        }
+    }
 
     /// What a finished scan is for: the printed thing itself, the thing a new part must fit, or undecided.
     enum ScanUse: String, Equatable { case copy, fit, later }
@@ -318,8 +331,7 @@ struct NewObjectView: View {
                 if fake == "walk-around" { attached = .walkAround }
                 else if fake.hasPrefix("stopped-"), let photos = Int(fake.dropFirst("stopped-".count)) {
                     attached = .walkAround
-                    stoppedPhotos = photos
-                    removableStop = MacConnection.isEnough(stoppedPhotos: photos) ? nil : "debug-stopped-\(photos)"
+                    stop.stopped(run: "debug-stopped-\(photos)", photos: photos)
                 }
             }
             #endif
@@ -390,7 +402,7 @@ struct NewObjectView: View {
                 // Which scan, by its project's name: the one already on the Mac, nothing to scan again.
                 Text("\(ProjectWords.title(seed)) · \(ScanLineage.scannedLine(seed))").font(.caption).foregroundStyle(.secondary)
                     .lineLimit(2).accessibilityIdentifier("scan-use-source")
-            } else if let stoppedPhotos {
+            } else if let stoppedPhotos = stop.photos {
                 // Why this scan may be thin, under its question and beside Remove (#795): a few photos warn in
                 // orange and explain the Remove next to them; enough are good news in the secondary style.
                 Text(MacConnection.stoppedScanWords(photos: stoppedPhotos)).font(.subheadline)
@@ -407,16 +419,16 @@ struct NewObjectView: View {
             // The thing being decided about, next to the question (lead, Nov 10): small, so all three answers still fit.
             HStack(spacing: 12) {
                 // VoiceOver reads a stopped scan's row (its picture, question and line) as one element; Remove keeps its own (#795).
-                if seed == nil, stoppedPhotos != nil { scanLabel.accessibilityElement(children: .combine) } else { scanLabel }
+                if seed == nil, stop.photos != nil { scanLabel.accessibilityElement(children: .combine) } else { scanLabel }
                 Spacer(minLength: 0)
                 if picked != nil {
                     Button("Remove") { picked = nil; scanUse = nil }.font(.subheadline)
                         .disabled(working != nil).accessibilityIdentifier("scan-use-remove")
-                } else if let run = removableStop {
+                } else if let run = stop.removableRun {
                     // A few stray photos from a stopped scan: take them off and the project designs from the words.
                     Button("Remove") {
                         MacConnection.removeStoppedScan(run: run)
-                        removableStop = nil; stoppedPhotos = nil; attached = nil; captureWarning = nil; scanUse = nil
+                        stop.clear(); attached = nil; captureWarning = nil; scanUse = nil
                         store.refreshStoppedScans()
                     }
                     .font(.subheadline).disabled(working != nil).accessibilityIdentifier("scan-use-remove")
@@ -686,16 +698,15 @@ struct NewObjectView: View {
     /// `includingStopped: false` when Scan is pressed again: a stopped scan is the one you may want to redo, so a new
     /// capture opens (its run is newer, so it is the one kept); a finished scan is still just attached.
     private func savedCapture(_ id: String, includingStopped: Bool = true) async -> Attached? {
-        if HandheldCapture.finished(id) { stoppedPhotos = nil; return .inHand }
+        if HandheldCapture.finished(id) { stop.clear(); return .inHand }
         switch store.mac.keptScan(id) {
         case .finished:
             captureWarning = store.mac.localScanWarning(id)
-            removableStop = nil; stoppedPhotos = nil
+            stop.clear()
             return .walkAround
         case .stopped(let run, let photos) where includingStopped:
             // Said under the scan's question, not again at the bottom of the sheet (#795).
-            captureWarning = nil; stoppedPhotos = photos
-            removableStop = MacConnection.isEnough(stoppedPhotos: photos) ? nil : run
+            captureWarning = nil; stop.stopped(run: run, photos: photos)
             return .walkAround
         case .stopped, nil:
             return nil
@@ -722,10 +733,10 @@ struct NewObjectView: View {
                 throw CompanionError(code: "missing-capture", message: "This project's saved scan is no longer on this phone. Start a new project to scan it again.")
             }
             if handheld {
-                if await HandheldCapture.run(objectId: object.id) { attached = .inHand; stoppedPhotos = nil; beginUpload(object) }
+                if await HandheldCapture.run(objectId: object.id) { attached = .inHand; stop.clear(); beginUpload(object) }
             } else if try await store.mac.scan(object.id) != nil {
                 attached = .walkAround
-                captureWarning = store.mac.localScanWarning(object.id); stoppedPhotos = nil
+                captureWarning = store.mac.localScanWarning(object.id); stop.clear()
                 beginUpload(object)
             } else if let saved = await savedCapture(object.id) {
                 // "Keep for later" in the capture still comes back here with the scan attached, not to a
