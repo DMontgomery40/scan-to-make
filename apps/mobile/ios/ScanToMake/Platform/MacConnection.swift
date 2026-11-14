@@ -322,6 +322,10 @@ typealias MacError = CompanionError
         }
     }
 
+    /// Whether a send cut short (Send was pressed, `sendRequested`) has a scan on this phone to finish with: an in-hand
+    /// capture, or a kept walk-around scan, finished or stopped after it kept photos (#791, review of #795).
+    static func resumesSend(handheldFinished: Bool, kept: KeptScan?) -> Bool { handheldFinished || kept != nil }
+
     /// A stopped scan with this many photos is sent as it is, like a finished one; fewer are still offered, with a
     /// warning, and the Mac says plainly if it can't build from them.
     static func isEnough(stoppedPhotos photos: Int) -> Bool { photos >= 20 }

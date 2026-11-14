@@ -157,8 +157,10 @@ struct ProjectView: View {
     private func resumeSavedCapture() async {
         guard !resumed, !away, let object, object.state == .new, !store.sending.contains(object.id), MacConnection.sendRequested(object.id) else { return }
         resumed = true
-        let saved = HandheldCapture.finished(object.id) ? true : await store.mac.finishedScan(object.id) != nil
-        if saved { act { try await finishSending(object) } }
+        // A stopped scan's send resumes too (#791): Send sent it as its photos, so a send cut short finishes the same way.
+        if MacConnection.resumesSend(handheldFinished: HandheldCapture.finished(object.id), kept: store.mac.keptScan(object.id)) {
+            act { try await finishSending(object) }
+        }
     }
 
     private func finishSending(_ object: Project) async throws -> Project? {

@@ -985,6 +985,17 @@ private actor HeldDownload {
         XCTAssertNil(MacConnection.keptScan(for: "dad", drafts: [draft("Not-A-UUID", "stopped")], active: nil) { _ in 9 })
     }
 
+    /// Send on a stopped scan, cut short (the app closed mid-upload): on relaunch its project page finishes the send
+    /// from the same kept photos, as it does for a finished scan (review of #795).
+    func testASendCutShortResumesForAStoppedScanToo() {
+        let stopped = "3b072103-c190-41b9-8158-03177424d0c5"
+        let kept = MacConnection.keptScan(for: "dad", drafts: [draft(stopped, "stopped")], active: nil) { _ in 68 }
+        XCTAssertTrue(MacConnection.resumesSend(handheldFinished: false, kept: kept))
+        XCTAssertTrue(MacConnection.resumesSend(handheldFinished: false, kept: .finished(run: stopped)))
+        XCTAssertTrue(MacConnection.resumesSend(handheldFinished: true, kept: nil))
+        XCTAssertFalse(MacConnection.resumesSend(handheldFinished: false, kept: nil), "nothing on this phone to send")
+    }
+
     /// What the New sheet says under a stopped scan it attached: enough photos are simply sent; a few are sent with a
     /// warning, never kept back.
     func testAStoppedScanSaysWhatItKeptAndWhetherThatIsEnough() {
