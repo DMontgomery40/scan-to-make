@@ -26,7 +26,7 @@ Nov 11: "why are we letting failed android or Linux or iPad builds or small bugs
 ### Done means all of these, in this order
 
 1. **No P0 on a tester's path.**
-   - **#791 (P0, David today): Stop on a scan sends nothing, and the project then designs from the text alone.** David: "where the fuck is the scan then ?" The 68 photos are kept read-only at `~/scan-to-make-work/green-key-2026-11-14/capture/Images` on the Mac. Fix both halves on every layout.
+   - **#791 (P0, David today, unowned; yours): Stop on a scan sends nothing, and the project then designs from the text alone.** David: "where the fuck is the scan then ?" The 68 photos are kept read-only at `~/scan-to-make-work/green-key-2026-11-14/capture/Images` on the Mac. Fix both halves on every layout.
    - **#769, #617 and #606** are merged. They close on the phone's media trace; how to read it is in their comments and in the 12e section below. The phone has been off the Mac's network all of Nov 14, so nothing new is recorded yet.
    - **#605 and #630** are about David's own P1S, not beta gates.
 2. **Finish what is in flight.**
@@ -63,7 +63,15 @@ The lead owns release decisions (David, Nov 10: "NO PUBLISHING IS YOURS TOO ... 
 
 ### Check first
 
-- **Another session is active.** Someone filed #791 at 17:06Z and is testing a green-backdrop key fix on the Mac, in `~/scan-to-make-work/green-key-2026-11-14/`. Builds A, B and C finished at 17:13Z, and it says "separate PR". Find it, or ask David, and agree who owns what before you dispatch anything. Two leads dispatching at once is the main risk.
+- **Another session: "Fix Green Screen Background Removal"**, a local Claude Code session on agents-173. Reach it with `ListAgents`, then `SendMessage`. Its scope, in its own words, Nov 14 17:3xZ:
+  - **It owns only [#793](https://github.com/DMontgomery40/scan-to-make/pull/793)** (`fix/green-backdrop-key`, head `df5db7aa`, based on `9408e0eb`): a green-backdrop key in `tools/mac-reconstruct` (`HandheldKit/BackdropKey.swift`, `Samples.swift`, `SupportCut.swift`, `main.swift` `--backdrop`), plus one `progressWords` line in `services/companion/src/objects/reconstruct.ts`.
+    - David: "the green screen issue, where it mashed together with the dad letters.... WTF IS THE POINT OF A GREEN SCREEN?!?! TO MAKE IT *NOT* GREEN."
+    - 45 Swift and 28 companion tests pass. `ci_local.py` and `branch_check.py --merge` have not been run. **It rides your next train**; it isn't reviewed yet.
+  - **It filed #791 but is not fixing it. #791 is yours.**
+  - Its Mac worktree is `~/fleet/stm-green-key`. `~/scan-to-make-work/green-key-2026-11-14/` holds read-only copies of David's 68-photo DAD scan: capture `3b072103`, which never reached project `b8158144`.
+    - It deliberately did not attach the photos, because a rebuild before #793 is installed would fuse the green again.
+    - Once #793 and #791 are installed, David sends that scan again through the app, as a user.
+  - Nothing of its is running. Clean up the worktree when #793 merges.
 - **A rule break on Nov 13, about 04:40Z.** The #788 builder's screenshot script started a Debug `Counterpart.app` from its scratch build for about 13 minutes, which could have shown a window on David's screen. A read-only listing found **no file in `~/Library/Application Support/Scan to Make/` changed between 21:30 and 22:05 MST** (the window it ran in). The script now refuses to start the app.
 - **Devices.**
   - Mac: **202611130345** (trains 12a–12f, main `9408e0eb`).
