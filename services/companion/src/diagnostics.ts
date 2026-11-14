@@ -57,8 +57,9 @@ export interface SoftwarePackage {
 }
 
 // Names that say a value is a secret: in `key=value`, `key: value` and JSON, whatever the case or joining
-// (`accessCode`, `BAMBU_ACCESS_CODE`, `refresh_token`, `X-Api-Key`).
-const SECRET_WORD = String.raw`(?:password|passwd|passcode|pwd|secret|token|api[_-]?key|apikey|access[_-]?code|accesscode|access[_-]?key|authorization|auth|cookie|credential|private[_-]?key|signature|ticket|login|email|user[_-]?info)`;
+// (`accessCode`, `BAMBU_ACCESS_CODE`, `refresh_token`, `X-Api-Key`). `auth` only as a word of its own (`AUTH_TOKEN`,
+// `authKey`), so prose such as "Failed to authenticate: Claude login …" keeps its words.
+const SECRET_WORD = String.raw`(?:password|passwd|passcode|pwd|secret|token|api[_-]?key|apikey|access[_-]?code|accesscode|access[_-]?key|authorization|auth(?:[_-]?key)?(?![a-z])|cookie|credential|private[_-]?key|signature|ticket|login|email|user[_-]?info)`;
 const SECRET_KEY = String.raw`[A-Za-z0-9_.-]*${SECRET_WORD}[A-Za-z0-9_.-]*`;
 const SECRET_NAME = new RegExp(SECRET_WORD, 'i');
 const RULES: [RegExp, string][] = [

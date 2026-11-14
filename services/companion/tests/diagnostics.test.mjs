@@ -128,6 +128,11 @@ test('no access code, token or email comes out, from the event log, the MCP\'s f
 test('redact keeps ordinary words and numbers', () => {
   const line = '{"seq":12,"type":"pass.started","passIndex":2,"layer":40,"words":"Printing on P1S"} host=192.0.2.7 version 1.1.90';
   assert.equal(redact(line), line);
+  // A real event's words (Nov 14 real-data check): "authenticate:" is prose, not a key.
+  const prose = '"body":"Failed to authenticate: Claude login reached its time limit"';
+  assert.equal(redact(prose), prose);
+  for (const secret of ['auth: s3cretvalue', 'AUTH_TOKEN=s3cretvalue', '"auth":"s3cretvalue"', 'authKey=s3cretvalue', 'Authorization: s3cretvalue'])
+    assert.ok(!redact(secret).includes('s3cretvalue'), secret);
 });
 
 test('size caps: the event log keeps its newest whole lines, an MCP past max_bytes is cut, and the whole answer fits', async t => {
