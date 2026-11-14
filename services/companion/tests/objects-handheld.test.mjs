@@ -168,6 +168,23 @@ test('a declared walk-around never starts on part of its images, from any client
   assert.equal(builds[0].objectCapture, true, 'Apple folder mode, never the handheld samples path');
 });
 
+test('a draft whose scan is still on the phone never starts from its words alone, and says where the scan is (#791)', async () => {
+  // David, Nov 14: a 68-photo scan stopped on the phone, the project started from "A replica of this DAD desk thing"
+  // alone, and the Mac asked for photos it already should have had. The phone now declares a kept scan as soon as
+  // it's attached; until any of it arrives, a start without it is refused in plain words.
+  const {service, object, builds, touchups} = await setup();
+  await service.updateInstructions(object.id, 'A replica of this DAD desk thing');
+  const sixtyEight = Array.from({length: 68}, (_, i) => `${String(i + 1).padStart(4, '0')}.heic`);
+  await service.declareCapture(object.id, objectCaptureManifest(sixtyEight));
+  await assert.rejects(service.start(object.id), {message: 'Your scan is still on the phone that took it (68 photos). Send it from that phone; its project there has Send to your Mac.'});
+  const waiting = await service.get(object.id);
+  assert.equal(waiting.state, 'new', 'still a draft: nothing designs from the text alone');
+  assert.deepEqual([builds.length, touchups.length, waiting.passes?.length ?? 0], [0, 0, 0]);
+  // Once part of it is here, the refusal is the resume one.
+  await service.addCapturePhoto(object.id, '0001.heic', Buffer.from('a'));
+  await assert.rejects(service.start(object.id), /Resume sending it from the phone that recorded it/);
+});
+
 test("the phone's preview from a send without every photo is kept as a preview, and says the full rebuild wasn't available", async () => {
   const {service, object, builds, touchups} = await setup();
   await service.addScan(object.id, 'scan.usdz', Buffer.from('phone model'), {preview: true});

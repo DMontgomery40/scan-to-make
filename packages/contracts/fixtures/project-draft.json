@@ -1,0 +1,197 @@
+{
+  "_about": "#788: a code design pass that ended with no final run keeps its last valid run as a draft. Every layout reads this file: the line, the reasons as given (collapsed after collapseAfter), and the print confirmation's note. round4: an MCP with engine round 4 (reasons from final_refused, services/companion/tests/fixtures/cad-round4). older: an MCP from before round 4 (a draft with no reasons). finished: no draft.",
+  "line": "Not finished: the design engine couldn't check everything",
+  "printNote": "This part wasn't fully checked: the design engine couldn't check everything.",
+  "collapseAfter": 2,
+  "projects": {
+    "round4": {
+      "project": {
+        "id": "7a1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01",
+        "title": "Dash mount",
+        "kind": "fit",
+        "instructions": "A phone mount for my Forester's dash.",
+        "state": "ready",
+        "status": {
+          "phase": "ready",
+          "text": "Not finished: the design engine couldn't check everything",
+          "symbol": "exclamationmark.triangle",
+          "tint": "orange"
+        },
+        "createdAtMs": 1794500000000,
+        "updatedAtMs": 1794510000000,
+        "photos": [],
+        "passes": [],
+        "current": {
+          "model": "current/model.stl",
+          "renders": [
+            "current/renders/1-contact.png",
+            "current/renders/2-use.png"
+          ],
+          "summary": "A dash mount for the phone.",
+          "sizeMm": [
+            146.2,
+            122.5,
+            23.8
+          ],
+          "engine": "code",
+          "draft": {
+            "reasons": [
+              "Model the dash as world:dash in use(): a solid slab where it really is, touching the part where it is taped, so the tape mount can be checked.",
+              "Turn the phone toward the user: its face is 41 deg off the line to their eye (allowed 25). Aim it the way the bought products do, with a joint or an angled base, and show it aimed in use().",
+              "Bring the phone within reach: it is 812 mm from the user (allowed 700)."
+            ]
+          }
+        },
+        "versions": [
+          {
+            "id": "20000000-0000-4000-8000-000000000001",
+            "sealedAtMs": 1794510000000,
+            "modelSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+            "result": {
+              "model": "versions/20000000-0000-4000-8000-000000000001/model.stl",
+              "renders": [
+                "versions/20000000-0000-4000-8000-000000000001/renders/1-contact.png",
+                "versions/20000000-0000-4000-8000-000000000001/renders/2-use.png"
+              ],
+              "summary": "A dash mount for the phone.",
+              "sizeMm": [
+                146.2,
+                122.5,
+                23.8
+              ],
+              "draft": {
+                "reasons": [
+                  "Model the dash as world:dash in use(): a solid slab where it really is, touching the part where it is taped, so the tape mount can be checked.",
+                  "Turn the phone toward the user: its face is 41 deg off the line to their eye (allowed 25). Aim it the way the bought products do, with a joint or an angled base, and show it aimed in use().",
+                  "Bring the phone within reach: it is 812 mm from the user (allowed 700)."
+                ]
+              }
+            },
+            "picture": "versions/20000000-0000-4000-8000-000000000001/pictures/part.png"
+          }
+        ]
+      },
+      "draft": true,
+      "reasons": [
+        "Model the dash as world:dash in use(): a solid slab where it really is, touching the part where it is taped, so the tape mount can be checked.",
+        "Turn the phone toward the user: its face is 41 deg off the line to their eye (allowed 25). Aim it the way the bought products do, with a joint or an angled base, and show it aimed in use().",
+        "Bring the phone within reach: it is 812 mm from the user (allowed 700)."
+      ]
+    },
+    "older": {
+      "project": {
+        "id": "7a1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a02",
+        "title": "Bottle holder",
+        "kind": "fit",
+        "instructions": "A phone mount for my Forester's dash.",
+        "state": "ready",
+        "status": {
+          "phase": "ready",
+          "text": "Not finished: the design engine couldn't check everything",
+          "symbol": "exclamationmark.triangle",
+          "tint": "orange"
+        },
+        "createdAtMs": 1794500000000,
+        "updatedAtMs": 1794510000000,
+        "photos": [],
+        "passes": [],
+        "current": {
+          "model": "current/model.stl",
+          "renders": [
+            "current/renders/1-contact.png",
+            "current/renders/2-use.png"
+          ],
+          "summary": "A dash mount for the phone.",
+          "sizeMm": [
+            146.2,
+            122.5,
+            23.8
+          ],
+          "engine": "code",
+          "draft": {}
+        },
+        "versions": [
+          {
+            "id": "20000000-0000-4000-8000-000000000002",
+            "sealedAtMs": 1794510000000,
+            "modelSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+            "result": {
+              "model": "versions/20000000-0000-4000-8000-000000000002/model.stl",
+              "renders": [
+                "versions/20000000-0000-4000-8000-000000000002/renders/1-contact.png",
+                "versions/20000000-0000-4000-8000-000000000002/renders/2-use.png"
+              ],
+              "summary": "A dash mount for the phone.",
+              "sizeMm": [
+                146.2,
+                122.5,
+                23.8
+              ],
+              "draft": {}
+            },
+            "picture": "versions/20000000-0000-4000-8000-000000000002/pictures/part.png"
+          }
+        ]
+      },
+      "draft": true,
+      "reasons": []
+    },
+    "finished": {
+      "project": {
+        "id": "7a1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a03",
+        "title": "Desk hook",
+        "kind": "fit",
+        "instructions": "A phone mount for my Forester's dash.",
+        "state": "ready",
+        "status": {
+          "phase": "ready",
+          "text": "Ready to print · 146 × 123 × 24 mm",
+          "detail": "146 × 123 × 24 mm",
+          "symbol": "checkmark.seal",
+          "tint": "accent"
+        },
+        "createdAtMs": 1794500000000,
+        "updatedAtMs": 1794510000000,
+        "photos": [],
+        "passes": [],
+        "current": {
+          "model": "current/model.stl",
+          "renders": [
+            "current/renders/1-contact.png",
+            "current/renders/2-use.png"
+          ],
+          "summary": "A dash mount for the phone.",
+          "sizeMm": [
+            146.2,
+            122.5,
+            23.8
+          ],
+          "engine": "code"
+        },
+        "versions": [
+          {
+            "id": "20000000-0000-4000-8000-000000000003",
+            "sealedAtMs": 1794510000000,
+            "modelSha256": "3333333333333333333333333333333333333333333333333333333333333333",
+            "result": {
+              "model": "versions/20000000-0000-4000-8000-000000000003/model.stl",
+              "renders": [
+                "versions/20000000-0000-4000-8000-000000000003/renders/1-contact.png",
+                "versions/20000000-0000-4000-8000-000000000003/renders/2-use.png"
+              ],
+              "summary": "A dash mount for the phone.",
+              "sizeMm": [
+                146.2,
+                122.5,
+                23.8
+              ]
+            },
+            "picture": "versions/20000000-0000-4000-8000-000000000003/pictures/part.png"
+          }
+        ]
+      },
+      "draft": false,
+      "reasons": []
+    }
+  }
+}

@@ -1199,3 +1199,7 @@ hr {
 /* A card that waits while an earlier design is on the stage (#616): a plain wrapper, its controls disabled natively. */
 fieldset.waits { border: 0; margin: 0; padding: 0; min-width: 0; }
 fieldset.waits:disabled { opacity: 0.6; }
+/* #788: a draft design's line and the engine's reasons, as given. */
+.draft-design ul { margin: 0.4rem 0 0.2rem; padding-left: 1.2rem; }
+.draft-design li { margin: 0.2rem 0; }
+.draft-design button { margin-top: 0.2rem; }

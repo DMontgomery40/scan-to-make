@@ -177,3 +177,23 @@ public struct ObjectWords: Sendable, Equatable {
 public extension Project {
     var words: ObjectWords { ObjectWords(self) }
 }
+
+/// The status capsule of the design on a project's stage (`showingDesign`): an earlier design selected shows its own
+/// state, as on the iPhone and iPad (#616), and a ready draft says "Not finished" with the warning symbol (#788). Made
+/// from the stage's project, never the newest design's (review of #790: the Mac's capsule read the newest design).
+public struct CapsuleWords: Equatable, Sendable {
+    public let stage: ProjectStage
+    public let text: String
+    /// Done (PRD §5.4): the green ✓.
+    public let done: Bool
+    /// A symbol in place of the stage's: a ready draft's warning triangle.
+    public let symbol: String?
+
+    public init(_ shown: Project) {
+        let words = shown.words
+        let draft = words.stage == .ready && shown.current?.draft != nil
+        stage = words.stage; done = words.done
+        text = draft ? Project.DesignDraft.capsule : words.capsule
+        symbol = draft ? Project.DesignDraft.symbol : nil
+    }
+}

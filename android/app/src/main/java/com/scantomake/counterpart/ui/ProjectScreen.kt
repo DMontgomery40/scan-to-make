@@ -231,7 +231,9 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
                     label = entry?.label ?: if (photo != null) "Your photo" else words.title,
                     unavailableLine = when { entry == null -> "Nothing to show yet."; entry.kind == ProjectGallery.Kind.Plate -> "No picture of this plate came with the file."; else -> "Your computer couldn't draw a picture of this." },
                     modifier = Modifier.fillMaxSize())
-                StatusCapsule(shownWords.phase, modifier = Modifier.padding(12.dp))
+                val draftCapsule = shownWords.phase == ProjectPhase.Ready && shown.current?.draft != null
+                StatusCapsule(shownWords.phase, text = if (draftCapsule) Project.Draft.CAPSULE else null,
+                    modifier = Modifier.padding(12.dp).testTag("status-capsule"), icon = if (draftCapsule) CIcons.Warning else null)
                 entry?.sizeText()?.let { Text(it, Modifier.align(Alignment.BottomStart).padding(12.dp).clip(RoundedCornerShape(50)).background(Color.Black.copy(alpha = 0.55f)).padding(8.dp, 4.dp), fontSize = 12.sp) }
                 // On the picture, with the same dark backing as the size and status chips, so it reads on either stage.
                 if (version == null && entry?.kind == ProjectGallery.Kind.Part && project.canLocate) Text("See It Together",
@@ -249,6 +251,8 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
                 }
             }
             if (version != null) ViewingEarlierDesignBar(project, version) { viewingDesign = null }
+            // #788: the design on the stage is a draft: the plain line and the printer MCP's reasons as given.
+            shown.current?.draft?.let { DraftDesignNote(it) }
             // Under What you scanned (design §3.3): make something else from this scan, on any project the computer has a
             // scan for, whatever its kind; where this one's scan came from; what else was made from it.
             val lineage = ScanLineage(project, projects)
@@ -529,4 +533,17 @@ fun AskSizesCard(form: AskSizesForm, enabled: Boolean, changed: (AskSizesForm) -
             answer?.let(send)
         }
     }
+}
+
+/** #788: a design that isn't finished: the plain line, then the printer MCP's reasons word for word (two, then Show all). */
+@Composable
+private fun DraftDesignNote(draft: Project.Draft) {
+    var expanded by remember(draft) { mutableStateOf(false) }
+    GlassCard(Modifier.fillMaxWidth().testTag("draft-design")) { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("⚠ " + Project.Draft.LINE, Modifier.testTag("draft-design-line"), color = Palette.needsYou, fontWeight = FontWeight.SemiBold)
+        draft.shown(expanded).forEach { reason -> Text("•  $reason", Modifier.testTag("draft-design-reason"), color = Palette.secondary, fontSize = 14.sp) }
+        if (draft.collapses) Text(if (expanded) "Show fewer" else "Show all ${draft.reasons.size}",
+            Modifier.testTag("draft-design-more").clickable(role = Role.Button) { expanded = !expanded },
+            color = Palette.filament, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+    } }
 }

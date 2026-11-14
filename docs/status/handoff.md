@@ -6,7 +6,116 @@ Updated in place; git history keeps the rest. This is the only handoff: no dated
 
 **What is running and owed this hour is the pinned issue [#610](https://github.com/DMontgomery40/scan-to-make/issues/610), which the lead updates at every wake. Read it first.**
 
-## Now (2026-11-13, 03:30Z): evening — train 12e (#769 second fix, Printer software, printer names)
+## Now (2026-11-14, 17:30Z): to a new lead — finish the public TestFlight beta
+
+**The goal.** David, Nov 14: "make handoff prompt for a new lead to actual finish this so it's toally ready for beta public in test flight".
+
+**The bar is David's, from [distribution.md](../distribution.md), Nov 7.** The beta is to "get more people testing their own printers and sending logs":
+- other printer models are the purpose of the beta, not an acceptance prerequisite;
+- in-hand scanning is Labs;
+- AR doesn't block the beta.
+
+Nov 11: "why are we letting failed android or Linux or iPad builds or small bugs block a full [train] of working shit". A failing layout gets `held-off-train` and does not hold the release. Add no gate David didn't state.
+
+**Where public stands.**
+- TestFlight 2.0 (4) and Mac beta 6 were built from `30e3afdd` (Nov 6), so they are eight days and trains 11–12f behind main.
+- The public link https://testflight.apple.com/join/S4tExVzp is open to anyone, in the external group Counterpart Public Beta.
+- #667 tracks the refresh.
+- Everything about ASC, signing, the Mac artifact and the setup page is in [distribution.md](../distribution.md).
+
+### Done means all of these, in this order
+
+1. **No P0 on a tester's path.**
+   - **#791 (P0, David today, unowned; yours): Stop on a scan sends nothing, and the project then designs from the text alone.** David: "where the fuck is the scan then ?" The 68 photos are kept read-only at `~/scan-to-make-work/green-key-2026-11-14/capture/Images` on the Mac. Fix both halves on every layout.
+   - **#769, #617 and #606** are merged. They close on the phone's media trace; how to read it is in their comments and in the 12e section below. The phone has been off the Mac's network all of Nov 14, so nothing new is recorded yet.
+   - **#605 and #630** are about David's own P1S, not beta gates.
+2. **Finish what is in flight.**
+   - **[#790](https://github.com/DMontgomery40/scan-to-make/pull/790)** (#788, P1). A code pass that ends with no final run keeps the last valid run as a draft, on every layout. Open items:
+     - one review finding: "a code change pass whose mesh is unchanged never records a new design draft";
+     - no Mac screenshots, because the off-screen renders came out blank;
+     - its round-4 fixtures are built from source, not from a real receipt.
+   - **Engine round 4**, [bambu-printer-mcp #160](https://github.com/DMontgomery40/bambu-printer-mcp/pull/160) and [mcp-3D-printer-server #116](https://github.com/DMontgomery40/mcp-3D-printer-server/pull/116), for #608/#734.
+     - The review's blockers are fixed. The builder (thread "Engine round 4" on agents-136) was told on Nov 14 to lower the held-mass density floor to 0.03 g/cm³ and push, and to re-run the Forester holder with measurements supplied. The holder's earlier `needs_closeup` is the measurement rule working, not a failure.
+     - Leftovers are #789 (round 5).
+     - **Release order: publish round 4 only after a public Mac beta carrying #790 is out.** Testers on Mac beta 6 pull npm's latest MCPs on their own, and with round 4 an old app would say "no model was saved".
+   - **#775** (Printer software) is installed. It closes when David looks at the screen once.
+   - **#784** is installed. It closes when a real uncertain print shows "Check print result".
+3. **A first run on a clean Mac.** Follow [distribution.md](../distribution.md), "Verify a downloaded copy on a clean Mac". Cover:
+   - the Local Network prompt;
+   - companion startup;
+   - cleanup workers;
+   - Download in Settings → Printer software;
+   - adding a printer;
+   - same-account phone pairing;
+   - the Sparkle update path.
+
+   This needs a Mac that isn't David's configured one, such as a VM or a second macOS account. **That is probably the one thing David has to provide**, so ask early.
+4. **Production push reaching a TestFlight phone.** Unverified since Nov 3; see distribution.md, "Production services". David's own Mac has a Sandbox relay URL saved.
+5. **The tester's way to send logs and feedback works end to end**, since that is the beta's stated purpose.
+6. **Ship.**
+   - **iPhone:** `apps/mobile/scripts/prepare-testflight.sh` from clean main with an unused 2.0 build number, then upload. Add the build to Counterpart Public Beta with What to Test (Beta App Review). Uploaded, in review and available to testers are different states; report them separately.
+   - **Mac:** `apps/mac/scripts/release.sh` (Developer ID, notarize, staple, Sparkle appcast). Run it through the Mac's T3 environment. Plain `ssh mac` can't read the Spillover include in `~/.ssh/config`, and notarization needs keychain access.
+   - **Publish:** the GitHub release, then the setup page `counterpart.dtmont.com/beta.html`. The page does not deploy on merge; Wrangler runs on the Mac.
+   - **Android and Linux** (#667).
+7. **Then** publish MCP round 4 and install it through the app's Update.
+
+The lead owns release decisions (David, Nov 10: "NO PUBLISHING IS YOURS TOO ... this codebase is yours").
+
+### Check first
+
+- **Another session: "Fix Green Screen Background Removal"**, a local Claude Code session on agents-173. Reach it with `ListAgents`, then `SendMessage`. Its scope, in its own words, Nov 14 17:3xZ:
+  - **It owns only [#793](https://github.com/DMontgomery40/scan-to-make/pull/793)** (`fix/green-backdrop-key`, head `df5db7aa`, based on `9408e0eb`): a green-backdrop key in `tools/mac-reconstruct` (`HandheldKit/BackdropKey.swift`, `Samples.swift`, `SupportCut.swift`, `main.swift` `--backdrop`), plus one `progressWords` line in `services/companion/src/objects/reconstruct.ts`.
+    - David: "the green screen issue, where it mashed together with the dad letters.... WTF IS THE POINT OF A GREEN SCREEN?!?! TO MAKE IT *NOT* GREEN."
+    - 45 Swift and 28 companion tests pass. `ci_local.py` and `branch_check.py --merge` have not been run. **It rides your next train**; it isn't reviewed yet.
+  - **It filed #791 but is not fixing it. #791 is yours.**
+  - Its Mac worktree is `~/fleet/stm-green-key`. `~/scan-to-make-work/green-key-2026-11-14/` holds read-only copies of David's 68-photo DAD scan: capture `3b072103`, which never reached project `b8158144`.
+    - It deliberately did not attach the photos, because a rebuild before #793 is installed would fuse the green again.
+    - Once #793 and #791 are installed, David sends that scan again through the app, as a user.
+  - Nothing of its is running. Clean up the worktree when #793 merges.
+- **A rule break on Nov 13, about 04:40Z.** The #788 builder's screenshot script started a Debug `Counterpart.app` from its scratch build for about 13 minutes, which could have shown a window on David's screen. A read-only listing found **no file in `~/Library/Application Support/Scan to Make/` changed between 21:30 and 22:05 MST** (the window it ran in). The script now refuses to start the app.
+- **Devices.**
+  - Mac: **202611130345** (trains 12a–12f, main `9408e0eb`).
+  - iPhone: **202611130318** (12e).
+  - iPad: **202611121212**. It has been off the Mac's network since Nov 12 20:4xZ, and the watcher (`~/scan-to-make-work/install-when-reachable-202611130318/`) gives up at 2026-11-14 18:00Z. Re-arm it or install by hand when the iPad is back.
+  - MCPs in the app: 1.1.94 / 1.2.76.
+
+### Running the team from T3: IDs and traps (as of Nov 14)
+
+Read operations.md, "Agents, models and machines", first. This adds the concrete IDs and what the last lead learned the hard way.
+
+**Environments** (check them with `t3_environment_links`):
+
+| Machine | `environmentId` | Used for |
+|---|---|---|
+| Mac mini | `11412686-e469-46d5-8f3a-5aaa68539c60` | builds, installs, devices, the Mac gate, notarization |
+| agents-171 | `47bda6d1-e923-4d84-80b2-3c70505a578f` | reviews, the companion/Linux/Android jobs; scratch goes in `~/stm-gates`, not `/tmp` |
+| agents-136 | `9ac19334-ae37-45a2-b26d-c20726031d9e` | MCP engine work (`~/bambu-printer-mcp`, `~/mcp-3D-printer-server`, `~/sonnet-test`) |
+| agents-173 | `ccf8b95b-985b-4d23-9c87-0ba61503ef31` | the last lead's thread; no gates here |
+
+**Projects used** (find them with `t3_project_list` per environment):
+- Mac: `mcp:7464dfa2-762b-4d22-987c-e39640f5159d` (builders and gates); `mcp:6e1f3fde-6b5e-42ca-8aa3-b3bc71fd95f1` (the install checkout `~/fleet/scan-to-make`); `mcp:d1cb4caf-25df-43ab-93ae-bd7e6f68d0c2` (MCP releases).
+- agents-171: `7b644e30-126c-489b-97b6-ac9483f88c40`.
+- agents-136: `4f80db3e-151c-45c7-bf54-b028d79dc3ef`.
+
+**Targets.** Call `orchestrator_capabilities` once first.
+- Builders: `claudeAgent` / `claude-opus-5-5` / `{effort:"high"}`.
+- Reviews: `muse` / `muse-wonder-full-1.0` / `{reasoningEffort:"high"}`.
+- Installs and releases: `codex` / `gpt-6.1-sol` / `{reasoningEffort:"high"}`.
+
+**Traps:**
+1. **A `delegate_task` to a linked environment can't use `isolation:"worktree"`.** The brief must have the child make its own worktree:
+   - on Linux, under `~/stm-gates`;
+   - on the Mac, from `~/fleet/stm-lane-a` or `-b`;
+   - never in `~/fleet/scan-to-make`, which is the install checkout.
+2. **A delegate's completion wakes you, but delegates often end a turn with "waiting on …" and carry on later.** That wake is interim, so `t3_thread_read` the thread; the real report arrives as a later wake.
+3. **`t3_thread_send` to a finished thread starts a new run but does not wake you.** Set a fallback timer: Bash `sleep 1500` with `run_in_background` (timeout up to 3000000 ms). A foreground `sleep` is blocked. A session restart kills these timers, so re-check your threads after one.
+4. **Local Claude sessions** on the same machine aren't T3 threads. Find them with `ListAgents`, message them with `SendMessage` (`notify_when_idle: true`). "Fix Green Screen Background Removal" on agents-173 is one.
+5. **Plain `ssh mac` has no TCC permissions.** `~/.ssh/config` line 1 includes a Spillover file, so `ci_local.py`'s fan-out dies over ssh, and the keychain, notarization and Local Network need the Mac's T3 environment. Read-only ssh (git, ls, a `devicectl` copy of the phone's trace) is fine.
+6. **#610 is updated with** `gh issue edit 610 --body-file <file>`, after `date -u`.
+
+**How the last lead worked:** see the sections below and [operations.md](../operations.md), covering trains, `ci_local.py` plus `branch_check.py --merge`, installs only from clean main, and Mac gates through a T3 agent. The pinned [#610](https://github.com/DMontgomery40/scan-to-make/issues/610) is the live list, so keep it current.
+
+## Before that (2026-11-13, 03:30Z): evening — train 12e (#769 second fix, Printer software, printer names)
 
 Lead: Claude Opus 5.5 (high), T3 thread "Recover Work and Stabilize Counterpart" on agents-173. Live list: pinned [#610](https://github.com/DMontgomery40/scan-to-make/issues/610). The sections below are the afternoon's and the night's record.
 

@@ -56,20 +56,23 @@ struct ProjectDetail: View {
         }
     }
 
-    /// The state; with Project Settings, also the menu that sets it (Done for something printed elsewhere, PRD §5.4).
+    /// The state of the design on the stage; with Project Settings, also the menu that sets it (Done for something
+    /// printed elsewhere, PRD §5.4). An earlier design selected shows its own state and draft (#616, #788), and its
+    /// menu waits for the newest, as on the iPhone and iPad.
     @ViewBuilder private var statusCapsule: some View {
-        if model.capabilities?.projectSettings == true {
+        let capsule = CapsuleWords(stageObject)
+        if model.capabilities?.projectSettings == true && viewingDesign == nil {
             Menu {
                 ProjectStatusItems(object: object, model: model)
             } label: {
-                StatusCapsule(stage: words.stage, text: words.capsule, done: words.done, menu: true)
+                StatusCapsule(stage: capsule.stage, text: capsule.text, done: capsule.done, menu: true, symbol: capsule.symbol)
             }
             .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
             .disabled(blocked)
             .help("Set the status: Not Printed, Printed, Done or Needs Changes")
-            .accessibilityLabel("Status: \(words.capsule)")
+            .accessibilityLabel("Status: \(capsule.text)")
         } else {
-            StatusCapsule(stage: words.stage, text: words.capsule, done: words.done)
+            StatusCapsule(stage: capsule.stage, text: capsule.text, done: capsule.done, symbol: capsule.symbol)
         }
     }
     private var working: Bool { model.working.contains(object.id) }
@@ -142,6 +145,8 @@ struct ProjectDetail: View {
                         Spacer()
                     }
                 }
+                // #788: the design on the stage is a draft: the plain line and the printer MCP's reasons as given.
+                if let draft = stageObject.current?.draft { DraftDesignNote(draft: draft) }
                 if let line = model.notAnsweringLine {
                     Label(line, systemImage: "exclamationmark.triangle").font(.callout).foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)

@@ -53,8 +53,9 @@ struct StageBackground: View {
 struct StatusCapsule: View {
     let phase: ProjectPhase
     var text: String? = nil
+    var symbol: String? = nil
     var body: some View {
-        Label(text ?? phase.label, systemImage: phase.symbol)
+        Label(text ?? phase.label, systemImage: symbol ?? phase.symbol)
             .font(.caption.weight(.semibold))
             .labelStyle(.titleAndIcon)
             .lineLimit(1).minimumScaleFactor(0.75)

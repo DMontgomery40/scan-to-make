@@ -37,7 +37,7 @@ export interface EventDraft {
   /** Relative to the project directory. */
   frame?: string;
   /** Facts only the words need (they end up in title and body, not in `data`). */
-  detail?: {item?: string; question?: string; size?: string; reason?: string; message?: string; title?: string; package?: string; printedBefore?: boolean};
+  detail?: {item?: string; question?: string; size?: string; reason?: string; message?: string; title?: string; package?: string; printedBefore?: boolean; draft?: boolean};
 }
 
 export interface MonitorClock {
