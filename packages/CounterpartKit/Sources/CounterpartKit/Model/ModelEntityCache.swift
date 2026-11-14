@@ -47,6 +47,8 @@ import Foundation
         guard !Task.isCancelled else { return nil }
         return entity?.clone(recursive: true)
     }
+    /// Loads waiting for a slot (tests).
+    var queuedLoads: Int { storage.work.queuedCount }
     public static func hasGeometry(_ entity: Entity) -> Bool {
         if let model = entity.components[ModelComponent.self],
            model.mesh.contents.models.contains(where: { $0.parts.contains(where: { ($0.triangleIndices?.count ?? 0) > 0 }) }) { return true }
