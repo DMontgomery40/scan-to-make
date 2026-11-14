@@ -6,6 +6,36 @@ Updated in place; git history keeps the rest. This is the only handoff: no dated
 
 **What is running and owed this hour is the pinned issue [#610](https://github.com/DMontgomery40/scan-to-make/issues/610), which the lead updates at every wake. Read it first.**
 
+## Update (2026-11-14, 23:30Z): train 2026-11-14 landed and is installed
+
+Lead: Claude Opus 5.5 (T3 thread on agents-173, took over at 17:53Z). The live list is the pinned [#610](https://github.com/DMontgomery40/scan-to-make/issues/610).
+
+- **Train [#801](https://github.com/DMontgomery40/scan-to-make/pull/801) merged at 23:10Z (main `840a4540`):**
+  - #790 (#788): drafts. A final run clears a draft; check runs (`role: "check"`) are never the draft; the MCP's `draft_reasons` come first.
+  - #795 (#791): Stop sends the scan. A stopped scan with ≥20 photos is declared at once, retried until the Mac acknowledges it, and the declared run is kept. One with 1–19 photos is attached with Remove. The status sits in the scan's row.
+  - #793: green backdrop key.
+  - Review: Muse Wonder Full. The P1 is fixed; the #793 hardening is #804.
+  - Two regression-watcher findings were fixed on the train.
+  - Gate: companion 1297/0, iOS unit 48/0, iPad layout 70/0, bad-day captures 162 frames with 0 flagged, Release step without React Native. The changed screens were looked at on iPhone, iPad and the Duo. `branch_check` SAFE.
+- **Installed build 202611142311** on the Mac and the iPhone. The iPad watcher `install-when-reachable-202611142311` runs until Nov 17 18:00Z.
+  - David re-sends the DAD scan through the app. That closes #791 and #793.
+- **Before the public beta build:**
+  - #804: backdrop and support-cut hardening (review F2, F3, F5, F7).
+  - #805 (P1): a busy media load must wait, not show as failed. Being built.
+  - #808: the gate false-green fix (#806); the iPad step now runs after an iPhone failure.
+  - #799: tester diagnostics. The MCP half is bambu #161 and mcp-3D #117 (unmerged, released with round 4); the app half is being built.
+- **Still to do on the beta path:**
+  - #797: a clean-Mac first run. Asked David: a macOS 27 VM on the Mac mini (he signs in once) or a second account.
+  - #798: production push on a TestFlight device. Asked David which device; the iPad is suggested.
+  - #799: logs.
+  - Then the TestFlight build, Mac beta, setup page, Android/Linux (#667).
+  - Then publish MCP round 4 (#160 and #116, now with `role` and `draft_reasons`) and diagnostics (#161 and #117) after one review.
+- **Filed today:** #797, #798, #799, #800, #802, #803, #805, #806, and the Duo draft-page P3.
+- **Known traps learned today:**
+  - `branch_check`'s boundary check needs the Jev key, which is only on the Mac (`~/.config/jev/env`). Run it from a Mac delegate and read the output.
+  - A stale Nov 11 agent-device session can hold `stm-ux-iphone` (DEVICE_IN_USE).
+  - Stage UI tests fail when the Mac is loaded: that's #805, an app bug.
+
 ## Now (2026-11-14, 17:30Z): to a new lead — finish the public TestFlight beta
 
 **The goal.** David, Nov 14: "make handoff prompt for a new lead to actual finish this so it's toally ready for beta public in test flight".
