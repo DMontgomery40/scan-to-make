@@ -391,10 +391,11 @@ typealias MacError = CompanionError
     /// warning, and the Mac says plainly if it can't build from them.
     static func isEnough(stoppedPhotos photos: Int) -> Bool { photos >= 20 }
 
+    /// The line under a stopped scan's question on New (#795). Too few sits beside Remove, so it names it.
     static func stoppedScanWords(photos: Int) -> String {
-        let kept = "The scan stopped at \(photos) photo\(photos == 1 ? "" : "s")."
-        return isEnough(stoppedPhotos: photos) ? "\(kept) Your Mac builds the model from them."
-            : "\(kept) That may be too few: your Mac will try, or scan it again."
+        let kept = "Stopped at \(photos) photo\(photos == 1 ? "" : "s")"
+        return isEnough(stoppedPhotos: photos) ? "\(kept). Your Mac builds the model from them."
+            : "\(kept), which may be too few. Remove it, or your Mac will try."
     }
 
     private static func imageNames(in images: URL) -> [String] {

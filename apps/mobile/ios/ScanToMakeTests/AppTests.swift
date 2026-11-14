@@ -1093,15 +1093,18 @@ private actor HeldDownload {
         XCTAssertEqual(MacConnection.pendingDeclares(defaults), [:], "the Mac refused: the project has moved on")
     }
 
-    /// What the New sheet says under a stopped scan it attached: enough photos are simply sent; a few are sent with a
-    /// warning, never kept back.
+    /// What the New sheet says under a stopped scan's question (#795): enough photos are simply sent; a few are sent
+    /// with a warning beside Remove, never kept back.
     func testAStoppedScanSaysWhatItKeptAndWhetherThatIsEnough() {
         XCTAssertTrue(MacConnection.isEnough(stoppedPhotos: 68))
         XCTAssertFalse(MacConnection.isEnough(stoppedPhotos: 19))
-        XCTAssertEqual(MacConnection.stoppedScanWords(photos: 68), "The scan stopped at 68 photos. Your Mac builds the model from them.")
-        XCTAssertEqual(MacConnection.stoppedScanWords(photos: 5),
-                       "The scan stopped at 5 photos. That may be too few: your Mac will try, or scan it again.")
+        XCTAssertEqual(MacConnection.stoppedScanWords(photos: 68), "Stopped at 68 photos. Your Mac builds the model from them.")
+        XCTAssertEqual(MacConnection.stoppedScanWords(photos: 20), "Stopped at 20 photos. Your Mac builds the model from them.")
+        XCTAssertEqual(MacConnection.stoppedScanWords(photos: 19),
+                       "Stopped at 19 photos, which may be too few. Remove it, or your Mac will try.")
+        XCTAssertEqual(MacConnection.stoppedScanWords(photos: 12),
+                       "Stopped at 12 photos, which may be too few. Remove it, or your Mac will try.")
         XCTAssertEqual(MacConnection.stoppedScanWords(photos: 1),
-                       "The scan stopped at 1 photo. That may be too few: your Mac will try, or scan it again.")
+                       "Stopped at 1 photo, which may be too few. Remove it, or your Mac will try.")
     }
 }
