@@ -704,6 +704,64 @@ test('#788: a pass that changes nothing on a draft leaves it a draft', async t =
   assert.equal(publicObject(after).status.text, "Not finished: the design engine couldn't check everything");
 });
 
+// Review of #790 (P1): an Ask for changes on a draft that ends with the same mesh and still no final run. The engine's
+// latest verdict on that mesh replaces the draft's reasons (on the project and its newest design); it stays a draft.
+test('#788: an unchanged pass with no final run on a draft keeps the draft with this pass\'s reasons', async t => {
+  const first = ['Model the desk as world:desk in use().'], latest = ['Give the hook a 3 mm lip so the strap can\'t slide off.'];
+  const f = await setup(t, [
+    {engine: 'code', result: {summary: 'A hook.', draft: {reasons: first}}},
+    {engine: 'code', status: 'unchanged', result: {summary: 'Nothing needed changing.', draft: {reasons: latest}}},
+    {engine: 'code', status: 'unchanged', result: {summary: 'Nothing needed changing.', draft: {}}},
+  ]);
+  const object = await f.service.create('A hook for under the desk', 'fit');
+  await f.service.start(object.id);
+  await f.service.settled(object.id);
+  await f.service.correct(object.id, 'Add a lip');
+  const after = await f.service.settled(object.id);
+  assert.equal(after.state, 'ready');
+  assert.equal(after.passes.at(-1).status, 'unchanged');
+  assert.equal(after.versions.length, 1, 'the same design, not a new one');
+  assert.deepEqual(after.current.draft, {reasons: latest}, 'this pass\'s reasons replace the earlier ones');
+  assert.deepEqual(after.versions.at(-1).result.draft, {reasons: latest}, 'the newest design, picked in its history, says the same');
+  assert.deepEqual(after.passes.at(-1).draft, {reasons: latest});
+  assert.equal(publicObject(after).status.text, "Not finished: the design engine couldn't check everything");
+  assert.equal(f.events.findLast(event => event.type === 'pass.ready').detail.draft, true);
+  // An MCP that gives no reasons this time: still a draft, now with none (the engine's answer, taken as given).
+  await f.service.correct(object.id, 'Again');
+  const none = await f.service.settled(object.id);
+  assert.deepEqual(none.current.draft, {});
+  assert.deepEqual(none.versions.at(-1).result.draft, {});
+});
+
+// Review of #790 (P1): the same on a finished design never makes it a draft. The pass ends unchanged and keeps the
+// engine's reasons on its own record, so the conversation can say why nothing changed.
+test('#788: an unchanged pass with no final run on a finished design leaves it finished and keeps the reasons on the pass', async t => {
+  const reasons = ['Give the hook a 3 mm lip so the strap can\'t slide off.'];
+  const f = await setup(t, [
+    {engine: 'code', result: {summary: 'A hook.'}},
+    {engine: 'code', status: 'unchanged', result: {summary: 'Nothing needed changing.', draft: {reasons}}},
+  ]);
+  const object = await f.service.create('A hook for under the desk', 'fit');
+  await f.service.start(object.id);
+  await f.service.settled(object.id);
+  await f.service.correct(object.id, 'Add a lip');
+  const after = await f.service.settled(object.id);
+  assert.equal(after.state, 'ready');
+  assert.equal(after.passes.at(-1).status, 'unchanged');
+  assert.equal(after.current.draft, undefined, 'a finished design is never turned into a draft');
+  assert.equal(after.versions.at(-1).result.draft, undefined);
+  assert.equal(after.versions.length, 1);
+  assert.deepEqual(after.passes.at(-1).draft, {reasons}, 'the pass says why nothing changed');
+  assert.deepEqual(publicObject(after).passes.at(-1).draft, {reasons});
+  assert.equal(after.passes.at(-2).draft, undefined);
+  assert.match(publicObject(after).status.text, /^Ready to print/);
+  assert.equal(f.events.findLast(event => event.type === 'pass.ready').detail?.draft, undefined);
+  // Pinned, not chosen here: an unchanged pass replaces current/design with its own run's source (today's behaviour
+  // for every unchanged code pass); the newest sealed design keeps the final run's.
+  assert.equal(await readFile(join(f.store.dir(object.id), after.current.design.script), 'utf8'), '# pass 2');
+  assert.equal(await readFile(join(f.store.dir(object.id), after.versions.at(-1).result.design.script), 'utf8'), '# pass 1');
+});
+
 test('a size question is its own kind: numbers on the wire, numbers back, and the worker is told which were measured and which accepted', async t => {
   const asked = [{label: 'width at the pink stripe', mm: 64, from: 'scan'}, {label: 'width at the waist', mm: 53, from: 'estimate'},
     {label: 'height to the cap tip', mm: 107, from: 'published', product: 'MiO 1.62 oz bottle', reference: 'the maker\'s product page'},

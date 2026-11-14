@@ -374,6 +374,8 @@ export async function runTouchupWorker(inv: TouchupInvocation, pass: TouchupPass
   // The rules require a checkpoint after every fix: a touch-up of a scan with none saved fixed nothing.
   // A make job (no scan) has nothing to be unchanged.
   if (pass.scanPaths.length > 0 && validCheckpoints.length === 0) return {status: 'unchanged', ...summary, model, ...base};
-  if (opts.inputStlSha256 && await sha256(model) === opts.inputStlSha256) return {status: 'unchanged', ...summary, model, ...base};
+  // #788 (review of #790): a draft whose mesh is the pass's input still brings the engine's reasons; the project decides
+  // where they go (a draft keeps them, a finished design keeps them on the pass only).
+  if (opts.inputStlSha256 && await sha256(model) === opts.inputStlSha256) return {status: 'unchanged', ...summary, model, ...base, ...(model === touched ? draft : {})};
   return {status: 'done', ...summary, model, ...base, ...(model === touched ? draft : {})};
 }

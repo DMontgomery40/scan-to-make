@@ -97,6 +97,11 @@ export interface ObjectPass {
   engine?: DesignEngine;
   /** Why a design pass used Blender when Fusion or the code engine was wanted. */
   engineNote?: string;
+  /**
+   * #788: this pass's result was a draft (the code engine's last valid run, no run made final), with the printer MCP's
+   * reasons as given. Also on a pass that changed nothing on a finished design, which stays finished: the reasons say why.
+   */
+  draft?: {reasons?: string[]};
 }
 
 /** One thing the user scanned or asked to have made, as the phone and the Mac app both show it. */

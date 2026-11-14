@@ -545,6 +545,30 @@ test('#788: a draft from a run the worker never asked to make final gives the fa
   assert.ok(plain.model);
 });
 
+// Review of #790 (P1): an Ask for changes whose only runs are non-final and whose mesh equals the pass's input ends
+// unchanged; the engine's reasons still come back with it, so the project (a draft) or the pass (a final design) keeps them.
+test('#788: a draft whose mesh is the pass\'s input ends unchanged and still carries the engine\'s reasons', async () => {
+  const {mkdir} = await import('node:fs/promises');
+  const root = await tempDir('touchup-code-draft-unchanged-');
+  const pass = await prepareTouchupPass({root, objectId: 'obj', scan: [], photos: [], requirePhotos: false});
+  const cadDir = join(pass.dir, 'cad');
+  await mkdir(cadDir, {recursive: true});
+  const reasons = ['Model the desk as world:desk in use().'];
+  await cadRun(cadDir, 'cad-holder-1', 'holder', {at: Date.now() - 1000, extra: {ready: false, final_requested: true, final_refused: reasons}});
+  const result = await runTouchupWorker(codeInv(pass, codeWorker({status: 'done', summary: 'Nothing needed changing.'})), pass,
+    {inputStlSha256: createHash('sha256').update(SOLID).digest('hex')});
+  assert.equal(result.status, 'unchanged');
+  assert.deepEqual(result.draft, {reasons}, 'the engine\'s latest verdict on the same mesh');
+  // A final run whose mesh is unchanged is no draft (and a question or a limit never was one).
+  const finalPass = await prepareTouchupPass({root, objectId: 'final', scan: [], photos: [], requirePhotos: false});
+  await mkdir(join(finalPass.dir, 'cad'), {recursive: true});
+  await cadRun(join(finalPass.dir, 'cad'), 'cad-holder-1', 'holder', {at: Date.now() - 1000, final: true});
+  const final = await runTouchupWorker(codeInv(finalPass, codeWorker({status: 'done', summary: 'Done.'})), finalPass,
+    {inputStlSha256: createHash('sha256').update(SOLID).digest('hex')});
+  assert.equal(final.status, 'unchanged');
+  assert.equal(final.draft, undefined);
+});
+
 test('#788: a final run still wins over a later non-final one, and is no draft', async () => {
   const {mkdir} = await import('node:fs/promises');
   const root = await tempDir('touchup-code-draft-final-');
