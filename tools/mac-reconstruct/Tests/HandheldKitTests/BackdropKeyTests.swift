@@ -7,7 +7,7 @@ final class BackdropKeyTests: XCTestCase {
     /// A 120×80 photo: the panel's colour on the right half, a black letter and the wood base on the left, measured
     /// colours from the Nov 14 photos. Depth (60×40): the letter and base at 0.17 m, the panel at `panelDepth`.
     private func scene(panel: (CGFloat, CGFloat, CGFloat), panelDepth: Float, panelWidth: Int = 60,
-                       greenPart: Bool = false) throws -> (CVPixelBuffer, DepthImage) {
+                       greenPart: Bool = false, counter: Bool = false) throws -> (CVPixelBuffer, DepthImage) {
         let w = 120, h = 80
         let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
                             space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)!
@@ -16,6 +16,9 @@ final class BackdropKeyTests: XCTestCase {
         ctx.fill(CGRect(x: w - panelWidth, y: 0, width: panelWidth, height: h))
         ctx.setFillColor(CGColor(red: 35/255, green: 27/255, blue: 18/255, alpha: 1)); ctx.fill(CGRect(x: 50, y: 20, width: 30, height: 40))   // letter, overlapping the panel
         ctx.setFillColor(CGColor(red: 152/255, green: 119/255, blue: 82/255, alpha: 1)); ctx.fill(CGRect(x: 10, y: 60, width: 100, height: 10)) // wood base
+        if counter {   // the panel seen through a hole in the letter, too small for the depth map: it reads the letter's 0.17 m
+            ctx.setFillColor(CGColor(red: panel.0/255, green: panel.1/255, blue: panel.2/255, alpha: 1)); ctx.fill(CGRect(x: 58, y: 34, width: 8, height: 8))
+        }
         if greenPart {   // a part of the object in the panel's own colour, at the object's depth (0.17 m)
             ctx.setFillColor(CGColor(red: panel.0/255, green: panel.1/255, blue: panel.2/255, alpha: 1)); ctx.fill(CGRect(x: 10, y: 20, width: 20, height: 20))
         }
@@ -42,8 +45,8 @@ final class BackdropKeyTests: XCTestCase {
         }
     }
 
-    /// Review of #793 (Codex P1): the panel and a green part of the object in one photo. The photo shows a backdrop, and
-    /// only the pixels the depth puts behind go: the object's green at 0.17 m stays, the panel at 0.41 m goes.
+    /// Review of #793 (Codex P1): the panel and a green part of the object in one photo. The photo shows a backdrop; the
+    /// object's green, a region big enough to measure at 0.17 m, stays, and the panel at 0.41 m goes.
     func testAGreenPartOfTheObjectStaysWhenThePanelIsInTheSamePhoto() throws {
         let (image, depth) = try scene(panel: (160, 147, 31), panelDepth: 0.41, greenPart: true)
         let frame = try BackdropKey.key(image: image, depth: depth)
@@ -52,6 +55,16 @@ final class BackdropKeyTests: XCTestCase {
         XCTAssertTrue(kept(frame, 12, 22) && kept(frame, 28, 38), "all of it, to its corners")
         XCTAssertFalse(kept(frame, 100, 40), "the panel")
         XCTAssertTrue(kept(frame, 65, 40), "the letter")
+    }
+
+    /// The panel seen through a letter's counter reads at the letter's depth (the LiDAR can't resolve a hole a few cells
+    /// wide; per-pixel depth closed the A's counters on David's Nov 8 scan). A region of the colour that small is keyed.
+    func testThePanelSeenThroughACounterTooSmallForTheDepthIsStillKeyed() throws {
+        let (image, depth) = try scene(panel: (160, 147, 31), panelDepth: 0.41, counter: true)
+        let frame = try BackdropKey.key(image: image, depth: depth)
+        XCTAssertTrue(frame.isBackdrop)
+        XCTAssertFalse(kept(frame, 61, 37), "the counter is open")
+        XCTAssertTrue(kept(frame, 55, 37), "the letter round it stays")
     }
 
     func testAYellowOrGreenObjectWithNothingBehindItIsNeverKeyed() throws {

@@ -20,9 +20,12 @@ macOS command-line tools for rebuilding and checking scans on the Mac.
   a saturated yellow-green to green with almost no blue (the panel measured RGB ≈ 160,147,31 in warm light to
   202,211,67 in daylight; the sign's wood base, black letters and grey plate all fail it) covering at least 2% of the
   photo and sitting at least 0.12 m behind the nearest surface in the LiDAR depth (panel ≈ 0.41 m, sign ≈ 0.17 m), so
-  a green or yellow object is never keyed. The same test then holds per pixel: only pixels of the colour whose depth
-  cell, or a neighbouring one, sits that far behind are removed, so a green part of the object in the same photo as
-  the panel stays. When a quarter of the photos or more show it, the folder goes in as
+  a green or yellow object is never keyed. Within such a photo, a region of the colour covering at least 2% of it
+  whose median depth sits within 0.12 m of the nearest surface is part of the object and stays (a green part of the
+  object in the same photo as the panel). Smaller regions are keyed by colour: the LiDAR depth is upsampled from far
+  fewer points and reads a letter's counter at the letter's own depth (keying those by depth per pixel closed the A's
+  counters on the Nov 8 scan again). A green part of the object smaller than that, or touching the panel in the
+  photo, goes with the panel. When a quarter of the photos or more show it, the folder goes in as
   `PhotogrammetrySample`s (`loadCaptureSample`: the same image, metadata, depth and gravity Apple's folder input reads)
   and each keyed photo gets an object mask: Vision's foreground minus the backdrop, cleaned by a 4 px opening. A
   supplied mask switches Apple's own masking off for that photo, so the mask must leave out the room too; the key

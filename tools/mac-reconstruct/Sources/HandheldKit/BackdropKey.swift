@@ -24,6 +24,9 @@ public enum BackdropKey {
     public static let minimumGap: Float = 0.12
     /// Below this share of the frame the colour is a stray (a tape measure, a label), not a backdrop.
     public static let minimumShare = 0.02
+    /// A region of the colour this big (share of the photo) at the object's depth is part of the object and stays.
+    /// Smaller ones, which the depth map can't measure (a letter's counter, the slot between letters), are backdrop.
+    public static let objectRegionShare = 0.02
 
     public struct Frame {
         /// 255 = keep (object or anything that isn't the backdrop), 0 = backdrop. Same size as the photo.
@@ -89,23 +92,46 @@ public enum BackdropKey {
                            share: Double(count) / Double(max(1, width * height)),
                            backdropDepth: backdropDepth, nearestDepth: nearestDepth)
         guard result.isBackdrop, let depth, let nearestDepth else { return result }
-        // Per pixel, not just per photo (review of #793): a pixel of the colour is backdrop only where the depth says
-        // it is behind, at least `minimumGap` past the nearest surface, so a green or yellow part of the object in the
-        // same photo as the panel stays. A cell with no reading counts as behind (beyond the LiDAR's range), and each
-        // behind cell lends it to its neighbours: the depth map is 16 photo pixels a cell and blurs at edges, and the
-        // panel seen through a letter's counter is only a few cells wide.
-        var behind = [Bool](repeating: false, count: depth.width * depth.height)
-        for i in behind.indices {
-            let d = depth.metres[i]
-            behind[i] = !(d > 0 && d.isFinite) || d - nearestDepth >= minimumGap
-        }
-        var keyable = behind
+        // Which regions of the colour are the object's own (review of #793): a green or yellow part of the object in the
+        // same photo as the panel must stay. The LiDAR can say so only for a region big enough to measure: the depth
+        // map is upsampled from far fewer points, so a letter's counter or the slot between two letters reads at the
+        // letter's own depth even where the panel shows through (on David's Nov 8 scan, keying by depth per pixel
+        // closed the A's counters again). So: regions of the colour (depth cells mostly that colour, 4-connected) of
+        // at least `objectRegionShare` of the photo whose median depth sits within `minimumGap` of the nearest surface
+        // are the object's, with a cell round them for the blurred edge; every other pixel of the colour is backdrop.
+        let cells = depth.width * depth.height
+        var colour = [Bool](repeating: false, count: cells)
+        let cellW = max(1, width / depth.width), cellH = max(1, height / depth.height)
         for dy in 0..<depth.height {
-            for dx in 0..<depth.width where !behind[dy * depth.width + dx] {
-                search: for ny in max(0, dy - 1)...min(depth.height - 1, dy + 1) {
-                    for nx in max(0, dx - 1)...min(depth.width - 1, dx + 1) where behind[ny * depth.width + nx] {
-                        keyable[dy * depth.width + dx] = true; break search
-                    }
+            for dx in 0..<depth.width {
+                let x0 = dx * width / depth.width, y0 = dy * height / depth.height
+                var on = 0, n = 0
+                for y in stride(from: y0, to: min(height, y0 + cellH), by: 2) {
+                    for x in stride(from: x0, to: min(width, x0 + cellW), by: 2) { n += 1; if keyed.pixels[y * width + x] > 127 { on += 1 } }
+                }
+                colour[dy * depth.width + dx] = n > 0 && on * 2 >= n
+            }
+        }
+        var own = [Bool](repeating: false, count: cells), seen = [Bool](repeating: false, count: cells)
+        for start in 0..<cells where colour[start] && !seen[start] {
+            var region = [start], next = 0
+            seen[start] = true
+            while next < region.count {
+                let c = region[next]; next += 1
+                let cx = c % depth.width, cy = c / depth.width
+                for (nx, ny) in [(cx - 1, cy), (cx + 1, cy), (cx, cy - 1), (cx, cy + 1)]
+                where nx >= 0 && ny >= 0 && nx < depth.width && ny < depth.height {
+                    let n = ny * depth.width + nx
+                    if colour[n] && !seen[n] { seen[n] = true; region.append(n) }
+                }
+            }
+            guard Double(region.count) >= objectRegionShare * Double(cells) else { continue }
+            let readings = region.map { depth.metres[$0] }.filter { $0 > 0 && $0.isFinite }.sorted()
+            guard !readings.isEmpty, readings[readings.count / 2] - nearestDepth < minimumGap else { continue }
+            for c in region {
+                let cx = c % depth.width, cy = c / depth.width
+                for ny in max(0, cy - 1)...min(depth.height - 1, cy + 1) {
+                    for nx in max(0, cx - 1)...min(depth.width - 1, cx + 1) { own[ny * depth.width + nx] = true }
                 }
             }
         }
@@ -115,7 +141,7 @@ public enum BackdropKey {
             let row = min(depth.height - 1, y * depth.height / height) * depth.width
             for x in 0..<width {
                 let i = y * width + x
-                notKeyed.pixels[i] = keyed.pixels[i] > 127 && keyable[row + min(depth.width - 1, x * depth.width / width)] ? 0 : 255
+                notKeyed.pixels[i] = keyed.pixels[i] > 127 && !own[row + min(depth.width - 1, x * depth.width / width)] ? 0 : 255
             }
         }
         result.keep = edge > 0 ? notKeyed.dilated(by: edge) : notKeyed
