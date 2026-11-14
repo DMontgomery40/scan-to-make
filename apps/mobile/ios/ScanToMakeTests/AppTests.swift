@@ -950,4 +950,177 @@ private actor HeldDownload {
         do { _ = try await waiter.value; XCTFail("a cancelled caller gets no result") } catch { XCTAssertTrue(error is CancellationError, "\(error)") }
         XCTAssertLessThan(ContinuousClock.now - cancelledAt, .seconds(2))
     }
+
+    // MARK: A scan stopped after it kept photos (#791)
+
+    private func draft(_ run: String, _ status: String, project: String = "dad") -> [String: Any] {
+        ["runID": run, "status": status, "origin": ["projectId": project]]
+    }
+
+    /// David, Nov 14: 68 photos, Done never enabled (only 2 from above), Stop, and the Mac got a project with no scan:
+    /// "where the fuck is the scan then ?". A stopped run that kept photos is the project's scan, to send.
+    func testAStoppedScanThatKeptPhotosIsTheProjectsScanToSend() {
+        let stopped = "3b072103-c190-41b9-8158-03177424d0c5"
+        let kept = MacConnection.keptScan(for: "dad", drafts: [draft(stopped, "stopped")], active: nil) { _ in 68 }
+        XCTAssertEqual(kept, .stopped(run: stopped, photos: 68))
+        for status in ["failed", "interrupted"] {
+            XCTAssertEqual(MacConnection.keptScan(for: "dad", drafts: [draft(stopped, status)], active: nil) { _ in 12 },
+                           .stopped(run: stopped, photos: 12), status)
+        }
+    }
+
+    /// Newest run first, as the store lists them: a finished scan after a stopped one wins, a stopped one after a
+    /// finished one wins, a stopped run with no photos is passed over, the run still capturing and other projects' runs
+    /// don't count.
+    func testTheNewestRunThatKeptSomethingIsTheOneSent() {
+        let a = "aaaaaaaa-0000-4000-8000-000000000001", b = "bbbbbbbb-0000-4000-8000-000000000002"
+        XCTAssertEqual(MacConnection.keptScan(for: "dad", drafts: [draft(b, "ready"), draft(a, "stopped")], active: nil) { _ in 9 },
+                       .finished(run: b))
+        XCTAssertEqual(MacConnection.keptScan(for: "dad", drafts: [draft(b, "stopped"), draft(a, "ready")], active: nil) { _ in 9 },
+                       .stopped(run: b, photos: 9))
+        XCTAssertEqual(MacConnection.keptScan(for: "dad", drafts: [draft(b, "stopped"), draft(a, "ready")], active: nil) { $0 == b ? 0 : 9 },
+                       .finished(run: a))
+        XCTAssertNil(MacConnection.keptScan(for: "dad", drafts: [draft(b, "stopped")], active: b) { _ in 9 })
+        XCTAssertNil(MacConnection.keptScan(for: "dad", drafts: [draft(b, "stopped", project: "other")], active: nil) { _ in 9 })
+        XCTAssertNil(MacConnection.keptScan(for: "dad", drafts: [draft("Not-A-UUID", "stopped")], active: nil) { _ in 9 })
+    }
+
+    /// Send on a stopped scan, cut short (the app closed mid-upload): on relaunch its project page finishes the send
+    /// from the same kept photos, as it does for a finished scan (review of #795).
+    func testASendCutShortResumesForAStoppedScanToo() {
+        let stopped = "3b072103-c190-41b9-8158-03177424d0c5"
+        let kept = MacConnection.keptScan(for: "dad", drafts: [draft(stopped, "stopped")], active: nil) { _ in 68 }
+        XCTAssertTrue(MacConnection.resumesSend(handheldFinished: false, kept: kept))
+        XCTAssertTrue(MacConnection.resumesSend(handheldFinished: false, kept: .finished(run: stopped)))
+        XCTAssertTrue(MacConnection.resumesSend(handheldFinished: true, kept: nil))
+        XCTAssertFalse(MacConnection.resumesSend(handheldFinished: false, kept: nil), "nothing on this phone to send")
+    }
+
+    /// Review of #795: a stray stopped scan (1–19 photos) is attached but not named to the Mac until Send, so Remove can
+    /// take it off; removed, it is never sent and an older finished scan, if any, is the project's again. Enough photos
+    /// are named at once. Kept, a small one is still what Send sends.
+    func testASmallStoppedScanWaitsForSendAndCanBeRemoved() {
+        let small = "cccccccc-0000-4000-8000-000000000003", older = "dddddddd-0000-4000-8000-000000000004"
+        XCTAssertFalse(MacConnection.declaresAtOnce(.stopped(run: small, photos: 2)))
+        XCTAssertTrue(MacConnection.declaresAtOnce(.stopped(run: small, photos: 68)))
+        XCTAssertFalse(MacConnection.declaresAtOnce(.finished(run: small)), "a finished scan goes with its own upload")
+        XCTAssertFalse(MacConnection.declaresAtOnce(nil))
+        XCTAssertEqual(MacConnection.keptScan(for: "dad", drafts: [draft(small, "stopped")], active: nil) { _ in 2 },
+                       .stopped(run: small, photos: 2), "kept, Send sends it")
+        XCTAssertNil(MacConnection.keptScan(for: "dad", drafts: [draft(small, "stopped")], active: nil, removed: [small]) { _ in 2 },
+                     "removed: the project designs from the words")
+        XCTAssertEqual(MacConnection.keptScan(for: "dad", drafts: [draft(small, "stopped"), draft(older, "ready")], active: nil,
+                                              removed: [small]) { _ in 2 }, .finished(run: older))
+    }
+
+    /// Review of #795: Stop on the project page sends only the run it just stopped. A capture that kept no photos
+    /// finds the older stopped run still there, and must not send it again in its place.
+    func testStopWithNoPhotosNeverResendsAnOlderStoppedScan() {
+        let a = "aaaaaaaa-0000-4000-8000-000000000001", b = "bbbbbbbb-0000-4000-8000-000000000002"
+        XCTAssertNil(MacConnection.justStopped(before: .stopped(run: a, photos: 30), after: .stopped(run: a, photos: 30)))
+        XCTAssertEqual(MacConnection.justStopped(before: .stopped(run: a, photos: 30), after: .stopped(run: b, photos: 25)), 25)
+        XCTAssertEqual(MacConnection.justStopped(before: nil, after: .stopped(run: b, photos: 3)), 3)
+        XCTAssertNil(MacConnection.justStopped(before: nil, after: .finished(run: b)))
+        XCTAssertNil(MacConnection.justStopped(before: .finished(run: a), after: nil))
+    }
+
+    /// Review of #801 (F4): the newest run decides. A newest stopped run that kept no photos, or was removed, never
+    /// hands Send or resume an older stopped run it superseded; only an older finished scan.
+    func testTheNewestStoppedRunDecidesNeverAnOlderStoppedOne() {
+        let newest = "eeeeeeee-0000-4000-8000-000000000005", older = "ffffffff-0000-4000-8000-000000000006"
+        let finished = "aaaaaaaa-0000-4000-8000-000000000001"
+        XCTAssertNil(MacConnection.keptScan(for: "dad", drafts: [draft(newest, "stopped"), draft(older, "stopped")], active: nil) {
+            $0 == newest ? 0 : 40 }, "no photos in the newest: the older stop isn't sent instead")
+        XCTAssertNil(MacConnection.keptScan(for: "dad", drafts: [draft(newest, "stopped"), draft(older, "stopped")], active: nil,
+                                            removed: [newest]) { _ in 40 }, "removed newest: nor here")
+        XCTAssertEqual(MacConnection.keptScan(for: "dad", drafts: [draft(newest, "stopped"), draft(older, "stopped"), draft(finished, "ready")],
+                                              active: nil, removed: [newest]) { _ in 40 }, .finished(run: finished), "an older finished scan still counts")
+    }
+
+    /// Review of #801 (regression watcher on 63a78f4c): once a run is declared, the phone and the Mac agree on it. A
+    /// 68-photo stop the Mac was told about stays the project's scan when a newer capture keeps no photos or is removed,
+    /// so Send sends it and the draft is never stranded; an older stop that was never declared still isn't sent; a newer
+    /// 20-photo stop is declared in its place.
+    func testADeclaredScanStaysTheProjectsScanUntilANewerOneIsDeclared() throws {
+        let declared = "3b072103-c190-41b9-8158-03177424d0c5", newer = "eeeeeeee-0000-4000-8000-000000000005"
+        let drafts = [draft(newer, "stopped"), draft(declared, "stopped")]
+        XCTAssertEqual(MacConnection.keptScan(for: "dad", drafts: drafts, active: nil, declared: declared) { $0 == newer ? 0 : 68 },
+                       .stopped(run: declared, photos: 68), "a newer stop with no photos: the declared scan, which Send sends")
+        XCTAssertEqual(MacConnection.keptScan(for: "dad", drafts: drafts, active: nil, removed: [newer], declared: declared) { $0 == newer ? 5 : 68 },
+                       .stopped(run: declared, photos: 68), "a newer stop removed: the same")
+        XCTAssertNil(MacConnection.keptScan(for: "dad", drafts: drafts, active: nil) { $0 == newer ? 0 : 12 },
+                     "an older stop never declared (under 20) under an empty newer one: nothing, as before")
+        XCTAssertEqual(MacConnection.keptScan(for: "dad", drafts: drafts, active: nil, declared: declared) { $0 == newer ? 30 : 68 },
+                       .stopped(run: newer, photos: 30), "a newer stop with photos is the project's scan")
+
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "declared-\(UUID().uuidString)"))
+        MacConnection.setDeclaredRun(project: "dad", run: declared, defaults)
+        MacConnection.setDeclaredRun(project: "dad", run: newer, defaults)
+        XCTAssertEqual(MacConnection.declaredRuns(defaults), ["dad": newer], "a newer declared run replaces it")
+    }
+
+    /// Review of #801 (F1): a stopped scan's declare is recorded and retried until the Mac acknowledges it. The first try
+    /// fails (the Mac is asleep): it stays. The next succeeds: it's done. A run no longer the project's kept scan, one
+    /// with too few photos, and one the Mac refuses are dropped without retrying forever.
+    func testAStoppedScansDeclareIsRetriedUntilTheMacHasIt() async throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "declares-\(UUID().uuidString)"))
+        let run = "3b072103-c190-41b9-8158-03177424d0c5", other = "bbbbbbbb-0000-4000-8000-000000000002"
+        var kept: [String: MacConnection.KeptScan] = ["dad": .stopped(run: run, photos: 68)]
+        var declared: [String] = []
+        MacConnection.setPendingDeclare(project: "dad", run: run, defaults)
+
+        await MacConnection.retryDeclares(defaults, kept: { kept[$0] }, declare: { _, _ in throw CompanionError.unreachable })
+        XCTAssertEqual(MacConnection.pendingDeclares(defaults), ["dad": run], "the Mac didn't answer: kept for next time")
+        await MacConnection.retryDeclares(defaults, kept: { kept[$0] }, declare: { project, run in declared.append("\(project) \(run)") })
+        XCTAssertEqual(declared, ["dad \(run)"])
+        XCTAssertEqual(MacConnection.pendingDeclares(defaults), [:], "acknowledged")
+        XCTAssertEqual(MacConnection.declaredRuns(defaults), ["dad": run], "and recorded as the run the Mac has")
+
+        MacConnection.setPendingDeclare(project: "dad", run: run, defaults)
+        kept["dad"] = .stopped(run: other, photos: 30)
+        await MacConnection.retryDeclares(defaults, kept: { kept[$0] }, declare: { _, _ in XCTFail("superseded: not declared") })
+        XCTAssertEqual(MacConnection.pendingDeclares(defaults), [:])
+
+        MacConnection.setPendingDeclare(project: "dad", run: run, defaults)
+        kept["dad"] = .stopped(run: run, photos: 5)
+        await MacConnection.retryDeclares(defaults, kept: { kept[$0] }, declare: { _, _ in XCTFail("too few: waits for Send") })
+        XCTAssertEqual(MacConnection.pendingDeclares(defaults), [:])
+
+        MacConnection.setPendingDeclare(project: "dad", run: run, defaults)
+        kept["dad"] = .stopped(run: run, photos: 68)
+        await MacConnection.retryDeclares(defaults, kept: { kept[$0] }, declare: { _, _ in
+            throw CompanionError(code: "invalid-state", message: "The scan can only be added before the touch-up starts.") })
+        XCTAssertEqual(MacConnection.pendingDeclares(defaults), [:], "the Mac refused: the project has moved on")
+    }
+
+    /// A new scan clears a stopped one's line and its Remove (regression watcher on e8de25fe): a 12-photo stop offers
+    /// Remove; once a scan finishes in its place, `scan-use-remove` is gone and the line with it. 20 or more never offer it.
+    func testANewScanClearsAStoppedScansRemove() {
+        var stop = NewObjectView.ScanStop()
+        XCTAssertNil(stop.removableRun, "no scan, no Remove")
+        stop.stopped(run: "run12", photos: 12)
+        XCTAssertEqual(stop.removableRun, "run12", "a few photos: Remove takes this run off")
+        XCTAssertEqual(stop.photos, 12)
+        stop.clear()  // what every path that attaches a finished scan does
+        XCTAssertNil(stop.removableRun, "Remove isn't shown beside the finished scan")
+        XCTAssertNil(stop.photos, "nor the stopped line")
+        stop.stopped(run: "run68", photos: 68)
+        XCTAssertNil(stop.removableRun, "enough photos are sent as they are: no Remove")
+        XCTAssertEqual(stop.photos, 68)
+    }
+
+    /// What the New sheet says under a stopped scan's question (#795): enough photos are simply sent; a few are sent
+    /// with a warning beside Remove, never kept back.
+    func testAStoppedScanSaysWhatItKeptAndWhetherThatIsEnough() {
+        XCTAssertTrue(MacConnection.isEnough(stoppedPhotos: 68))
+        XCTAssertFalse(MacConnection.isEnough(stoppedPhotos: 19))
+        XCTAssertEqual(MacConnection.stoppedScanWords(photos: 68), "Stopped at 68 photos. Your Mac builds the model from them.")
+        XCTAssertEqual(MacConnection.stoppedScanWords(photos: 20), "Stopped at 20 photos. Your Mac builds the model from them.")
+        XCTAssertEqual(MacConnection.stoppedScanWords(photos: 19),
+                       "Stopped at 19 photos, which may be too few. Remove it, or your Mac will try.")
+        XCTAssertEqual(MacConnection.stoppedScanWords(photos: 12),
+                       "Stopped at 12 photos, which may be too few. Remove it, or your Mac will try.")
+        XCTAssertEqual(MacConnection.stoppedScanWords(photos: 1),
+                       "Stopped at 1 photo, which may be too few. Remove it, or your Mac will try.")
+    }
 }

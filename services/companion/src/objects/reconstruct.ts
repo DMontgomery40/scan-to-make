@@ -115,6 +115,8 @@ export function progressWords(line: Record<string, unknown>): string | undefined
   if (line.stage === 'downloading') return 'Getting your Mac ready to build from photos. This happens once.';
   if (line.stage === 'masking' && typeof line.done === 'number' && typeof line.total === 'number')
     return `Finding the object in your photos (${line.done} of ${line.total}).`;
+  if (line.stage === 'backdrop' && typeof line.done === 'number' && typeof line.total === 'number')
+    return `Checking your photos for a backdrop to take out (${line.done} of ${line.total}).`;
   if (line.stage === 'reconstructing') return 'Building the model from your photos.';
   if (typeof line.progress === 'number') return `Building the model from your photos (${Math.round(line.progress * 100)}%).`;
   return undefined;

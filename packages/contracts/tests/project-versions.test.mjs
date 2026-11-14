@@ -32,3 +32,31 @@ test('a sealed design may list its merged mesh, inside the project only', () => 
   assert.equal(ProjectDesignsSchema.parse({versions: [version()]}).versions[0].result.mergedMesh, undefined, 'an older Mac says nothing');
   assert.equal(ProjectDesignsSchema.safeParse({versions: [version('../elsewhere.stl')]}).success, false);
 });
+
+// #788: a draft design, on `current` and on its sealed design, with the MCP's reasons as given. Every layout reads this file.
+test('the shared draft fixture is a valid wire project, its line and note are the contract\'s, and the Swift copy is the same file', async () => {
+  const {DesignDraftSchema, DRAFT_LINE, DRAFT_PRINT_NOTE} = await import('../dist/counterpart.js');
+  const text = await readFile(new URL('../fixtures/project-draft.json', import.meta.url), 'utf8');
+  const doc = JSON.parse(text);
+  assert.equal(doc.line, DRAFT_LINE);
+  assert.equal(doc.printNote, DRAFT_PRINT_NOTE);
+  for (const [name, {project, draft, reasons}] of Object.entries(doc.projects)) {
+    const designs = ProjectDesignsSchema.parse(project);
+    assert.equal(!!designs.versions.at(-1).result.draft, draft, name);
+    assert.equal(!!project.current.draft, draft, name);
+    if (draft) assert.deepEqual(DesignDraftSchema.parse(project.current.draft).reasons ?? [], reasons, name);
+    assert.equal(project.status.text === DRAFT_LINE, draft, `${name}: the companion's line`);
+  }
+  assert.ok(doc.projects.round4.reasons.length > doc.collapseAfter, 'the round-4 draft has enough reasons to collapse');
+  const swift = await readFile(new URL('../../CounterpartKit/Tests/CounterpartKitTests/Fixtures/project-draft.json', import.meta.url), 'utf8');
+  assert.deepEqual(JSON.parse(swift), doc);
+});
+
+test('a draft\'s reasons are short strings, at most twelve; an older Mac sends no draft at all', () => {
+  const version = draft => ({id: 'a', sealedAtMs: 1, modelSha256: 'a'.repeat(64), result: {model: 'versions/a/model.stl', renders: [], ...(draft ? {draft} : {})}});
+  assert.deepEqual(ProjectDesignsSchema.parse({versions: [version({reasons: ['Model the desk.']})]}).versions[0].result.draft, {reasons: ['Model the desk.']});
+  assert.deepEqual(ProjectDesignsSchema.parse({versions: [version({})]}).versions[0].result.draft, {}, 'a draft from an MCP before round 4');
+  assert.equal(ProjectDesignsSchema.parse({versions: [version()]}).versions[0].result.draft, undefined);
+  assert.equal(ProjectDesignsSchema.safeParse({versions: [version({reasons: Array(13).fill('x')})]}).success, false);
+  assert.equal(ProjectDesignsSchema.safeParse({versions: [version({reasons: ['x'.repeat(301)]})]}).success, false);
+});

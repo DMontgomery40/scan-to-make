@@ -134,7 +134,29 @@ data class Project(
                                     /** A fit's places for the scanned object, as its pass said (docs/protocols/seats.md). */
                                     val seats: List<Seat>? = null,
                                     /** #769: the merged mesh beside a multi-part design's 3MF, listed only while the file is there. */
-                                    val mergedMesh: String? = null)
+                                    val mergedMesh: String? = null,
+                                    /** #788: a draft, never a finished design: the design engine's last valid run of a pass with no final run. */
+                                    val draft: Draft? = null)
+    /**
+     * #788: why a design is a draft, in the printer MCP's own words (`final_refused`, or its failing purpose requirements),
+     * shown as given and never interpreted. None from an MCP before engine round 4. Reasons that aren't words are left out.
+     */
+    @Serializable data class Draft(@SerialName("reasons") val listed: JsonElement? = null) {
+        val reasons: List<String> get() = (listed as? kotlinx.serialization.json.JsonArray)?.mapNotNull { item ->
+            (item as? JsonPrimitive)?.takeIf { it.isString }?.content?.trim()?.takeIf { it.isNotEmpty() } } ?: emptyList()
+        /** All of them when expanded or few, else the first [COLLAPSE_AFTER]. */
+        fun shown(expanded: Boolean): List<String> = if (expanded || reasons.size <= COLLAPSE_AFTER) reasons else reasons.take(COLLAPSE_AFTER)
+        val collapses: Boolean get() = reasons.size > COLLAPSE_AFTER
+        companion object {
+            /** The one plain line every layout shows for a draft design (contracts `DRAFT_LINE`). */
+            const val LINE = "Not finished: the design engine couldn't check everything"
+            /** What Print's sheet adds for a draft design (contracts `DRAFT_PRINT_NOTE`). */
+            const val PRINT_NOTE = "This part wasn't fully checked: the design engine couldn't check everything."
+            const val COLLAPSE_AFTER = 2
+            /** The status capsule's words on a ready draft's page. */
+            const val CAPSULE = "Not finished"
+        }
+    }
     /** The scan turned about the fixed X, then Y, then Z axes (`rotationDeg`), then moved (`translationMm`), into the part's frame. */
     @Serializable data class Seat(val name: String? = null, val translationMm: List<Double>, val rotationDeg: List<Double>)
     /** A spool a print used, as the printer MCP reported it when the print was sent. */
