@@ -6,7 +6,8 @@ import CoreGraphics
 final class BackdropKeyTests: XCTestCase {
     /// A 120×80 photo: the panel's colour on the right half, a black letter and the wood base on the left, measured
     /// colours from the Nov 14 photos. Depth (60×40): the letter and base at 0.17 m, the panel at `panelDepth`.
-    private func scene(panel: (CGFloat, CGFloat, CGFloat), panelDepth: Float, panelWidth: Int = 60) throws -> (CVPixelBuffer, DepthImage) {
+    private func scene(panel: (CGFloat, CGFloat, CGFloat), panelDepth: Float, panelWidth: Int = 60,
+                       greenPart: Bool = false) throws -> (CVPixelBuffer, DepthImage) {
         let w = 120, h = 80
         let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
                             space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)!
@@ -15,6 +16,9 @@ final class BackdropKeyTests: XCTestCase {
         ctx.fill(CGRect(x: w - panelWidth, y: 0, width: panelWidth, height: h))
         ctx.setFillColor(CGColor(red: 35/255, green: 27/255, blue: 18/255, alpha: 1)); ctx.fill(CGRect(x: 50, y: 20, width: 30, height: 40))   // letter, overlapping the panel
         ctx.setFillColor(CGColor(red: 152/255, green: 119/255, blue: 82/255, alpha: 1)); ctx.fill(CGRect(x: 10, y: 60, width: 100, height: 10)) // wood base
+        if greenPart {   // a part of the object in the panel's own colour, at the object's depth (0.17 m)
+            ctx.setFillColor(CGColor(red: panel.0/255, green: panel.1/255, blue: panel.2/255, alpha: 1)); ctx.fill(CGRect(x: 10, y: 20, width: 20, height: 20))
+        }
         var metres = [Float](repeating: 0.17, count: 60 * 40)
         for y in 0..<40 { for x in (60 - panelWidth / 2)..<60 { metres[y * 60 + x] = panelDepth } }
         for y in 10..<30 { for x in 25..<40 { metres[y * 60 + x] = 0.17 } }   // the letter in front of the panel
@@ -36,6 +40,18 @@ final class BackdropKeyTests: XCTestCase {
             XCTAssertTrue(kept(frame, 81, 40), "the letter's edge stays on the letter \(lime)")
             XCTAssertFalse(kept(frame, 84, 40), "the key starts a few pixels out \(lime)")
         }
+    }
+
+    /// Review of #793 (Codex P1): the panel and a green part of the object in one photo. The photo shows a backdrop, and
+    /// only the pixels the depth puts behind go: the object's green at 0.17 m stays, the panel at 0.41 m goes.
+    func testAGreenPartOfTheObjectStaysWhenThePanelIsInTheSamePhoto() throws {
+        let (image, depth) = try scene(panel: (160, 147, 31), panelDepth: 0.41, greenPart: true)
+        let frame = try BackdropKey.key(image: image, depth: depth)
+        XCTAssertTrue(frame.isBackdrop)
+        XCTAssertTrue(kept(frame, 20, 30), "the object's own green")
+        XCTAssertTrue(kept(frame, 12, 22) && kept(frame, 28, 38), "all of it, to its corners")
+        XCTAssertFalse(kept(frame, 100, 40), "the panel")
+        XCTAssertTrue(kept(frame, 65, 40), "the letter")
     }
 
     func testAYellowOrGreenObjectWithNothingBehindItIsNeverKeyed() throws {

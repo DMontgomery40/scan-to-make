@@ -88,10 +88,36 @@ public enum BackdropKey {
         var result = Frame(keep: GrayImage(width: width, height: height, fill: 255),
                            share: Double(count) / Double(max(1, width * height)),
                            backdropDepth: backdropDepth, nearestDepth: nearestDepth)
-        guard result.isBackdrop else { return result }
+        guard result.isBackdrop, let depth, let nearestDepth else { return result }
+        // Per pixel, not just per photo (review of #793): a pixel of the colour is backdrop only where the depth says
+        // it is behind, at least `minimumGap` past the nearest surface, so a green or yellow part of the object in the
+        // same photo as the panel stays. A cell with no reading counts as behind (beyond the LiDAR's range), and each
+        // behind cell lends it to its neighbours: the depth map is 16 photo pixels a cell and blurs at edges, and the
+        // panel seen through a letter's counter is only a few cells wide.
+        var behind = [Bool](repeating: false, count: depth.width * depth.height)
+        for i in behind.indices {
+            let d = depth.metres[i]
+            behind[i] = !(d > 0 && d.isFinite) || d - nearestDepth >= minimumGap
+        }
+        var keyable = behind
+        for dy in 0..<depth.height {
+            for dx in 0..<depth.width where !behind[dy * depth.width + dx] {
+                search: for ny in max(0, dy - 1)...min(depth.height - 1, dy + 1) {
+                    for nx in max(0, dx - 1)...min(depth.width - 1, dx + 1) where behind[ny * depth.width + nx] {
+                        keyable[dy * depth.width + dx] = true; break search
+                    }
+                }
+            }
+        }
         // Keep = not backdrop, grown by `edge` so the key stops short of the object's edge.
         var notKeyed = keyed
-        for i in notKeyed.pixels.indices { notKeyed.pixels[i] = keyed.pixels[i] > 127 ? 0 : 255 }
+        for y in 0..<height {
+            let row = min(depth.height - 1, y * depth.height / height) * depth.width
+            for x in 0..<width {
+                let i = y * width + x
+                notKeyed.pixels[i] = keyed.pixels[i] > 127 && keyable[row + min(depth.width - 1, x * depth.width / width)] ? 0 : 255
+            }
+        }
         result.keep = edge > 0 ? notKeyed.dilated(by: edge) : notKeyed
         return result
     }
