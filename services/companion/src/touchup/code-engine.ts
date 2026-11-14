@@ -110,6 +110,10 @@ interface CadReceipt {
   final_refused?: unknown;
   /** Engine round 4, optional: what the part is for, compiled into requirements (`pass`, `fail`, `not_modelled`). */
   purpose?: unknown;
+  /** #790, optional: what the run is, `design` or `check` (the worker measuring a pose, a diagnostic). Absent: a design. */
+  role?: unknown;
+  /** #790, optional: why a run that isn't final is a draft, as the MCP says it; first among the reasons. */
+  draft_reasons?: unknown;
 }
 interface CadRun {dir: string; receipt: CadReceipt; manifest: string; stl: string; script: string; parameters: string; completedAt: string}
 
@@ -136,6 +140,8 @@ async function validRuns(cadDir: string, validStl: StlCheck): Promise<CadRun[]> 
     try { receipt = JSON.parse(await readFile(manifest, 'utf8')) as CadReceipt; } catch { continue; }
     // Final is the worker's selection, not proof: the run must also have completed, passed its checks and kept its STL.
     if (receipt.status !== 'completed' || receipt.valid !== true) continue;
+    // #790: a run the receipt says is not the design (a check part) is never a checkpoint, the model or a draft.
+    if (receipt.role !== undefined && receipt.role !== 'design') continue;
     const stl = inside(dir, receipt.stl);
     if (!stl || !await validStl(stl)) continue;
     // The model and its design source come together: a run without its own script and parameters can't be selected.
@@ -157,7 +163,7 @@ async function validRuns(cadDir: string, validStl: StlCheck): Promise<CadRun[]> 
  * Nothing the worker made is changed.
  */
 export async function collectCodeRuns(pass: Pick<TouchupPass, 'dir' | 'outDir' | 'checkpointsDir'>, validStl: StlCheck,
-  opts: {draft?: boolean} = {}): Promise<{design?: CodeDesign; draft?: CodeDraft}> {
+  opts: {draft?: boolean} = {}): Promise<{design?: CodeDesign; draft?: CodeDraft; final?: true}> {
   const valid = await validRuns(passCadDir(pass), validStl);
   const selected = valid.filter(run => run.receipt.final === true);
   // #788: with no final run, a pass the worker answered as done keeps its last valid run as a draft, never nothing.
@@ -185,7 +191,7 @@ export async function collectCodeRuns(pass: Pick<TouchupPass, 'dir' | 'outDir' |
     await rm(touched, {force: true}).catch(() => undefined);
     throw error;
   }
-  if (!draft) return {design};
+  if (!draft) return {design, final: true};
   const reasons = draftReasons(draft.receipt);
   return {design, draft: reasons.length ? {reasons} : {}};
 }
@@ -198,12 +204,14 @@ export interface CodeDraft {reasons?: string[]}
 export const DRAFT_REASONS_MAX = 12, DRAFT_REASON_CHARS = 300;
 
 /**
- * Why a run is a draft, in the MCP's words and never reworded or interpreted: its `final_refused` (round 4: each the
- * step that fixes it) when it has one, else what each purpose requirement that didn't pass says to do (`fix`, or what
- * it `says`). Anything not a string is left out.
+ * Why a run is a draft, in the MCP's words and never reworded or interpreted: its `draft_reasons` (#790) when it has
+ * any, else its `final_refused` (round 4: each the step that fixes it), else what each purpose requirement that didn't
+ * pass says to do (`fix`, or what it `says`). Anything not a string is left out.
  */
-export function draftReasons(receipt: Pick<CadReceipt, 'final_refused' | 'purpose'>): string[] {
+export function draftReasons(receipt: Pick<CadReceipt, 'draft_reasons' | 'final_refused' | 'purpose'>): string[] {
   const strings = (items: unknown[]) => items.filter((item): item is string => typeof item === 'string' && !!item.trim()).map(item => item.trim());
+  const given = Array.isArray(receipt.draft_reasons) ? strings(receipt.draft_reasons) : [];
+  if (given.length) return given.slice(0, DRAFT_REASONS_MAX).map(reason => reason.slice(0, DRAFT_REASON_CHARS));
   const refused = Array.isArray(receipt.final_refused) ? strings(receipt.final_refused) : [];
   const requirements = receipt.purpose && typeof receipt.purpose === 'object' ? (receipt.purpose as {requirements?: unknown}).requirements : undefined;
   const failing = refused.length || !Array.isArray(requirements) ? [] : strings(requirements.map(item => {

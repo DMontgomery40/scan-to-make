@@ -17,3 +17,12 @@ names at that path.
 What the real receipts showed (Nov 14): `final_requested` and `final_refused` appear only on a refusal; requirement
 statuses are `pass`, `fail` and `not_modelled`, with `fix` only on the ones that didn't pass; `stl`, `script`,
 `parameters`, `step`, `input_manifest`, `result_manifest` and every render are absolute paths inside the run folder.
+
+Added Nov 14 for #790's receipt contract (`role`, `draft_reasons`; the lead's brief, to be written by both MCPs after
+round 4). Neither field exists in a published or round-4 MCP yet, so each fixture is the real `not-ready` receipt above
+with only that field added after `final`:
+
+- `check-role.cad-result.json`: `role: "check"`. `chk_cradle_seated` really is a check part, so this is what the real
+  receipt will say. The companion never keeps it as a checkpoint, the model or a draft.
+- `draft-reasons.cad-result.json`: `role: "design"` and two synthetic `draft_reasons`, worded apart from the run's
+  `fix` so a test can tell which one the companion used. They come before `final_refused` and the failing requirements.

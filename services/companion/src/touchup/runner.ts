@@ -41,6 +41,8 @@ export interface TouchupResult {
   design?: DesignSource;
   /** #788: the model is a draft, the last valid run of a code pass with no final run; `reasons` are the MCP's words. */
   draft?: {reasons?: string[]};
+  /** #790: the model is a code run the engine let the worker make final, so a draft with the same mesh is cleared. */
+  finalRun?: true;
   reason?: string;
   /** CLI loader rejection, recognized from its terminal event before any model turn. */
   resumeUnavailable?: boolean;
@@ -347,7 +349,8 @@ export async function runTouchupWorker(inv: TouchupInvocation, pass: TouchupPass
   const summary = {...(answer?.summary ? {summary: publicText(answer.summary)} : {}), ...structured(answer, publicText)};
   const f3d = join(pass.outDir, 'touched.f3d'), parameters = join(pass.outDir, 'touched.parameters.json');
   // A draft's reasons are the MCP's words, made safe to show and otherwise as given.
-  const draft = code?.draft ? {draft: code.draft.reasons ? {reasons: code.draft.reasons.map(reason => publicText(reason))} : {}} : {};
+  const draft = code?.draft ? {draft: code.draft.reasons ? {reasons: code.draft.reasons.map(reason => publicText(reason))} : {}}
+    : code?.final ? {finalRun: true as const} : {};
   const design = code ? (code.design ? {design: code.design} : {}) : await stat(f3d).then(info => info.isFile(), () => false)
     ? {design: {f3d, ...(await stat(parameters).then(info => info.isFile(), () => false) ? {parameters} : {})}} : {};
   Object.assign(base, design);

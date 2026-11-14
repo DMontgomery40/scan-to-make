@@ -733,6 +733,29 @@ test('#788: an unchanged pass with no final run on a draft keeps the draft with 
   assert.deepEqual(none.versions.at(-1).result.draft, {});
 });
 
+// #790 (c): an Ask for changes on a draft whose run the engine let the worker make final, with the same mesh (the
+// worker fixed use(), not the part): the engine's latest verdict wins, so the design is no longer a draft.
+test('#788: an unchanged pass with a final run clears a draft, on the project and its newest design', async t => {
+  const reasons = ['Model the desk as world:desk in use().'];
+  const f = await setup(t, [
+    {engine: 'code', result: {summary: 'A hook.', draft: {reasons}}},
+    {engine: 'code', status: 'unchanged', result: {summary: 'Nothing needed changing.', finalRun: true}},
+  ]);
+  const object = await f.service.create('A hook for under the desk', 'fit');
+  await f.service.start(object.id);
+  await f.service.settled(object.id);
+  await f.service.correct(object.id, 'Model the desk');
+  const after = await f.service.settled(object.id);
+  assert.equal(after.state, 'ready');
+  assert.equal(after.passes.at(-1).status, 'unchanged');
+  assert.equal(after.versions.length, 1, 'the same design, not a new one');
+  assert.equal(after.current.draft, undefined, 'the engine let it be final');
+  assert.equal(after.versions.at(-1).result.draft, undefined, 'the newest design, picked in its history, too');
+  assert.equal(after.passes.at(-1).draft, undefined);
+  assert.match(publicObject(after).status.text, /^Ready to print/);
+  assert.equal(f.events.findLast(event => event.type === 'pass.ready').detail?.draft, undefined);
+});
+
 // Review of #790 (P1): the same on a finished design never makes it a draft. The pass ends unchanged and keeps the
 // engine's reasons on its own record, so the conversation can say why nothing changed.
 test('#788: an unchanged pass with no final run on a finished design leaves it finished and keeps the reasons on the pass', async t => {
