@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFile, writeFile} from 'node:fs/promises';
-import {join} from 'node:path';
+import {dirname, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {prepareTouchupPass} from '../dist/touchup/inputs.js';
 import {runTouchupWorker} from '../dist/touchup/runner.js';
@@ -489,12 +489,12 @@ const round4 = fileURLToPath(new URL('./fixtures/cad-round4/', import.meta.url))
 async function round4Receipt(fixture, dir) {
   const receipt = JSON.parse((await readFile(join(round4, fixture), 'utf8')).replaceAll('@RUN@', dir));
   const {mkdir} = await import('node:fs/promises');
-  await mkdir(join(dir, 'phone_mount.renders'), {recursive: true});
-  for (const [view, path] of Object.entries(receipt.renders)) await writeFile(path, view);
-  for (const file of ['py', 'parameters.json', 'step']) await writeFile(join(dir, `phone_mount.${file}`), file);
-  await writeFile(join(dir, 'phone_mount.stl'), SOLID);
-  await writeFile(join(dir, 'phone_mount.inputs.json'), '{}');
-  await writeFile(join(dir, 'cad-result.json'), JSON.stringify(receipt));
+  // Every file at the path the receipt names, as the engine left it.
+  for (const [view, path] of Object.entries(receipt.renders)) { await mkdir(dirname(path), {recursive: true}); await writeFile(path, view); }
+  for (const key of ['script', 'parameters', 'step']) await writeFile(receipt[key], key);
+  await writeFile(receipt.stl, SOLID);
+  await writeFile(receipt.input_manifest, '{}');
+  await writeFile(receipt.result_manifest, JSON.stringify(receipt));
   return receipt;
 }
 
@@ -529,11 +529,14 @@ test('#788: a draft from a run the worker never asked to make final gives the fa
   const pass = await prepareTouchupPass({root, objectId: 'obj', scan: [join(fixtures, 'scan.obj')], photos: [join(fixtures, 'photo.jpg')]});
   const cadDir = join(pass.dir, 'cad');
   await mkdir(cadDir, {recursive: true});
-  const receipt = await round4Receipt('not-ready.cad-result.json', join(cadDir, 'cad-phone_mount-1'));
+  const run = join(cadDir, 'cad-chk_cradle_seated-1');
+  const receipt = await round4Receipt('not-ready.cad-result.json', run);
   const result = await runTouchupWorker(codeInv(pass, codeWorker({status: 'done', summary: 'Done.'})), pass);
   assert.equal(result.status, 'done', 'a scan pass\'s draft is a change, not unchanged');
+  assert.equal(result.design.script, join(run, 'chk_cradle_seated.py'));
+  // The real receipt (round-4 re-run, Nov 14): one requirement fails, and its own fix is the reason, word for word.
   const failing = receipt.purpose.requirements.filter(item => item.status !== 'pass');
-  assert.equal(failing.length, 3);
+  assert.deepEqual(failing.map(item => item.requirement), ['use is the built part']);
   assert.deepEqual(result.draft, {reasons: failing.map(item => item.fix)});
   // An MCP from before round 4: no final_refused, no purpose. Still a draft, with no reasons.
   const older = await prepareTouchupPass({root, objectId: 'older', scan: [], photos: [], requirePhotos: false});

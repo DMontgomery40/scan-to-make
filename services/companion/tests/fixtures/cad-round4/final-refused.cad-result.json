@@ -28,8 +28,43 @@
     "positive_volume": true,
     "manifold": true,
     "step_valid": true,
+    "step_solids": true,
     "stl_step_bounds_agree": true
   },
+  "bodies": {
+    "solids": 1,
+    "clearance_mm": 0.3,
+    "clearance_source": "default: Prusa's \"at least 0.3 mm\" for movable parts (fdm_fit)",
+    "print_in_place": true,
+    "declared_bodies": null,
+    "pairs_measured": 0,
+    "exact_measurements": 0,
+    "screened_only": 0,
+    "pairs_not_measured": [],
+    "errors": [],
+    "fused": [],
+    "too_close": [],
+    "unconfirmed": [],
+    "closest": null,
+    "above_bed": [],
+    "below_bed": [],
+    "severed": [],
+    "problems": [],
+    "seconds": 0
+  },
+  "problems": [],
+  "checked": [
+    "the exported mesh is closed, manifold and consistently wound, and the STEP agrees with it (valid, checks)",
+    "bounds, size, volumes and solid count of the exported files",
+    "whether each solid stands on the print plate (Z = 0 of the exported frame) or rests on a solid that does, and whether any reaches below it (bodies; failures are in problems)",
+    "what PURPOSE says it is for, compiled into requirements and evaluated on use(): the held objects, the mounts, the loads at each mount and whether it faces its user (purpose; anything not passing is in purpose.blocked)"
+  ],
+  "not_checked": [
+    "fit to the real object or a mating part (use cad_check_fit per state)",
+    "strength, stiffness or how it holds under load",
+    "motion, articulated poses and snap or flex behaviour",
+    "printing: supports, bridges and bed adhesion are the slicer's answer"
+  ],
   "renders": {
     "front": "@RUN@/phone_mount.renders/front.png",
     "back": "@RUN@/phone_mount.renders/back.png",
@@ -58,6 +93,7 @@
     "material": "PETG",
     "jolt_g": 1.5,
     "press_n": 10,
+    "within_deg": 25,
     "requirements": [
       {
         "requirement": "holds phone",
@@ -98,6 +134,7 @@
   },
   "ready": false,
   "next": "Not selected as final, so it is not yet the model. To make it final: Model the dash as world:dash in use(): a solid slab where it really is, touching the part where it is taped, so the tape mount can be checked. Turn the phone toward the user: its face is 41 deg off the line to their eye (allowed 25). Aim it the way the bought products do, with a joint or an angled base, and show it aimed in use(). Bring the phone within reach: it is 812 mm from the user (allowed 700). Then run again with final: true. Read renders.perspective and renders.use first.",
+  "printed": "leaf length 8.20 mm, thickness 2.20, height 12.0; EI=21296 N mm2\nseated: theta 0.0296 rad, strain 0.40 %, pad force per side 1.90 N\ninsertion peak: theta 0.106 rad, strain 1.43 %, tab force per side 8.9 N (tab arm 31 mm)\nhard stop theta ~0.156 rad, strain 2.09 %\nlever bar top z 23.05, phone z 12.20..20.45, lip underside 21.05\nstalk tilt from vertical 26.3 deg; socket axis 30.0 deg; angle between them (swing needed) 3.7 deg; base yaw 22.6 deg\nscreen normal elevation 18.7 deg\nlowest point of the cradle above the dash: 18.8 mm",
   "status": "completed",
   "final": false,
   "final_requested": true,
