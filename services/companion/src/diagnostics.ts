@@ -46,6 +46,8 @@ export interface DiagnosticsSource {
   sessions?(): {destinationId: string; printer: string; session: PrinterSession}[];
   /** The home folder, shown as `~`. */
   home?: string;
+  /** The companion's own environment: its secret-named values (the model key, the TLS key) are swept too. */
+  ownEnv?: Record<string, string | undefined>;
   limits?: Partial<DiagnosticsLimits>;
 }
 /** The fields of a `printers.mcps` package the bundle keeps. */
@@ -56,63 +58,113 @@ export interface SoftwarePackage {
   usedBy?: string[];
 }
 
-// Names that say a value is a secret: in `key=value`, `key: value` and JSON, whatever the case or joining
-// (`accessCode`, `BAMBU_ACCESS_CODE`, `refresh_token`, `X-Api-Key`). `auth` only as a word of its own (`AUTH_TOKEN`,
-// `authKey`), so prose such as "Failed to authenticate: Claude login …" keeps its words.
-const SECRET_WORD = String.raw`(?:password|passwd|passcode|pwd|secret|token|api[_-]?key|apikey|access[_-]?code|accesscode|access[_-]?key|authorization|auth(?:[_-]?key)?(?![a-z])|cookie|credential|private[_-]?key|signature|ticket|login|email|user[_-]?info)`;
-const SECRET_KEY = String.raw`[A-Za-z0-9_.-]*${SECRET_WORD}[A-Za-z0-9_.-]*`;
-const SECRET_NAME = new RegExp(SECRET_WORD, 'i');
-/** Values that are already safe after a secret's name: a "[set]" or "[redacted…]" marker, an empty string, true/false/null. */
-const SAFE = String.raw`(?!"(?:\[set\]|\[redacted[^"]*\])?"|\[set\]|\[redacted|true\b|false\b|null\b|"")`;
-const RULES: [RegExp, string][] = [
-  // PEM private keys, whole.
-  [/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g, '[redacted private key]'],
+// Whether a key names a secret, by its words: `accessCode`, `BAMBU_ACCESS_CODE`, `X-Api-Key`, `SCAN_TO_MAKE_MODEL_KEY`,
+// `session_key`, `PAIRING_PIN`, `password`. Short words (`key`, `pin`, `otp`, `auth`) count only as a whole word,
+// so `mapping`, `keyboard` and "Failed to authenticate:" keep their values.
+const SECRET_WORDS = new Set(['password', 'passwd', 'passcode', 'passphrase', 'pwd', 'secret', 'secrets', 'token', 'tokens', 'key', 'keys',
+  'apikey', 'accesscode', 'accesskey', 'privatekey', 'authorization', 'auth', 'cookie', 'cookies', 'credential', 'credentials', 'signature',
+  'ticket', 'login', 'email', 'userinfo', 'session', 'sessionid', 'sid', 'pin', 'otp', 'jwt', 'bearer']);
+const SECRET_PAIRS = new Set(['access code', 'lan code', 'pair code', 'pairing code', 'user info', 'id token']);
+// Long words that are secrets even inside one unbroken name (`accesstoken`, `CLIENTSECRET`).
+const SECRET_INSIDE = /password|passwd|passcode|passphrase|secret|token|credential|cookie|authorization|signature|apikey|accesscode|privatekey/;
+
+export function isSecretName(name: string): boolean {
+  const decoded = name.replace(/\\u([0-9a-fA-F]{4})/g, (_, hex: string) => String.fromCharCode(Number.parseInt(hex, 16)));
+  const words = decoded.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  if (words.some(word => SECRET_WORDS.has(word))) return true;
+  if (words.some((word, i) => i > 0 && SECRET_PAIRS.has(`${words[i - 1]} ${word}`))) return true;
+  return SECRET_INSIDE.test(words.join(''));
+}
+
+/** A value that is already safe after a secret's name, as a whole value: a "[set]" or "[redacted…]" marker, "", true/false/null. */
+function safeValue(value: string): boolean {
+  return /^(?:"(?:\[set\]|\[redacted[^"\]]*\])?"|\[set\]|\[redacted[^\]]*\]|true|false|null|'')$/.test(value);
+}
+const KEY_CHARS = String.raw`(?:[A-Za-z0-9_.\-]|\\u[0-9a-fA-F]{4})+`;
+// A bare value: up to the next delimiter; a leading [marker] doesn't end it (`[set]hunter2` is one value).
+const BARE = String.raw`(?:\[[^\]\s]*\])?[^\s,;&}\]"'<>]*`;
+const NAMED: [RegExp, (match: string, ...groups: string[]) => string][] = [
+  // Escaped JSON inside a string: \"accessCode\":\"1234\".
+  [new RegExp(String.raw`(\\"(${KEY_CHARS})\\"\s*:\s*)(\\"(?:[^"\\]|\\[^"])*\\")`, 'g'),
+    (match, head, key, value) => isSecretName(key!) && value !== '\\"\\"' && value !== '\\"[set]\\"' ? `${head}\\"[redacted]\\"` : match],
+  // JSON: "accessCode": "1234", a number, or a bare word.
+  [new RegExp(String.raw`("(${KEY_CHARS})"\s*:\s*)("(?:[^"\\]|\\.)*"|${BARE})`, 'g'),
+    (match, head, key, value) => isSecretName(key!) && value && !safeValue(value) ? `${head}"[redacted]"` : match],
+  // key=value, key: value, ?key=value&, #key=value (on one line: `KEY=` with nothing after it stays empty).
+  [new RegExp(String.raw`(^|[^A-Za-z0-9_.\-\\])([A-Za-z][A-Za-z0-9_.\-]*)([ \t]*[=:](?!\/\/)[ \t]*)("[^"\n]*"|'[^'\n]*'|${BARE})`, 'gm'),
+    (match, before, key, sep, value) => isSecretName(key!) && value && !safeValue(value) ? `${before}${key}${sep}[redacted]` : match],
+  // --key value.
+  [/(--)([A-Za-z][A-Za-z0-9_.-]*)([ \t]+)("[^"\n]*"|'[^'\n]*'|[^\s"']+)/g,
+    (match, dashes, key, space) => isSecretName(key!) ? `${dashes}${key}${space}[redacted]` : match],
+];
+const VALUES: [RegExp, string][] = [
+  // PEM blocks of any type (private keys, certificates), whole.
+  [/-----BEGIN [A-Z0-9 ]+-----[\s\S]*?(?:-----END [A-Z0-9 ]+-----|$)/g, '[redacted PEM block]'],
   // scheme://user:password@host keeps its host.
   [/\b([a-z][a-z0-9+.-]*:\/\/)[^/\s:@"'<>]+(?::[^/\s@"'<>]*)?@/gi, '$1[redacted]@'],
-  // Escaped JSON inside a string: \"accessCode\":\"1234\".
-  [new RegExp(String.raw`(\\"${SECRET_KEY}\\"\s*:\s*)\\"(?:[^"\\]|\\[^"])*\\"`, 'gi'), '$1\\"[redacted]\\"'],
-  // JSON: "accessCode": "1234" (a number or bare word too).
-  // A value that is already safe stays: "[set]", "" and true/false/null say whether a secret is configured.
-  [new RegExp(String.raw`("${SECRET_KEY}"\s*:\s*)${SAFE}(?:"(?:[^"\\]|\\.)*"|[^\s,}\]]+)`, 'gi'), '$1"[redacted]"'],
-  // key=value, key: value, ?key=value&, --key value.
-  // (On one line: `KEY=` with nothing after it is empty, never the next line's first word.)
-  [new RegExp(String.raw`(\b${SECRET_KEY}[ \t]*[=:][ \t]*|--${SECRET_KEY}[ \t]+)${SAFE}(?:"[^"\n]*"|'[^'\n]*'|[^\s,;&}\]"']+)`, 'gi'), '$1[redacted]'],
-  // Authorization schemes.
-  [/\b(Bearer|Basic|Digest|Token)\s+[A-Za-z0-9._~+/=-]{6,}/g, '$1 [redacted]'],
+  // Authorization schemes, in any case (`authorization: bearer …`, `Basic dXNl…`).
+  [/\b(Bearer|Basic|Digest|Token)(\s+)[A-Za-z0-9._~+/=-]{6,}/gi, '$1$2[redacted]'],
   // Cookie headers, whole line.
   [/^((?:Set-)?Cookie:).*$/gim, '$1 [redacted]'],
   // JSON web tokens.
   [/\beyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]+/g, '[redacted token]'],
-  // API keys with a known prefix.
+  // Keys with a known prefix: OpenAI/Anthropic-style, GitHub, AWS, Google, Hugging Face, Slack.
   [/\b(?:sk|pk|rk)-[A-Za-z0-9_-]{16,}/g, '[redacted key]'],
+  [/\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})/g, '[redacted key]'],
+  [/\bA(?:KIA|SIA)[0-9A-Z]{16}\b/g, '[redacted key]'],
+  [/\bAIza[0-9A-Za-z_-]{30,}/g, '[redacted key]'],
+  [/\b(?:hf_[A-Za-z0-9]{20,}|xox[abprs]-[A-Za-z0-9-]{10,})/g, '[redacted key]'],
+  // Any long run of mixed case and digits (a pairing code, an unlabelled key). Serials (no lowercase) and hashes (no
+  // uppercase) stay.
+  [/\b(?=[A-Za-z0-9_]*[A-Z])(?=[A-Za-z0-9_]*[a-z])(?=[A-Za-z0-9_]*[0-9])[A-Za-z0-9_]{24,}\b/g, '[redacted token]'],
   // Email addresses (an Apple Account, a Bambu account).
   [/[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}/g, '[redacted email]'],
   // A pairing link carries its code.
   [/scantomake:\/\/pair\?[^\s"']+/g, 'scantomake://pair?[redacted]'],
 ];
+// Someone else's home folder, plain or JSON-escaped (`\/Users\/name`), and `~name/`.
+const HOMES: [RegExp, string][] = [
+  [/(\\?\/)(Users|home)(\\?\/)(?!\[user\])([^/\\\s"'<>:]+)/g, '$1$2$3[user]'],
+  [/\b([A-Za-z]:\\{1,2}Users\\{1,2})([^\\\s"'<>:]+)/g, '$1[user]'],
+  [/(^|[\s"'=(])~(?!\[)([A-Za-z_][A-Za-z0-9_.-]*)(?=\/)/gm, '$1~[user]'],
+];
 
-/** Every secret the bundle must never carry: the printers' configured secret values (access codes, keys, passwords). */
-export function configuredSecrets(sessions: readonly {session: PrinterSession}[]): string[] {
+/**
+ * Every secret value the bundle must never carry: each printer's configured secrets (access codes, keys, passwords)
+ * and the companion's own (its model key, its TLS key). Paths and short values aren't swept.
+ */
+export function configuredSecrets(sessions: readonly {session: PrinterSession}[], own: Record<string, string | undefined> = {}): string[] {
   const values = new Set<string>();
-  for (const {session} of sessions) {
-    for (const [key, value] of Object.entries(session.config.process.env ?? {})) {
-      if (typeof value === 'string' && value.length >= 4 && SECRET_NAME.test(key)) values.add(value);
+  const sweep = (env: Record<string, unknown>) => {
+    for (const [key, value] of Object.entries(env)) {
+      if (typeof value === 'string' && value.length >= 6 && !value.startsWith('/') && !safeValue(value) && isSecretName(key)) values.add(value);
     }
-  }
+  };
+  for (const {session} of sessions) sweep(session.config.process.env ?? {});
+  sweep(own);
   // Longest first, so one secret that contains another goes whole.
   return [...values].sort((a, b) => b.length - a.length);
 }
 
-/** Text with every secret removed; the home folder reads `~`. Serials, hosts and versions stay. */
+/** Text with every secret it recognises removed; the home folder reads `~`, anyone else's `[user]`. Serials and hosts stay. */
 export function redact(text: string, secrets: readonly string[] = [], home?: string): string {
   let out = text;
   for (const secret of secrets) out = out.split(secret).join('[redacted]');
-  for (const [pattern, replacement] of RULES) out = out.replace(pattern, replacement);
-  if (home && home.length > 1) out = out.split(home).join('~');
+  for (const [pattern, replacement] of VALUES) out = out.replace(pattern, replacement);
+  for (const [pattern, replace] of NAMED) out = out.replace(pattern, replace as (match: string, ...rest: string[]) => string);
+  if (home && home.length > 1) out = out.split(home).join('~').split(home.replaceAll('/', '\\/')).join('~');
+  for (const [pattern, replacement] of HOMES) out = out.replace(pattern, replacement);
   return out;
 }
 
 const bytes = (text: string) => Buffer.byteLength(text, 'utf8');
+/** What a string costs in the JSON reply, escapes included. */
+const jsonBytes = (text: string) => bytes(JSON.stringify(text));
+/** `{"name":…,"content":…,"truncated":false},` around a file's name and content. */
+const FILE_OVERHEAD = 48;
+const MAX_MCP_NOTES = 64;
+/** A note as one printable line of at most 1000 characters (control characters would escape to six bytes each). */
+const oneLine = (text: string) => { const line = text.replace(/[\x00-\x1f\x7f]+/g, ' ').trim(); return line.length > 1000 ? `${line.slice(0, 999)}…` : line; };
 
 /** The newest `max` bytes of text, starting at a whole line (a cut line could hold half a secret's label). */
 export function tail(text: string, max: number): {content: string; truncated: boolean} {
@@ -176,7 +228,7 @@ export async function diagnosticsBundle(source: DiagnosticsSource): Promise<Diag
   const limits = {...DIAGNOSTICS_LIMITS, ...source.limits};
   const files: BundleFile[] = [], notes: string[] = [];
   const sessions = (() => { try { return source.sessions?.() ?? []; } catch { return []; } })();
-  const secrets = configuredSecrets(sessions);
+  const secrets = configuredSecrets(sessions, source.ownEnv);
   const clean = (text: string) => redact(text, secrets, source.home);
   const add = (name: string, content: string, truncated = false) => files.push({name, content: clean(content), truncated});
   const json = (value: unknown) => `${JSON.stringify(value, null, 2)}\n`;
@@ -205,7 +257,8 @@ export async function diagnosticsBundle(source: DiagnosticsSource): Promise<Diag
   const maxBytes = Math.min(limits.mcpEachBytes, Math.max(limits.mcpMinBytes, share));
   const mcpWork = Promise.all(asked.map(async ({destinationId, printer, session}) => {
     const label = packageLabel(session.backend as PrinterBackend);
-    const folder = `mcp/${slug(printer)}-${slug(label)}`;
+    // The destination id keeps two printers with the same name on the same MCP apart.
+    const folder = `mcp/${slug(printer)}-${slug(label)}-${slug(destinationId)}`;
     const signal = AbortSignal.timeout(limits.mcpTimeoutMs);
     try {
       const answer = await withTimeout(readDiagnostics(session, maxBytes, {signal, failFast: true}), limits.mcpTimeoutMs + 1000, label);
@@ -214,16 +267,26 @@ export async function diagnosticsBundle(source: DiagnosticsSource): Promise<Diag
       }
       const {diagnostics} = answer;
       const out: BundleFile[] = [], said: string[] = [];
+      // Names, contents and notes all count against the bundle's share, as JSON (escapes included).
       let budget = maxBytes;
+      for (const note of diagnostics.notes.slice(0, MAX_MCP_NOTES)) {
+        const line = oneLine(`${label} for ${printer}: ${note}`);
+        if (jsonBytes(line) > budget) break;
+        budget -= jsonBytes(line); said.push(line);
+      }
+      if (diagnostics.notes.length > said.length) said.push(`${label} for ${printer}: ${diagnostics.notes.length - said.length} more of its notes were left out to keep the export small.`);
+      let left = 0;
       for (const file of diagnostics.files) {
         if (!safeName(file.name)) { said.push(`${label} for ${printer} named a file this export can't use; it was left out.`); continue; }
         const name = `${folder}/${file.name}`;
+        const room = budget - jsonBytes(name) - FILE_OVERHEAD;
+        if (room < 0) { left++; continue; }
         // The MCP keeps to max_bytes; a bundle that doesn't is cut here, keeping each file's newest lines.
-        const kept = tail(file.content, Math.max(0, budget - bytes(file.name)));
-        budget -= bytes(file.name) + bytes(kept.content);
+        const kept = tail(file.content, Math.floor(room / 2));
+        budget -= jsonBytes(name) + FILE_OVERHEAD + jsonBytes(kept.content);
         out.push({name, content: kept.content, truncated: file.truncated || kept.truncated});
       }
-      said.push(...diagnostics.notes.slice(0, 64).map(note => `${label} for ${printer}: ${note}`));
+      if (left) said.push(`${label} for ${printer}: ${left} of its files were left out to keep the export small.`);
       return {files: out, notes: said};
     } catch (error) {
       return {files: [], notes: [`${label} for ${printer} (${destinationId}) didn't give its diagnostics: ${reason(error)}`]};
@@ -239,14 +302,19 @@ export async function diagnosticsBundle(source: DiagnosticsSource): Promise<Diag
     notes.push(...result.notes);
   }
 
-  const bundle: DiagnosticsBundle = {files, notes: notes.map(clean)};
-  // The whole answer fits the control socket's reply: the largest file gives up its oldest half until it does.
-  while (bytes(JSON.stringify(bundle)) > limits.replyBytes) {
-    const largest = bundle.files.reduce((a, b) => bytes(b.content) > bytes(a.content) ? b : a, bundle.files[0]!);
-    if (!largest || !largest.content) break;
-    const kept = tail(largest.content, Math.floor(bytes(largest.content) / 2));
-    largest.content = kept.content; largest.truncated = true;
+  const bundle: DiagnosticsBundle = {files, notes: notes.map(note => oneLine(clean(note)))};
+  // The whole answer fits the reply (and so the control socket's 8 MiB): the largest file gives up its oldest half,
+  // then whole files and notes go from the end, with one line saying so. Room is kept for that line.
+  const target = limits.replyBytes - 512;
+  let dropped = 0;
+  while (bytes(JSON.stringify(bundle)) > target) {
+    const largest = bundle.files.reduce<BundleFile | undefined>((a, b) => !a || bytes(b.content) > bytes(a.content) ? b : a, undefined);
+    if (largest?.content) { const kept = tail(largest.content, Math.floor(bytes(largest.content) / 2)); largest.content = kept.content; largest.truncated = true; continue; }
+    if (bundle.files.length) { bundle.files.pop(); dropped++; continue; }
+    if (!bundle.notes.length) break;
+    bundle.notes.pop(); dropped++;
   }
+  if (dropped) bundle.notes.push(`${dropped} files or notes were left out to keep the export under ${Math.floor(limits.replyBytes / 1024 / 1024)} MiB.`);
   return bundle;
 }
 

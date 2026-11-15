@@ -221,7 +221,7 @@ export type CounterpartDiagnostics = z.infer<typeof counterpartDiagnosticsSchema
  */
 export async function readDiagnostics(session: PrinterSession, maxBytes: number, options: SessionCallOptions = {}): Promise<{server: {name: string; version: string}} & (
   {diagnostics: CounterpartDiagnostics} | {unsupported: true})> {
-  const catalog = await session.connect(options.signal ? {signal: options.signal} : {});
+  const catalog = await session.connect({...(options.signal ? {signal: options.signal} : {}), ...(options.failFast ? {failFast: true} : {})});
   const server = {name: catalog.server.name, version: catalog.server.version};
   const info = await readPrinterInfo(session, options);
   // The tool is there but its printer info didn't parse: say that, not "too old".

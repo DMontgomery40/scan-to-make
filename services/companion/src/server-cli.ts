@@ -361,7 +361,7 @@ try {
       ...(cadSettings ? {cadSettings} : {}),
       ...(fusionStatus ? {fusionStatus} : {}),
       // Export Diagnostics (#799): the event log's tail, the printers and their software, and each printer MCP's own bundle.
-      diagnostics:() => diagnosticsBundle({eventsPath:join(dataRoot,'events.ndjson'),home:homedir(),
+      diagnostics:() => diagnosticsBundle({eventsPath:join(dataRoot,'events.ndjson'),home:homedir(),ownEnv:process.env,
         ...(printerDirectory ? directorySource(printerDirectory, id => mcpUpdates?.version?.(id)) : {}),
         ...(printerSetup ? {software:async () => (await printerSetup.mcps()).packages} : {})}),
       // With every address answering, the Mac's QR is a v2 link from the live list.

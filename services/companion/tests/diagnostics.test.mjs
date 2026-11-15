@@ -74,9 +74,9 @@ test('the bundle has the event log tail, the printers and the printer software, 
   assert.equal(software[0].installs[0].path, '~/Library/Application Support/Scan to Make/printers/bambu', 'the home folder reads ~');
   assert.equal(software[0].uses[0].words, 'P1S uses Counterpart’s copy (1.1.90).');
   // The MCP's own files, under its printer's folder, named as the MCP named them.
-  assert.equal(file(bundle, 'mcp/Bambu-Lab-P1S-bambu-printer-mcp/server.json').content, '{"version":"1.1.90"}');
-  assert.equal(file(bundle, 'mcp/Bambu-Lab-P1S-bambu-printer-mcp/fulu/control-trace.log').truncated, true);
-  assert.match(file(bundle, 'mcp/Bambu-Lab-P1S-bambu-printer-mcp/fulu/control-trace.log').content, /01P00A123456789/, 'serials stay');
+  assert.equal(file(bundle, 'mcp/Bambu-Lab-P1S-bambu-printer-mcp-p1s/server.json').content, '{"version":"1.1.90"}');
+  assert.equal(file(bundle, 'mcp/Bambu-Lab-P1S-bambu-printer-mcp-p1s/fulu/control-trace.log').truncated, true);
+  assert.match(file(bundle, 'mcp/Bambu-Lab-P1S-bambu-printer-mcp-p1s/fulu/control-trace.log').content, /01P00A123456789/, 'serials stay');
   assert.ok(bundle.notes.includes('bambu-printer-mcp for Bambu Lab P1S: native helper logs: none'));
   assert.deepEqual(p1s.calls.map(call => call.name), ['counterpart_printer_info', 'counterpart_diagnostics']);
   assert.deepEqual(p1s.calls[1].args, {max_bytes: DIAGNOSTICS_LIMITS.mcpEachBytes}, 'one printer gets one MCP\'s full share; only max_bytes is passed');
@@ -100,7 +100,7 @@ test('a printer MCP that can\'t start, or a missing event log, is a note and the
   assert.ok(bundle.notes.includes('There is no event log yet.'));
   assert.ok(bundle.notes.some(note => note.startsWith('mcp-3D-printer-server for Ender (down) didn\'t give its diagnostics: ')), bundle.notes.join('\n'));
   assert.ok(bundle.notes.includes('The printer software list couldn\'t be read (npm is slow).'));
-  assert.ok(file(bundle, 'mcp/P1S-bambu-printer-mcp/server.json'));
+  assert.ok(file(bundle, 'mcp/P1S-bambu-printer-mcp-ok/server.json'));
   assert.deepEqual(ok.calls[1].args, {max_bytes: DIAGNOSTICS_LIMITS.mcpEachBytes}, '3 MiB shared by two printers is 1.5 MiB each');
 });
 
@@ -117,11 +117,12 @@ test('no access code, token or email comes out, from the event log, the MCP\'s f
   ].join('\n') + '\n';
   const {eventsPath} = await fixture(t, events);
   const leaky = session('p1s', {diagnostics: true, env: {BAMBU_ACCESS_CODE: ACCESS_CODE, BAMBU_TOKEN: TOKEN}, bundle: {package: 'bambu-printer-mcp', version: '1.1.90',
-    files: [{name: 'fulu/control-trace.log', content: `serial=01P00A123456789 host=192.0.2.7 code ${ACCESS_CODE} user ${EMAIL} bearer ${TOKEN}\n`, truncated: false}],
+    files: [{name: 'fulu/control-trace.log', content: `serial=01P00A123456789 host=192.0.2.7 code ${ACCESS_CODE} user ${EMAIL} bearer ${TOKEN}\nkey sk-ant-api03-mcpfilesecretabcdefghij jwt eyJhbGciOiJIUzI1NiJ9.eyJtY3AiOiJmaWxlIn0.c2lnbWNwZmlsZQ\n`, truncated: false}],
     notes: [`signed in as ${EMAIL} with ${ACCESS_CODE}`]}});
   const bundle = await diagnosticsBundle({eventsPath, sessions: () => [{destinationId: 'p1s', printer: 'P1S', session: leaky.session}]});
   const all = JSON.stringify(bundle);
-  for (const secret of [ACCESS_CODE, TOKEN, EMAIL, 'sk-ant-api03', 'eyJhbGciOiJIUzI1NiJ9', 'MIIEvQIBADANBgkqhkiG9w0BAQEFAASC']) assert.ok(!all.includes(secret), `${secret} leaked:\n${all}`);
+  assert.ok(events.includes('sk-ant-api03-abcdefghijklmnopqrstuvwxyz') && events.includes('eyJhbGciOiJIUzI1NiJ9.'), 'the fixture plants a key and a JWT');
+  for (const secret of [ACCESS_CODE, TOKEN, EMAIL, 'sk-ant-api03', 'eyJhbGciOiJIUzI1NiJ9', 'eyJtY3AiOiJmaWxlIn0', 'MIIEvQIBADANBgkqhkiG9w0BAQEFAASC']) assert.ok(!all.includes(secret), `${secret} leaked:\n${all}`);
   for (const kept of ['01P00A123456789', '192.0.2.7', 'pairing.created', 'mqtts://']) assert.ok(all.includes(kept), `${kept} should stay`);
 });
 
@@ -148,7 +149,7 @@ test('size caps: the event log keeps its newest whole lines, an MCP past max_byt
   assert.ok(Buffer.byteLength(events.content) <= 50_000);
   assert.match(events.content, /^\{"seq":\d+,/, 'starts at a whole line');
   assert.match(events.content, /"seq":3999,/, 'keeps the newest');
-  const stderr = file(bundle, 'mcp/P1S-bambu-printer-mcp/server-stderr.log');
+  const stderr = file(bundle, 'mcp/P1S-bambu-printer-mcp-p1s/server-stderr.log');
   assert.equal(stderr.truncated, true);
   assert.ok(Buffer.byteLength(stderr.content) <= 40_000, 'the MCP\'s answer is held to what was asked');
   assert.match(stderr.content, /line 1999 /);
@@ -157,7 +158,7 @@ test('size caps: the event log keeps its newest whole lines, an MCP past max_byt
   const small = await diagnosticsBundle({eventsPath, limits: {...limits, replyBytes: 20_000}, sessions: () => [{destinationId: 'p1s', printer: 'P1S', session: greedy.session}]});
   assert.ok(Buffer.byteLength(JSON.stringify(small)) <= 20_000);
   assert.ok(file(small, 'events-tail.ndjson').content.length > 0, 'both still carry their newest lines');
-  assert.ok(file(small, 'mcp/P1S-bambu-printer-mcp/server-stderr.log').content.length > 0);
+  assert.ok(file(small, 'mcp/P1S-bambu-printer-mcp-p1s/server-stderr.log').content.length > 0);
 });
 
 test('an MCP file name that could leave its folder is left out with a note', async t => {
@@ -165,7 +166,7 @@ test('an MCP file name that could leave its folder is left out with a note', asy
   const bad = session('p1s', {diagnostics: true, bundle: {package: 'bambu-printer-mcp', version: '1.1.90',
     files: [{name: '../../etc/passwd', content: 'x', truncated: false}, {name: '/abs.log', content: 'x', truncated: false}, {name: 'ok.log', content: 'fine', truncated: false}], notes: []}});
   const bundle = await diagnosticsBundle({eventsPath, sessions: () => [{destinationId: 'p1s', printer: 'P1S', session: bad.session}]});
-  assert.deepEqual(bundle.files.map(item => item.name), ['events-tail.ndjson', 'mcp/P1S-bambu-printer-mcp/ok.log']);
+  assert.deepEqual(bundle.files.map(item => item.name), ['events-tail.ndjson', 'mcp/P1S-bambu-printer-mcp-p1s/ok.log']);
   assert.equal(bundle.notes.filter(note => note.includes('named a file this export can\'t use')).length, 2);
 });
 
@@ -201,4 +202,68 @@ test('diagnostics.bundle is a control method with its own 45 s deadline, answere
   assert.deepEqual(await dispatch('diagnostics.bundle', {}), expected);
   const without = createControlDispatcher({auth: {}, companionVersion: '0.1.0'});
   await assert.rejects(without('diagnostics.bundle', {}), error => error.code === 'unavailable');
+});
+
+// #813 review: the reviewer's adversarial corpus, run against the redactor itself. Every case's secret must go.
+test('the review\'s adversarial probes: no secret survives', async () => {
+  const {readFileSync} = await import('node:fs');
+  const {cases} = JSON.parse(readFileSync(new URL('./fixtures/redaction-probes.json', import.meta.url), 'utf8'));
+  assert.ok(cases.length >= 44);
+  const leaks = cases.filter(({input, mustNotSurvive}) => redact(input, ['31415926'], '/Users/davidm').includes(mustNotSurvive));
+  assert.deepEqual(leaks.map(item => `${item.label}: ${redact(item.input, ['31415926'], '/Users/davidm')}`), []);
+});
+
+test('secret names by their words: the codebase\'s own keys count, ordinary words don\'t', async () => {
+  const {isSecretName} = await import('../dist/diagnostics.js');
+  for (const name of ['SCAN_TO_MAKE_MODEL_KEY', 'SCAN_TO_MAKE_AI_KEY', 'SCAN_TO_MAKE_LAN_TLS_KEY', 'session_key', 'PAIRING_PIN', 'passphrase', 'X-Api-Key', 'accessToken', 'otp', '\\u0070assword', 'lan_code'])
+    assert.ok(isSecretName(name), name);
+  for (const name of ['mapping', 'keyboard', 'authenticate', 'passIndex', 'spinning', 'hotplate', 'model', 'serial', 'host', 'code'])
+    assert.ok(!isSecretName(name), name);
+});
+
+test('the companion\'s own secret values are swept wherever they appear, unlabelled', async t => {
+  const MODEL_KEY = 'hf9f8e7d6c5b4a39281706';
+  const {eventsPath} = await fixture(t, `{"type":"ai.failed","detail":"provider said ${MODEL_KEY} is invalid"}\n`);
+  const bundle = await diagnosticsBundle({eventsPath, ownEnv: {SCAN_TO_MAKE_MODEL_KEY: MODEL_KEY, SCAN_TO_MAKE_LAN_TLS_KEY: '/k/p.key', HOME: '/Users/x'}});
+  assert.ok(!JSON.stringify(bundle).includes(MODEL_KEY));
+});
+
+test('two printers with the same name on the same MCP keep their own folders', async t => {
+  const {eventsPath} = await fixture(t, '');
+  const answer = {package: 'bambu-printer-mcp', version: '1.1.90', files: [{name: 'server.json', content: '{}', truncated: false}], notes: []};
+  const a = session('a', {diagnostics: true, bundle: answer}), b = session('b', {diagnostics: true, bundle: answer});
+  const bundle = await diagnosticsBundle({eventsPath, sessions: () => [{destinationId: 'a', printer: 'Bambu Lab P1S', session: a.session}, {destinationId: 'b', printer: 'Bambu Lab P1S', session: b.session}]});
+  const names = bundle.files.map(item => item.name).filter(name => name.startsWith('mcp/'));
+  assert.deepEqual(names, ['mcp/Bambu-Lab-P1S-bambu-printer-mcp-a/server.json', 'mcp/Bambu-Lab-P1S-bambu-printer-mcp-b/server.json']);
+});
+
+test('an MCP that hangs is a note after its timeout, and the bundle still comes', async t => {
+  const {eventsPath} = await fixture(t, '');
+  const hung = session('p1s', {diagnostics: true, bundle: () => new Promise(() => {})});
+  const started = Date.now();
+  const bundle = await diagnosticsBundle({eventsPath, limits: {mcpTimeoutMs: 200}, sessions: () => [{destinationId: 'p1s', printer: 'P1S', session: hung.session}]});
+  assert.ok(Date.now() - started < 5000);
+  assert.ok(bundle.notes.some(note => note.startsWith('bambu-printer-mcp for P1S (p1s) didn\'t give its diagnostics')), bundle.notes.join('\n'));
+});
+
+test('an MCP answer that doesn\'t match counterpart/1 is a note, never files', async t => {
+  const {eventsPath} = await fixture(t, '');
+  const odd = session('p1s', {diagnostics: true, bundle: {package: 7, files: 'nope'}});
+  const bundle = await diagnosticsBundle({eventsPath, sessions: () => [{destinationId: 'p1s', printer: 'P1S', session: odd.session}]});
+  assert.ok(!bundle.files.some(item => item.name.startsWith('mcp/')));
+  assert.ok(bundle.notes.some(note => note.includes('didn\'t give its diagnostics')), bundle.notes.join('\n'));
+});
+
+test('at the schema\'s maximum (8 printers × 512 files and 512 notes of control characters) the reply stays under 6 MiB', async t => {
+  const {eventsPath} = await fixture(t, 'x'.repeat(100) + '\n');
+  const huge = () => ({package: 'bambu-printer-mcp', version: '1.1.90',
+    files: Array.from({length: 512}, (_, i) => ({name: `${'n'.repeat(500)}${i}`, content: 'c'.repeat(4000), truncated: false})),
+    notes: Array.from({length: 512}, () => '\u0001'.repeat(8192))});
+  const printers = Array.from({length: 8}, (_, i) => ({destinationId: `p${i}`, printer: `Printer ${i}`, session: session(`p${i}`, {diagnostics: true, bundle: huge}).session}));
+  const bundle = await diagnosticsBundle({eventsPath, sessions: () => printers});
+  const size = Buffer.byteLength(JSON.stringify(bundle));
+  assert.ok(size <= DIAGNOSTICS_LIMITS.replyBytes, `${size} bytes`);
+  assert.ok(size < 8 * 1024 * 1024);
+  assert.ok(bundle.notes.every(note => !/[\x00-\x1f]/.test(note) && note.length <= 1000));
+  assert.ok(bundle.notes.some(note => note.includes('left out to keep the export small')));
 });

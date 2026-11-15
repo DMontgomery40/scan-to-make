@@ -1,0 +1,225 @@
+{
+ "source": "#813 review (agents-171 ~/stm-gates/probes, redact-extract.mts and redact2.mts), copied verbatim; redacted with secrets [\"31415926\"] and home /Users/davidm",
+ "cases": [
+  {
+   "label": "model key env",
+   "input": "SCAN_TO_MAKE_MODEL_KEY=hf_9f8e7d6c5b4a39281706f5e4d3c2b1a0",
+   "mustNotSurvive": "hf_9f8e7d6c5b4a39281706f5e4d3c2b1a0"
+  },
+  {
+   "label": "tls key env json",
+   "input": "{\"SCAN_TO_MAKE_LAN_TLS_KEY\":\"/k/p.key\",\"SCAN_TO_MAKE_AI_KEY\":\"plainhex0123456789abcdef0123\"}",
+   "mustNotSurvive": "plainhex0123456789abcdef0123"
+  },
+  {
+   "label": "generic session_key json",
+   "input": "{\"session_key\":\"s3ss10nV4lue98765\"}",
+   "mustNotSurvive": "s3ss10nV4lue98765"
+  },
+  {
+   "label": "encryption_key",
+   "input": "encryption_key: deadbeefcafe0123456789",
+   "mustNotSurvive": "deadbeefcafe0123456789"
+  },
+  {
+   "label": "passphrase",
+   "input": "passphrase=hunter2-horse-battery",
+   "mustNotSurvive": "hunter2-horse-battery"
+  },
+  {
+   "label": "pairing pin",
+   "input": "PAIRING_PIN=482910",
+   "mustNotSurvive": "482910"
+  },
+  {
+   "label": "otp",
+   "input": "{\"otp\":\"731204\"}",
+   "mustNotSurvive": "731204"
+  },
+  {
+   "label": "lowercase bearer",
+   "input": "authorization: bearer abcDEF123456ghiJKL789",
+   "mustNotSurvive": "abcDEF123456ghiJKL789"
+  },
+  {
+   "label": "lowercase basic",
+   "input": "Proxy-Authorization: basic dXNlcjpwYXNzd29yZA==",
+   "mustNotSurvive": "dXNlcjpwYXNzd29yZA=="
+  },
+  {
+   "label": "github token bare",
+   "input": "cloned with ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6",
+   "mustNotSurvive": "ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6"
+  },
+  {
+   "label": "aws key bare",
+   "input": "aws id AKIAIOSFODNN7EXAMPLE ok",
+   "mustNotSurvive": "AKIAIOSFODNN7EXAMPLE"
+  },
+  {
+   "label": "google api key bare",
+   "input": "key AIzaSyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r done",
+   "mustNotSurvive": "AIzaSyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r"
+  },
+  {
+   "label": "pem certificate",
+   "input": "-----BEGIN CERTIFICATE-----\nMIIBszCCAVmgAwIBAgIUZZZ\n-----END CERTIFICATE-----",
+   "mustNotSurvive": "MIIBszCCAVmgAwIBAgIUZZZ"
+  },
+  {
+   "label": "pem ec key header variant",
+   "input": "-----BEGIN EC PRIVATE KEY-----\nMHQCAQEEIAbc123\n-----END EC PRIVATE KEY-----",
+   "mustNotSurvive": "MHQCAQEEIAbc123"
+  },
+  {
+   "label": "openssh key",
+   "input": "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXk=\n-----END OPENSSH PRIVATE KEY-----",
+   "mustNotSurvive": "b3BlbnNzaC1rZXk="
+  },
+  {
+   "label": "session cookie bare",
+   "input": "{\"sessionId\":\"7f3a9c1e88b24d6fa015\"}",
+   "mustNotSurvive": "7f3a9c1e88b24d6fa015"
+  },
+  {
+   "label": "cookie json lowercase name ok?",
+   "input": "{\"cookie\":\"sid=zzz999yyy888\"}",
+   "mustNotSurvive": "zzz999yyy888"
+  },
+  {
+   "label": "access code hyphen",
+   "input": "access-code: 31415926",
+   "mustNotSurvive": "31415926"
+  },
+  {
+   "label": "lan code",
+   "input": "lan_code=87654321",
+   "mustNotSurvive": "87654321"
+  },
+  {
+   "label": "pair code json",
+   "input": "{\"code\":\"Ab3dEf6hJk9mNpQrStUvWxYz012345\"}",
+   "mustNotSurvive": "Ab3dEf6hJk9mNpQrStUvWxYz012345"
+  },
+  {
+   "label": "jwt planted",
+   "input": "t eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.signaturepart99",
+   "mustNotSurvive": "eyJzdWIiOiIxIn0"
+  },
+  {
+   "label": "sk planted",
+   "input": "k sk-ant-api03-abcdefghijklmnopqrstuvwx",
+   "mustNotSurvive": "sk-ant-api03"
+  },
+  {
+   "label": "email plus addressing",
+   "input": "a.b+tag@sub.example.co.uk",
+   "mustNotSurvive": "a.b+tag@sub.example.co.uk"
+  },
+  {
+   "label": "home other user",
+   "input": "/Users/someoneelse/Library/x /home/other/y C:\\Users\\DavidM\\z",
+   "mustNotSurvive": "someoneelse"
+  },
+  {
+   "label": "home escaped json",
+   "input": "{\\\"path\\\":\\\"\\/Users\\/davidm\\/Library\\\"}",
+   "mustNotSurvive": "davidm"
+  },
+  {
+   "label": "username in ~user",
+   "input": "log at ~davidm/Library/Logs",
+   "mustNotSurvive": "davidm"
+  },
+  {
+   "label": "url query token",
+   "input": "GET https://api.example.com/x?access_token=tokABC123456&y=1",
+   "mustNotSurvive": "tokABC123456"
+  },
+  {
+   "label": "url fragment token",
+   "input": "https://ex.com/cb#id_token=tokXYZ987654",
+   "mustNotSurvive": "tokXYZ987654"
+  },
+  {
+   "label": "set-cookie lowercase",
+   "input": "set-cookie: sid=lowcookie123; HttpOnly",
+   "mustNotSurvive": "lowcookie123"
+  },
+  {
+   "label": "quoted single key=value with spaces",
+   "input": "password = 'correct horse battery'",
+   "mustNotSurvive": "correct horse"
+  },
+  {
+   "label": "json secret value with spaces",
+   "input": "{\"password\":\"correct horse battery\"}",
+   "mustNotSurvive": "correct horse"
+  },
+  {
+   "label": "bearer token with hyphen underscore",
+   "input": "Bearer abc-def_123456",
+   "mustNotSurvive": "abc-def_123456"
+  },
+  {
+   "label": "x-api-key header",
+   "input": "X-Api-Key: headervalue123456",
+   "mustNotSurvive": "headervalue123456"
+  },
+  {
+   "label": "privateKey camel",
+   "input": "{\"privateKey\":\"MIIEvQIBADANBgkq\"}",
+   "mustNotSurvive": "MIIEvQIBADANBgkq"
+  },
+  {
+   "label": "client_secret",
+   "input": "client_secret=cs_9876543210abcdef",
+   "mustNotSurvive": "cs_9876543210abcdef"
+  },
+  {
+   "label": "refresh token spaced name",
+   "input": "refresh token: rt_abcdef0123456789",
+   "mustNotSurvive": "rt_abcdef0123456789"
+  },
+  {
+   "label": "safe-prefix true-",
+   "input": "password=true-secret-value",
+   "mustNotSurvive": "true-secret-value"
+  },
+  {
+   "label": "safe-prefix null-",
+   "input": "api_key=null-123456789",
+   "mustNotSurvive": "null-123456789"
+  },
+  {
+   "label": "safe-prefix [set]",
+   "input": "token=[set]hunter2value",
+   "mustNotSurvive": "hunter2value"
+  },
+  {
+   "label": "safe-prefix false_",
+   "input": "secret=false_value99",
+   "mustNotSurvive": "false_value99"
+  },
+  {
+   "label": "json true prefix quoted",
+   "input": "{\"password\":\"true-secret\"}",
+   "mustNotSurvive": "true-secret"
+  },
+  {
+   "label": "unicode escaped key",
+   "input": "{\"\\u0070assword\":\"unicodesecret1\"}",
+   "mustNotSurvive": "unicodesecret1"
+  },
+  {
+   "label": "b64 basic lowercase",
+   "input": "authorization: basic dXNlcjpwYXNzOTg3",
+   "mustNotSurvive": "dXNlcjpwYXNzOTg3"
+  },
+  {
+   "label": "digest lowercase",
+   "input": "authorization: digest abcdef0123456789",
+   "mustNotSurvive": "abcdef0123456789"
+  }
+ ]
+}
