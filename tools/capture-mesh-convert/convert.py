@@ -60,6 +60,45 @@ def _layer_bytes(src, ident):
     return src.name, src.read_bytes()
 
 
+def _layer_digest(src, ident):
+    """(relative name, sha256, bytes) for a layer or asset inside src, read in 1 MiB pieces: a rebuild's 80 MB
+    displacement map is hashed, never held whole in memory (#852, review P1-1)."""
+    src_abs = str(src.resolve())
+    outer, inner = Ar.SplitPackageRelativePathOuter(ident) if Ar.IsPackageRelativePath(ident) else (ident, "")
+    digest, size = hashlib.sha256(), 0
+    def read(stream):
+        nonlocal size
+        for chunk in iter(lambda: stream.read(1 << 20), b""):
+            digest.update(chunk); size += len(chunk)
+    if inner:
+        if str(Path(outer).resolve()) != src_abs:
+            raise RuntimeError(f"asset boundary: dependency outside package: {ident}")
+        with zipfile.ZipFile(src) as z:
+            try:
+                with z.open(inner) as stream: read(stream)
+            except KeyError:
+                raise RuntimeError(f"asset boundary: packaged entry missing: {ident}") from None
+        return inner, digest.hexdigest(), size
+    if str(Path(ident).resolve()) != src_abs:
+        raise RuntimeError(f"asset boundary: dependency outside source: {ident}")
+    if zipfile.is_zipfile(src):  # package root layer = first zip entry
+        with zipfile.ZipFile(src) as z:
+            first = z.infolist()[0].filename
+            with z.open(first) as stream: read(stream)
+        return first, digest.hexdigest(), size
+    with open(src, "rb") as stream: read(stream)
+    return src.name, digest.hexdigest(), size
+
+
+def _file_digest(path):
+    """sha256 and size of a file, read in 1 MiB pieces."""
+    digest, size = hashlib.sha256(), 0
+    with open(path, "rb") as stream:
+        for chunk in iter(lambda: stream.read(1 << 20), b""):
+            digest.update(chunk); size += len(chunk)
+    return digest.hexdigest(), size
+
+
 def check_asset_boundary(src, stage):
     layers, assets, unresolved = UsdUtils.ComputeAllDependencies(Sdf.AssetPath(str(src)))
     if unresolved:
@@ -69,8 +108,8 @@ def check_asset_boundary(src, stage):
     idents += [l.identifier for l in stage.GetUsedLayers() if l != session and not l.anonymous]
     out = {}
     for ident in idents:
-        name, data = _layer_bytes(src, ident)
-        out[name] = {"identifier": name, "sha256": sha256_bytes(data), "bytes": len(data)}
+        name, digest, size = _layer_digest(src, ident)
+        out[name] = {"identifier": name, "sha256": digest, "bytes": size}
     return [out[k] for k in sorted(out)]
 
 
@@ -161,13 +200,19 @@ def _has_time_samples(attr):
     return attr and attr.IsValid() and attr.GetNumTimeSamples() > 0
 
 
-def convert(src, out_obj):
+class _GeometryOnly(Exception):
+    """Skips a mesh's material and UVs in a geometry-only conversion."""
+
+
+def convert(src, out_obj, geometry_only=False):
+    """`geometry_only` (#852): the same triangles in the same frame, with no material or texture read or written. A Mac
+    rebuild is mostly textures (a 200 MB scan holds about 3 MB of mesh); a design engine reads the mesh."""
     _load_pxr()
     src = Path(src)
     out_obj = Path(out_obj)
     if src.resolve() == out_obj.resolve():
         raise RuntimeError("output must not overwrite source")
-    src_bytes = src.read_bytes()
+    src_sha256, src_size = _file_digest(src)
     stage = Usd.Stage.Open(str(src))
     if stage is None:
         raise RuntimeError(f"could not open USD stage: {src}")
@@ -268,7 +313,10 @@ def convert(src, out_obj):
             raise RuntimeError(f"{path}: invalid topology: index {bad[0]} out of range for {len(points)} points")
         material = None
         uv_name = "st"
+        uvs = None
         try:
+            if geometry_only:
+                raise _GeometryOnly()
             material = base_colour(prim, src, _layer_bytes)
             if material:
                 uv_name = material.get("uvPrimvar", "st")
@@ -282,6 +330,8 @@ def convert(src, out_obj):
                     unsupported.append({"feature":"textureWrapping", "prim":path,
                                         "detail":"out-of-range UVs affected by " +
                                                  "; ".join(material["textureWarnings"])})
+        except _GeometryOnly:
+            material, uvs = None, None
         except UnsupportedTexture as exc:
             unsupported.append({"feature":"baseColour", "prim":path, "detail":str(exc)})
             material, uvs = None, None
@@ -393,7 +443,7 @@ def convert(src, out_obj):
         "usdVersion": ".".join(map(str, Usd.GetVersion())),
         "contributingLayers": layer_hashes,
         "outputs":outputs, "materials":[desc for _,desc in materials],
-        "source": {"path": src.name, "sha256": sha256_bytes(src_bytes), "bytes": len(src_bytes)},
+        "source": {"path": src.name, "sha256": src_sha256, "bytes": src_size},
         "output": {"path": Path(out_obj).name, "format": "obj", "sha256": sha256_bytes(obj_bytes),
                    "bytes": len(obj_bytes)},
         "metersPerUnit": mpu, "unitsAuthored": units_authored,
@@ -402,7 +452,7 @@ def convert(src, out_obj):
                         "metersPerUnit": mpu, "upAxis": str(up), "handedness": "right",
                         "winding": "counter-clockwise front faces",
                         "faces": "triangles (ear clipping on face plane)"},
-        "metricQualified": metric_qualified,
+        "metricQualified": metric_qualified, "geometryOnly": bool(geometry_only),
         "metricQualifiedReason": None if metric_qualified else
             ("metersPerUnit not authored (default used)" if not units_authored else "unsupported features present"),
         "subdivisionPolicy": SUBDIVISION_POLICY,
@@ -417,6 +467,7 @@ def main(argv=None):
     ap.add_argument("source")
     ap.add_argument("--out", required=True, help="output .obj path")
     ap.add_argument("--report", help="output JSON report path (default: stdout)")
+    ap.add_argument("--geometry-only", action="store_true", help="the mesh alone: no material or texture is read or written")
     a = ap.parse_args(argv)
     try:
         if a.report:
@@ -429,7 +480,7 @@ def main(argv=None):
                  (report_path.suffix == ".png" and any(report_path.name.startswith(stem+"_"+role+"_")
                                                        for role in ("basecolor", "normal", "occlusion"))))):
                 raise RuntimeError("report must not overwrite source or output artifacts")
-        report = convert(a.source, a.out)
+        report = convert(a.source, a.out, geometry_only=a.geometry_only)
     except Exception as e:  # noqa: BLE001
         print(f"error: {e}", file=sys.stderr)
         return 2
