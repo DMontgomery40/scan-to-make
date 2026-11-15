@@ -47,7 +47,7 @@ import {ObjectNotFoundError, ObjectStore, restoreLocate, type LocateSnapshot, ty
 import {fitRequest, workerRequest} from './fit.js';
 import {inheritHistory} from './inherited.js';
 import {sealVersion} from './versions.js';
-import {answeredSizes, askKind, closedByPrint, InvalidSizesError, mergeCheckedSizes, sizesMessage, sizesNote, withCheckedSizes} from './asks.js';
+import {answeredSizes, askKind, closedByPrint, takesScan, InvalidSizesError, mergeCheckedSizes, sizesMessage, sizesNote, withCheckedSizes} from './asks.js';
 /** An answer to an open question: photos, words, Best Guess, and for a sizes question its numbers with `measured`,
  *  the ids the person typed or edited (contracts `SizesAnswerSchema`); any together. */
 export type AskAnswer = {bestGuess?: boolean; text?: string; photoNames?: string[]; sizes?: {id: string; mm: number}[]; measured?: string[]};
@@ -1538,7 +1538,8 @@ export class ObjectService {
       // A send resumed after its start already went through (the reply was lost) changes nothing.
       if (object.state !== 'new' && object.captureCompletion?.source === 'object-capture'
           && JSON.stringify([...(object.capture ?? [])].sort()) === JSON.stringify(manifest.images)) return object;
-      if (object.state !== 'new') throw new InvalidStateError('The scan can only be added before the touch-up starts.');
+      // A project asking for photos with no model yet takes one too (#825): it started from its words while the scan was on the phone.
+      if (!takesScan(object)) throw new InvalidStateError('The scan can only be added before the touch-up starts.');
       const run = captureRun(value);
       return this.#changed(await this.#deps.store.update(id, o => ({...o, captureDeclared: {source: 'object-capture' as const, images: manifest.images, ...(run ? {run} : {})}})));
     });
@@ -1557,7 +1558,7 @@ export class ObjectService {
       if (!this.objectCaptureImages) throw new InvalidStateError(SCANS_NEED_A_MAC);
       const named = forgetIdentity(identity);
       const object = await this.get(id);
-      if (object.state !== 'new' || object.scan) throw new InvalidStateError('The scan can only be changed before the touch-up starts.');
+      if (!takesScan(object) || object.scan) throw new InvalidStateError('The scan can only be changed before the touch-up starts.');
       const declared = object.captureDeclared;
       if (!declared) return object;
       if (declared.run ? declared.run !== named.run : JSON.stringify(declared.images) !== JSON.stringify(named.images)) {
@@ -1574,7 +1575,7 @@ export class ObjectService {
   addCapturePhoto(id: string, name: string, bytes: Buffer): Promise<StmObject> {
     return this.#gate(id, async () => {
       const object = await this.get(id);
-      if (object.state !== 'new' || object.scan) throw new InvalidStateError('The scan can only be added before the touch-up starts.');
+      if (!takesScan(object) || object.scan) throw new InvalidStateError('The scan can only be added before the touch-up starts.');
       if (object.captureDeclared && !object.captureDeclared.images.includes(name)) throw new InvalidStateError("That photo isn't part of this scan. Resume sending it from the phone that recorded it.");
       // Replacing capture photos invalidates camera metadata bound to the old bytes.
       if (object.captureCamera) {
@@ -1598,7 +1599,7 @@ export class ObjectService {
   addCaptureCamera(id: string, value: unknown): Promise<StmObject> {
     return this.#gate(id, async () => {
       const object = await this.get(id);
-      if (object.state !== 'new' || object.scan) throw new InvalidStateError('Camera information can only be added before the touch-up starts.');
+      if (!takesScan(object) || object.scan) throw new InvalidStateError('Camera information can only be added before the touch-up starts.');
       const camera = await validateCaptureCamera(value, join(this.dir(id), 'capture'), object.capture ?? []);
       // Store exactly what was validated; the digest binds those bytes to the completion.
       const stored = Buffer.from(JSON.stringify(camera, null, 2) + '\n', 'utf8');
@@ -1615,7 +1616,7 @@ export class ObjectService {
       if (!/^[0-9]{4}\.depth\.plist$/.test(name) || bytes.length < 8 || bytes.subarray(0, 8).toString('ascii') !== 'bplist00')
         throw new Error('Invalid file name');
       const object = await this.get(id);
-      if (object.state !== 'new' || object.scan) throw new InvalidStateError('Depth can only be added before reconstruction starts.');
+      if (!takesScan(object) || object.scan) throw new InvalidStateError('Depth can only be added before reconstruction starts.');
       if (object.captureCompletion) await this.#deps.store.update(id, o => ({...o, captureCompletion: undefined}));
       await this.#deps.store.addFile(id, 'capture', name, bytes);
       return this.#changed(await this.#deps.store.update(id, o => ({...o,
@@ -1709,7 +1710,8 @@ export class ObjectService {
         && object.captureCompletion.source === manifest.source;
       if (same && ['touching-up', 'needs-closeup', 'ready', 'printing', 'printed'].includes(object.state)) return object;
       if (!same) {
-        if (object.state !== 'new' && object.state !== 'failed') throw new InvalidStateError('Wait until the current step finishes.');
+        // A project asking for photos with no model starts from them as a new one would (#825): rebuild, then its words.
+        if (object.state !== 'failed' && !takesScan(object)) throw new InvalidStateError('Wait until the current step finishes.');
         object = await this.#deps.store.update(id, o => ({...o, captureCompletion: {
           version: 1, depthRequired: manifest.depthRequired,
           ...(manifest.cameraMetadataRequired ? {cameraMetadataRequired: true} : {}),
@@ -1886,6 +1888,10 @@ export class ObjectService {
     if (object.state !== 'needs-closeup') throw new InvalidStateError('No close-up was asked for.');
     // A reconstruction review is not a close-up: Best Guess, words or photos must not approve it.
     if (object.reconstructionReview) throw new InvalidStateError(RECONSTRUCTION_REVIEW_UPDATE);
+    // A scan asked for is arriving (#825): no answer, Best Guess included, takes the question from it before it's here.
+    if (object.captureDeclared) {
+      throw new InvalidStateError((object.capture ?? []).length === 0 ? scanStillOnPhone(object.captureDeclared.images.length) : CAPTURE_PENDING);
+    }
     // Carry on with what the asking pass was doing: a correction keeps its note and its model.
     // Only this answer's explicit attachments belong to it. Other pending photos may already
     // be reserved by a correction queued on either client; Best Guess and text claim none.

@@ -696,6 +696,104 @@ typealias MacError = CompanionError
         await Self.retryDeclares(kept: { [self] in keptScan($0) }, declare: { [self] in try await declareKeptScan($0, run: $1) })
     }
 
+    // MARK: A stop stranded by the build before #795 (#825)
+
+    /// A stopped run of 20 photos or more that the build before #795 left on this phone, never declared or sent. David,
+    /// Nov 15: "i sent it once why would i send it again?". What happens to it is narrow (lead, Nov 15, regression
+    /// watcher): `send` only to a project that already started and is asking for exactly this (no model, an open question
+    /// for photos), so nothing spends a tester's model budget with no tap; `declare` only, for a draft, as Stop with 20 or
+    /// more does now, so the Mac knows a scan exists and nothing starts from the words alone. Send and Remove stay the person's.
+    struct StrandedScan: Equatable {
+        enum Action: Equatable { case send, declare }
+        let project: String, run: String, photos: Int, action: Action
+    }
+
+    /// The question a stranded scan answers: no model yet, and an open close-up question (answered with a photo or the
+    /// camera). The Mac checks the same before it takes one.
+    static func asksForScan(_ project: Project) -> Bool {
+        guard project.state == .needsCloseup, project.current == nil, let ask = project.openAsk else { return false }
+        return (ask.kind ?? ask.type ?? "closeup") == "closeup" && !Set(ask.answers).isDisjoint(with: ["photos", "camera"])
+    }
+
+    /// Each stranded run's handling, by run, recorded once so it never qualifies again: `declared`, `sending` (under way:
+    /// a send the Mac didn't answer carries on at the next contact), or `sent` (started, refused, or moved on).
+    static func strandedHandled(_ defaults: UserDefaults = .standard) -> [String: String] {
+        (defaults.dictionary(forKey: strandedHandledKey) as? [String: String]) ?? [:]
+    }
+    private static func setStrandedHandled(run: String, _ state: String, _ defaults: UserDefaults) {
+        var handled = strandedHandled(defaults)
+        handled[run] = state
+        defaults.set(handled, forKey: strandedHandledKey)
+    }
+    private static let strandedHandledKey = "CounterpartStrandedScans"
+
+    /// The Mac's refusal of a stranded scan's send, by project, in its own words: the scan stays, and the project says why.
+    static func recoveryRefusals(_ defaults: UserDefaults = .standard) -> [String: String] {
+        (defaults.dictionary(forKey: recoveryRefusalsKey) as? [String: String]) ?? [:]
+    }
+    static func setRecoveryRefusal(project: String, message: String?, _ defaults: UserDefaults = .standard) {
+        var refusals = recoveryRefusals(defaults)
+        refusals[project] = message
+        defaults.set(refusals, forKey: recoveryRefusalsKey)
+    }
+    private static let recoveryRefusalsKey = "CounterpartStrandedRefusals"
+
+    /// The card's words while a stranded scan is sent.
+    static func recoveringWords(photos: Int) -> String { "Sending the \(photos) photos your stopped scan kept" }
+
+    /// The stranded runs to handle now, from the projects the Mac just listed. Only runs from before the fix: no pending,
+    /// declared or acknowledged record, not removed, Send never pressed. A send cut short carries on while its project still
+    /// asks for it, and is closed once the project has moved on (its start may have gone through with the reply lost).
+    static func strandedScans(_ listed: [Project], _ defaults: UserDefaults = .standard, kept: (String) -> KeptScan?,
+                              requested: (String) -> Bool) -> [StrandedScan] {
+        var due: [StrandedScan] = []
+        for project in listed {
+            guard case .stopped(let run, let photos)? = kept(project.id), isEnough(stoppedPhotos: photos),
+                  !isRemoved(project.id, run, defaults) else { continue }
+            let handled = strandedHandled(defaults)[run]
+            if handled == "sending" {
+                if asksForScan(project) { due.append(StrandedScan(project: project.id, run: run, photos: photos, action: .send)) }
+                else { setStrandedHandled(run: run, "sent", defaults) }
+                continue
+            }
+            guard handled == nil, pendingDeclares(defaults)[project.id] == nil, declaredRuns(defaults)[project.id] == nil,
+                  acknowledgedRuns(defaults)[project.id] == nil, !requested(project.id) else { continue }
+            if asksForScan(project) { due.append(StrandedScan(project: project.id, run: run, photos: photos, action: .send)) }
+            else if project.state == .new { due.append(StrandedScan(project: project.id, run: run, photos: photos, action: .declare)) }
+        }
+        return due
+    }
+
+    /// A draft's stranded run, recorded to declare as a Stop with 20 or more is (`retryPendingDeclares` tells the Mac).
+    /// Never uploaded or started.
+    static func declareStranded(_ scan: StrandedScan, _ defaults: UserDefaults = .standard) {
+        guard scan.action == .declare else { return }
+        setStrandedHandled(run: scan.run, "declared", defaults)
+        setPendingDeclare(project: scan.project, run: scan.run, defaults)
+        setDeclaredRun(project: scan.project, run: scan.run, defaults)
+    }
+
+    /// Sends a stranded run to the project asking for it, once: `send` is the declare-and-send path (`sendStoppedScan`).
+    /// Recorded before anything goes. A Mac that didn't answer leaves it under way for the next contact; a start, a refusal
+    /// (kept in the Mac's words) or a Remove meanwhile ends it for good.
+    static func sendStranded(_ scan: StrandedScan, _ defaults: UserDefaults = .standard,
+                             send: (String, String) async throws -> Void) async throws {
+        guard scan.action == .send else { return }
+        setStrandedHandled(run: scan.run, "sending", defaults)
+        do {
+            try await send(scan.project, scan.run)
+            setStrandedHandled(run: scan.run, "sent", defaults)
+            setRecoveryRefusal(project: scan.project, message: nil, defaults)
+        } catch let failure as CompanionError where failure.code == removedWhileSending.code {
+            setStrandedHandled(run: scan.run, "sent", defaults)
+            throw failure
+        } catch let failure as CompanionError where macAnswered(failure) {
+            setStrandedHandled(run: scan.run, "sent", defaults)
+            setRecoveryRefusal(project: scan.project, message: failure.message, defaults)
+            throw failure
+        }
+    }
+
     /// Sends a stopped scan's photos as they are; the Mac rebuilds from what's there and says plainly if it's too few.
     func sendStoppedScan(_ id: String, run: String) async throws -> StmObject {
         let manifest = try await sendStoppedCapture(id, run: run)

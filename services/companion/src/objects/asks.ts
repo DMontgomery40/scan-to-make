@@ -16,6 +16,20 @@ export function askKind(object: Pick<StmObject, 'ask' | 'reconstructionReview'>)
   return ask.type ?? 'closeup';
 }
 
+/**
+ * #825: whether a walk-around scan may still join this project. A `new` one always; and one that ran from its words
+ * alone (no model) and is now asking for photos (an open `closeup` ask, which every client answers with a photo or the
+ * camera), because a scan is exactly what it asked for. David, Nov 15: a 68-photo scan stranded on the phone by the
+ * build before #795, whose project then asked for photos and refused the scan for good: "i sent it once why would i
+ * send it again?". A project with a model, or one waiting on a file, a choice, sizes or a reconstruction review, takes
+ * none: its scan is no longer the question.
+ */
+export function takesScan(object: Pick<StmObject, 'state' | 'current' | 'ask' | 'reconstructionReview'>): boolean {
+  if (object.state === 'new') return true;
+  return object.state === 'needs-closeup' && !object.current && !object.reconstructionReview
+    && object.ask?.status === 'open' && askKind(object) === 'closeup';
+}
+
 /** A print is recorded: the part printed (`printed`), was marked Works (`confirmed`), or went to a printer Counterpart can't follow (`sent`). */
 const PRINT_RECORDED: ReadonlySet<StmObject['state']> = new Set(['printed', 'confirmed', 'sent']);
 

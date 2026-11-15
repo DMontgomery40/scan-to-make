@@ -676,6 +676,8 @@ struct ProjectView: View {
 
     @ViewBuilder private func stateCard(_ object: Project, _ words: ProjectWords) -> some View {
         switch words.phase {
+        // A scan stopped before the fix, sent by itself to the project asking for it (#825): said before the question.
+        case _ where store.recoveringScans[object.id] != nil: workingCard(object, words)
         case .working, .sending: workingCard(object, words)
         // A printer question needs you too (an older Mac sends no status); it's answered in its sheet, not with photos.
         case .needsYou where object.printConfirmation != nil:
@@ -758,18 +760,21 @@ struct ProjectView: View {
             // While the Mac isn't answering, time left stays as it was when the phone last heard (the line above says when),
             // never counting down as if it were live.
             let work = WorkProgress(object, now: away ? (store.heard[object.id] ?? context.date) : context.date)
+            let recovering = store.recoveringScans[object.id]
+            let sending = words.phase == .sending || recovering != nil
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
-                    Image(systemName: words.phase.symbol).foregroundStyle(.blue).symbolEffect(.pulse)
-                    Text(words.phase == .sending ? "Sending to your Mac" : "Your Mac is working on it").font(.headline)
+                    Image(systemName: sending ? ProjectPhase.sending.symbol : words.phase.symbol).foregroundStyle(.blue).symbolEffect(.pulse)
+                    Text(recovering.map(MacConnection.recoveringWords) ?? (sending ? "Sending to your Mac" : "Your Mac is working on it")).font(.headline)
+                        .accessibilityIdentifier(recovering != nil ? "stranded-scan-sending" : "working-title")
                     Spacer()
                     if let left = work.remainingSec, let about = Format.about(max(60, left)) {
                         Text(about).font(.subheadline.monospacedDigit()).foregroundStyle(.secondary)
                     }
                 }
-                if let fraction = words.phase == .sending ? store.sendProgress[object.id] : work.fraction { ProgressView(value: fraction).tint(.blue) }
+                if let fraction = sending ? store.sendProgress[object.id] : work.fraction { ProgressView(value: fraction).tint(.blue) }
                 else { ProgressView().progressViewStyle(.linear).tint(.blue) }
-                Text(words.phase == .sending ? "Keep the app open until your files are sent." : ProjectWords.putDown)
+                Text(sending ? "Keep the app open until your files are sent." : ProjectWords.putDown)
                     .font(.footnote).foregroundStyle(.secondary)
             }
             .padding(16)

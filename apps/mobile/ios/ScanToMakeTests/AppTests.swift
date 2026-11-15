@@ -1435,6 +1435,188 @@ private actor HeldDownload {
     }
 }
 
+// MARK: A stop stranded by the build before #795 (#825)
+
+extension AppTests {
+    /// The phone's own send of a kept stopped scan, as `sendStoppedScan` makes it: the declare and upload in the project's
+    /// turn (`declareThenUpload`), then the start only if the scan wasn't removed meanwhile.
+    fileprivate func stoppedSend(_ mac: FakeMac, _ defaults: UserDefaults, refuseStart: String? = nil) -> (String, String) async throws -> Void {
+        { project, run in
+            let sending = try await MacConnection.declareThenUpload(project: project, run: run, defaults,
+                declare: { try await MacConnection.declare(project: project, run: run, defaults, forget: mac.forget, declare: mac.declare(run)) },
+                upload: { mac.heard.append("upload") })
+            guard sending else { throw MacConnection.removedWhileSending }
+            try MacConnection.ensureStillSending(project, run: run, defaults)
+            if mac.away { throw CompanionError.unreachable }
+            if let refuseStart { throw CompanionError(code: "invalid-state", message: refuseStart) }
+            mac.heard.append("start")
+        }
+    }
+
+    /// A project as the Mac lists it after a words-only pass that asked for photos: no model, its question open.
+    fileprivate func askingForPhotos(_ id: String, state: Project.State = .needsCloseup) -> Project {
+        var project = Project(id: id, createdAtMs: 1, updatedAtMs: 2, instructions: "A replica of this DAD desk thing", state: state)
+        project.ask = Project.Ask(id: "5f868ee2-bd8c-49ff-97e4-8e3e7644a9cc", question: "The scan still hasn't arrived. Can you rescan it?",
+                                  answers: ["camera", "photos", "best-guess", "text"], kind: "closeup")
+        return project
+    }
+
+    /// David, Nov 15: "i sent it once why would i send it again?" His 68-photo DAD scan stopped on the phone; the build
+    /// before #795 started its project from the words alone, and the project now asks for photos with no model. On the
+    /// next contact the phone sends that scan by itself and the Mac starts from it, once: never again, whatever the Mac
+    /// later says it holds.
+    func testAStrandedStopIsSentOnceToTheProjectAskingForIt() async throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "stranded-\(UUID().uuidString)"))
+        let dad = "b8158144-d1c2-41e7-a356-9948167964ea", run = "3b072103-c190-41b9-8158-03177424d0c5"
+        let mac = FakeMac()
+        let asking = askingForPhotos(dad)
+        let kept: (String) -> MacConnection.KeptScan? = { $0 == dad ? .stopped(run: run, photos: 68) : nil }
+
+        let due = MacConnection.strandedScans([asking], defaults, kept: kept, requested: { _ in false })
+        XCTAssertEqual(due, [MacConnection.StrandedScan(project: dad, run: run, photos: 68, action: .send)])
+        for scan in due { try await MacConnection.sendStranded(scan, defaults, send: stoppedSend(mac, defaults)) }
+        XCTAssertEqual(mac.heard, ["declare \(run)", "upload", "start"], "declared, every photo, then the start")
+        XCTAssertNil(MacConnection.recoveryRefusals(defaults)[dad])
+
+        // The next contact, and every one after: nothing, even once the phone's record of the declare is gone.
+        XCTAssertEqual(MacConnection.strandedScans([asking], defaults, kept: kept, requested: { _ in false }), [])
+        MacConnection.setDeclaredRun(project: dad, run: nil, defaults)
+        MacConnection.setAcknowledgedRun(project: dad, run: nil, defaults)
+        XCTAssertEqual(MacConnection.strandedScans([asking], defaults, kept: kept, requested: { _ in false }), [], "sent once: never again")
+        XCTAssertEqual(mac.heard.count, 3)
+        XCTAssertEqual(MacConnection.recoveringWords(photos: 68), "Sending the 68 photos your stopped scan kept")
+    }
+
+    /// Lead, Nov 15 (regression watcher): a draft left with a stop from before the fix is never uploaded or started by
+    /// itself, which would spend a tester's model budget with no tap. It is only declared, as Stop with 20 or more does
+    /// now: the Mac knows a scan is coming and nothing starts from the words alone. Send and Remove stay the person's.
+    func testAStrandedStopOnANewDraftIsOnlyDeclared() async throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "stranded-draft-\(UUID().uuidString)"))
+        let draft = "aaaaaaaa-0000-4000-8000-0000000000aa", run = "eeeeeeee-0000-4000-8000-000000000005"
+        let mac = FakeMac()
+        let new = Project(id: draft, createdAtMs: 1, updatedAtMs: 2, instructions: "A hook", state: .new)
+        let kept: (String) -> MacConnection.KeptScan? = { _ in .stopped(run: run, photos: 30) }
+
+        let due = MacConnection.strandedScans([new], defaults, kept: kept, requested: { _ in false })
+        XCTAssertEqual(due, [MacConnection.StrandedScan(project: draft, run: run, photos: 30, action: .declare)])
+        for scan in due { MacConnection.declareStranded(scan, defaults) }
+        XCTAssertEqual(MacConnection.pendingDeclares(defaults), [draft: run], "recorded at once, as a Stop with 20 or more is")
+        await MacConnection.retryDeclares(defaults, kept: kept, declare: { project, run in
+            try await MacConnection.declare(project: project, run: run, defaults, forget: mac.forget, declare: mac.declare(run)) })
+        XCTAssertEqual(mac.heard, ["declare \(run)"], "declared at most: no upload, no start")
+        XCTAssertEqual(MacConnection.strandedScans([new], defaults, kept: kept, requested: { _ in false }), [], "second contact: nothing new")
+
+        // Its Remove still takes it off, and the Mac forgets it.
+        try await MacConnection.removeStoppedScan(project: draft, run: run, defaults, forget: mac.forget)
+        XCTAssertEqual(mac.heard, ["declare \(run)", "forget \(run)"])
+        XCTAssertEqual(MacConnection.strandedScans([new], defaults, kept: kept, requested: { _ in false }), [])
+    }
+
+    /// A send cut short: the Mac didn't answer, so it is carried on at the next contact. One whose start went through with
+    /// its reply lost finds the project moved on, and is closed without sending anything again.
+    func testAStrandedSendCutShortCarriesOnOrClosesOnceItsProjectMovedOn() async throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "stranded-cut-\(UUID().uuidString)"))
+        let dad = "b8158144-d1c2-41e7-a356-9948167964ea", run = "3b072103-c190-41b9-8158-03177424d0c5"
+        let mac = FakeMac()
+        let kept: (String) -> MacConnection.KeptScan? = { _ in .stopped(run: run, photos: 68) }
+        let asking = askingForPhotos(dad)
+        let due = MacConnection.strandedScans([asking], defaults, kept: kept, requested: { _ in false })
+        mac.away = true
+        do { try await MacConnection.sendStranded(due[0], defaults, send: stoppedSend(mac, defaults)); XCTFail("the Mac is away") } catch {}
+        XCTAssertEqual(mac.heard, [], "nothing reached it")
+        mac.away = false
+        XCTAssertEqual(MacConnection.strandedScans([asking], defaults, kept: kept, requested: { _ in false }), due, "unfinished: carried on")
+        do {
+            try await MacConnection.sendStranded(due[0], defaults, send: { project, run in
+                try await self.stoppedSend(mac, defaults)(project, run)
+                throw CompanionError.unreachable   // the start's reply was lost
+            })
+            XCTFail("no reply")
+        } catch {}
+        XCTAssertEqual(mac.heard, ["declare \(run)", "upload", "start"])
+        var working = asking
+        working.state = .touchingUp
+        XCTAssertEqual(MacConnection.strandedScans([working], defaults, kept: kept, requested: { _ in false }), [])
+        XCTAssertEqual(MacConnection.strandedScans([asking], defaults, kept: kept, requested: { _ in false }), [], "closed: never again")
+        XCTAssertEqual(mac.heard.count, 3)
+    }
+
+    /// Only a stop from before the fix (never declared, pending, acknowledged or removed), of 20 photos or more. Sent only
+    /// to a project asking for photos with no model; with a model, another question, or any other state: nothing.
+    func testOnlyAStrandedStopIsSentByItselfNeverAfterRemoveOrWithAModel() async throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "stranded-not-\(UUID().uuidString)"))
+        let dad = "b8158144-d1c2-41e7-a356-9948167964ea", run = "3b072103-c190-41b9-8158-03177424d0c5"
+        let mac = FakeMac()
+        let kept: (String) -> MacConnection.KeptScan? = { _ in .stopped(run: run, photos: 68) }
+        let none: (String) -> Bool = { _ in false }
+        var modelled = askingForPhotos(dad)
+        modelled.current = Project.Result(model: "current/model.stl", renders: [])
+        XCTAssertEqual(MacConnection.strandedScans([modelled], defaults, kept: kept, requested: none), [], "asking, with a model")
+        var file = askingForPhotos(dad)
+        file.ask = Project.Ask(id: "5f868ee2-bd8c-49ff-97e4-8e3e7644a9cc", question: "Download the model and share it here.", answers: ["file"], kind: "file")
+        XCTAssertEqual(MacConnection.strandedScans([file], defaults, kept: kept, requested: none), [], "asking for a file")
+        var answered = askingForPhotos(dad)
+        answered.ask?.status = "answered"
+        XCTAssertEqual(MacConnection.strandedScans([answered], defaults, kept: kept, requested: none), [], "nothing open")
+        for state: Project.State in [.ready, .touchingUp, .failed, .printing] {
+            XCTAssertEqual(MacConnection.strandedScans([askingForPhotos(dad, state: state)], defaults, kept: kept, requested: none), [], state.rawValue)
+        }
+        let asking = askingForPhotos(dad)
+        XCTAssertEqual(MacConnection.strandedScans([asking], defaults, kept: { _ in .stopped(run: run, photos: 19) }, requested: none), [],
+                       "fewer than 20 wait for Send")
+        XCTAssertEqual(MacConnection.strandedScans([asking], defaults, kept: { _ in .finished(run: run) }, requested: none), [],
+                       "a finished scan goes with its own send")
+        XCTAssertEqual(MacConnection.strandedScans([asking], defaults, kept: kept, requested: { _ in true }), [],
+                       "Send was pressed: its own resume finishes it")
+        MacConnection.setPendingDeclare(project: dad, run: run, defaults)
+        XCTAssertEqual(MacConnection.strandedScans([asking], defaults, kept: kept, requested: none), [], "being declared: #795's path")
+        MacConnection.setPendingDeclare(project: dad, run: nil, defaults)
+        MacConnection.setDeclaredRun(project: dad, run: run, defaults)
+        XCTAssertEqual(MacConnection.strandedScans([asking], defaults, kept: kept, requested: none), [], "declared after the fix")
+        MacConnection.setDeclaredRun(project: dad, run: nil, defaults)
+        MacConnection.setAcknowledgedRun(project: dad, run: run, defaults)
+        XCTAssertEqual(MacConnection.strandedScans([asking], defaults, kept: kept, requested: none), [], "the Mac has it")
+        MacConnection.setAcknowledgedRun(project: dad, run: nil, defaults)
+
+        // Removed before the Mac answered: never sent, then or later.
+        try await MacConnection.removeStoppedScan(project: dad, run: run, defaults, forget: mac.forget)
+        XCTAssertEqual(MacConnection.strandedScans([asking], defaults, kept: kept, requested: none), [])
+        // Removed while its send waits its turn: nothing is uploaded or started.
+        let hook = "aaaaaaaa-0000-4000-8000-0000000000aa", later = "eeeeeeee-0000-4000-8000-000000000005"
+        let hookKept: (String) -> MacConnection.KeptScan? = { _ in .stopped(run: later, photos: 30) }
+        let due = MacConnection.strandedScans([askingForPhotos(hook)], defaults, kept: hookKept, requested: none)
+        XCTAssertEqual(due.map(\.action), [.send])
+        mac.holdDeclare = true
+        let send = Task { @MainActor in try await MacConnection.sendStranded(due[0], defaults, send: self.stoppedSend(mac, defaults)) }
+        while mac.held == nil { await Task.yield() }
+        let remove = Task { @MainActor in try await MacConnection.removeStoppedScan(project: hook, run: later, defaults, forget: mac.forget) }
+        for _ in 0..<50 { await Task.yield() }
+        mac.held?.resume()
+        do { try await send.value; XCTFail("removed") } catch let failure as CompanionError { XCTAssertEqual(failure.code, "scan-removed") }
+        try await remove.value
+        XCTAssertEqual(mac.heard, ["forget \(run)", "declare \(later)", "forget \(later)"], "no upload, no start")
+        XCTAssertNil(MacConnection.recoveryRefusals(defaults)[hook], "a Remove is not the Mac's refusal")
+        XCTAssertEqual(MacConnection.strandedScans([askingForPhotos(hook)], defaults, kept: hookKept, requested: none), [])
+    }
+
+    /// The Mac refuses (an older Mac that still won't take the scan): the scan stays on the phone, the project says why
+    /// in the Mac's own words, and it isn't sent by itself again.
+    func testAStrandedStopTheMacRefusesStaysAndSaysWhy() async throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "stranded-refused-\(UUID().uuidString)"))
+        let dad = "b8158144-d1c2-41e7-a356-9948167964ea", run = "3b072103-c190-41b9-8158-03177424d0c5"
+        let mac = FakeMac()
+        let kept: (String) -> MacConnection.KeptScan? = { _ in .stopped(run: run, photos: 68) }
+        let asking = askingForPhotos(dad)
+        let due = MacConnection.strandedScans([asking], defaults, kept: kept, requested: { _ in false })
+        let words = "The scan can only be added before the touch-up starts."
+        do { try await MacConnection.sendStranded(due[0], defaults, send: stoppedSend(mac, defaults, refuseStart: words)); XCTFail("refused") }
+        catch let failure as CompanionError { XCTAssertEqual(failure.message, words) }
+        XCTAssertEqual(MacConnection.recoveryRefusals(defaults), [dad: words])
+        XCTAssertFalse(MacConnection.isRemoved(dad, run, defaults), "the scan stays")
+        XCTAssertEqual(MacConnection.strandedScans([asking], defaults, kept: kept, requested: { _ in false }), [], "not sent by itself again")
+    }
+}
+
 /// A Mac as the phone's declares and forgets see it (review of #819): the run whose list it holds, what it heard, and
 /// whether it answers. `dropReply`: a declare lands but its reply is lost, so the phone sees the Mac as unreachable.
 @MainActor final class FakeMac {

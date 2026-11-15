@@ -52,6 +52,8 @@ import CounterpartKit
     /// Finished scans still only on this phone: their projects offer Send even though the Mac has no scan yet.
     var readyScans: Set<String> = []
     func refreshStoppedScans() { stoppedScans = mac.stoppedScans(); readyScans = mac.readyScanProjects() }
+    /// Projects this phone is sending a stranded stopped scan to by itself (#825), with its photo count, for the card.
+    var recoveringScans: [String: Int] = [:]
     /// "Scan stopped · 9 photos kept", while the project hasn't been sent.
     func stoppedScanWords(_ project: Project) -> String? {
         guard project.state == .new, let stopped = stoppedScans[project.id] else { return nil }
@@ -111,6 +113,10 @@ import CounterpartKit
         // UI tests: a wait that never hears from the canned Mac expires within the test.
         if Fixtures.folder != nil, let seconds = ProcessInfo.processInfo.environment["COUNTERPART_MCP_WAIT_SECONDS"].flatMap(Double.init) {
             mcpWaits.waitingLimit = .milliseconds(Int(seconds * 1000))
+        }
+        // `-CounterpartRecoveringScan 68` (scripts/ux_screens.py): the asking plush shows a stranded scan being sent (#825).
+        if Fixtures.folder != nil, let photos = Int(UserDefaults.standard.string(forKey: "CounterpartRecoveringScan") ?? "") {
+            recoveringScans[Fixtures.ids.plush] = photos
         }
         #endif
     }
@@ -273,8 +279,16 @@ import CounterpartKit
             remember(listed: latest)
             refreshStoppedScans()
             for project in projects where corrections.pending(project.id) != nil { sendQueuedNote(project) }
-            // The Mac answered: any Remove it hasn't heard, then any stopped scan it hasn't acknowledged, goes now (#801, #819).
-            if MacConnection.hasPendingWithMac { let mac = mac; Task { await mac.retryPendingDeclares() } }
+            let stranded = strandedScans(latest)
+            // The Mac answered: any Remove it hasn't heard, then any stopped scan it hasn't acknowledged, goes now (#801, #819),
+            // then a scan stranded before the fix to the project asking for it (#825).
+            if MacConnection.hasPendingWithMac || !stranded.isEmpty {
+                let mac = mac
+                Task {
+                    if MacConnection.hasPendingWithMac { await mac.retryPendingDeclares() }
+                    for scan in stranded { await sendStranded(scan) }
+                }
+            }
         } catch let failure as CompanionError {
             guard !Task.isCancelled, reads.isCurrent(ticket), failure.code != "cancelled" else { return }
             // The list couldn't be read: the banner says why, whatever the reason.
@@ -438,7 +452,7 @@ import CounterpartKit
         models.reset()
         known = nil; heard = [:]
         projects = []; loaded = false; listedFromMac = false; error = nil; catalog = nil; printerProblem = nil; link = .checking; events = nil; spools = [:]; macCapabilities = []; mcpUpdates = [:]; mcpWaits.forget(); attemptedMcpMoves = [:]; mcpCopies = nil; mcpCopiesProblem = nil
-        stoppedScans = [:]; readyScans = []; sendFailures = [:]
+        stoppedScans = [:]; readyScans = []; sendFailures = [:]; recoveringScans = [:]
         restoredUnconfirmed = false
         // A pairing reset shows nothing from before it. The next load restores this Mac's own copy, if it has one, and
         // removes one that belongs to another Mac or to no pairing at all.
@@ -523,6 +537,40 @@ import CounterpartKit
                 sendFailures[id] = CompanionError.unreachable.message
                 await reload(id)
             }
+        }
+    }
+
+    // MARK: A stop stranded by the build before #795 (#825)
+
+    /// From the projects the Mac just listed: a draft's stranded run is recorded to declare (never uploaded or started);
+    /// the runs to send are returned. A refusal kept from an earlier send shows on its project while the scan is still
+    /// here and the project still asks for it.
+    private func strandedScans(_ listed: [Project]) -> [MacConnection.StrandedScan] {
+        #if DEBUG
+        if Fixtures.folder != nil { return [] }
+        #endif
+        for (id, message) in MacConnection.recoveryRefusals() {
+            guard let project = listed.first(where: { $0.id == id }), MacConnection.asksForScan(project), stoppedScans[id] != nil else {
+                MacConnection.setRecoveryRefusal(project: id, message: nil); continue
+            }
+            if sendFailures[id] == nil { sendFailures[id] = message }
+        }
+        let stranded = MacConnection.strandedScans(listed, kept: { [stoppedScans] id in
+            stoppedScans[id].map { MacConnection.KeptScan.stopped(run: $0.run, photos: $0.photos) }
+        }, requested: MacConnection.sendRequested)
+        for scan in stranded where scan.action == .declare { MacConnection.declareStranded(scan) }
+        return stranded.filter { $0.action == .send }
+    }
+
+    /// Sends one stranded scan through the same path as its Send (`sendStoppedScan`): the card says it's sending the photos
+    /// it kept, and a refusal shows in the Mac's words.
+    private func sendStranded(_ scan: MacConnection.StrandedScan) async {
+        guard !sending.contains(scan.project) else { return }
+        await sendInBackground(scan.project) { [self] in
+            recoveringScans[scan.project] = scan.photos
+            defer { recoveringScans[scan.project] = nil }
+            try await MacConnection.sendStranded(scan, send: { [mac] id, run in _ = try await mac.sendStoppedScan(id, run: run) })
+            await reload(scan.project)
         }
     }
 

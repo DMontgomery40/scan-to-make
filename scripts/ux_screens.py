@@ -306,6 +306,9 @@ def screens(ids: dict, record: str, offline_record: str, fixtures: Path, offline
     add('fx-home-empty', 'Home: no projects (starters)', 'empty Mac', 'fixture', fixture(set_='empty'), pages=3)
     add('fx-working', 'Project: working', 'pass running', 'fixture', fixture('-CounterpartScreen', 'working'), pages=2)
     add('fx-ask', 'Project: question', 'close-up asked', 'fixture', fixture('-CounterpartScreen', 'ask'), pages=2)
+    # A scan stopped before the #795 fix, sent by itself to the project asking for it (#825).
+    add('fx-ask-stranded-sending', 'Project: sending a stranded scan', 'sending 68 kept photos', 'fixture',
+        fixture('-CounterpartScreen', 'ask', '-CounterpartRecoveringScan', '68'), pages=1)
     add('fx-failed', 'Project: failed (Activity)', 'Blender closed', 'fixture', fixture('-CounterpartScreen', 'failed'), pages=2)
     for screen, state in [('print', 'AMS printer'), ('print-noams', 'one spool'), ('print-loaded', 'printer that doesn\'t report'),
                           ('print-pauses', 'layer pauses')]:
