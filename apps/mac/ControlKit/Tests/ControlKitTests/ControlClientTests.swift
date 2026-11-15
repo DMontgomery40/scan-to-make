@@ -223,4 +223,19 @@ final class ControlClientTests: XCTestCase {
         catch { XCTAssertEqual(error as? ControlClientError, .invalidResponse) }
         withExtendedLifetime(server) {}
     }
+
+    /// #827: a fresh Mac showed "The operation couldn’t be completed. (Counterpart.ControlRemoteError error 1.)".
+    /// Any refusal shown with `localizedDescription` reads as the companion's own sentence, or a plain one for its code.
+    func testARefusalReadsAsPlainWordsWhereverItIsShown() {
+        let worded: Error = ControlRemoteError(code: "unavailable", message: "Counterpart checks Fusion through your printer software. Add a printer in Settings › Printers, then check again.")
+        XCTAssertEqual(worded.localizedDescription, "Counterpart checks Fusion through your printer software. Add a printer in Settings › Printers, then check again.")
+        for code in ["unavailable", "conflict", "not-found", "internal", "invalid-request", "timed-out", "busy", "something-new"] {
+            let text = (ControlRemoteError(code: code, message: "") as Error).localizedDescription
+            XCTAssertFalse(text.contains("ControlRemoteError") || text.contains("couldn’t be completed") || text.isEmpty, "\(code): \(text)")
+        }
+        for failure in [ControlClientError.invalidEndpoint, .oversizedRequest, .unavailable, .timedOut, .invalidResponse, .cancelled] {
+            let text = (failure as Error).localizedDescription
+            XCTAssertFalse(text.contains("ControlClientError") || text.contains("couldn’t be completed"), "\(failure): \(text)")
+        }
+    }
 }

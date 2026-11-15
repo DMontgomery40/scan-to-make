@@ -241,7 +241,11 @@ struct AddPrinterSheet: View {
             ForEach(discovery?.found ?? []) { candidate in candidateRow(candidate) }
         } header: { Text("Found") } footer: {
             ForEach(options?.updates ?? []) { update in Text(update.message).font(.caption).foregroundStyle(.orange) }
-            if discovery?.network == "unavailable" {
+            if discovery?.network == "no-software" {
+                // #826: nothing is installed to listen, so nothing else is to blame.
+                Text("No printer software is installed yet. Install it first in Settings → Printers → Printer software, then look again.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else if discovery?.network == "unavailable" {
                 Text("Counterpart couldn’t listen for Bambu printers on this network (another app, such as Bambu Studio, may be using it). Enter the address instead.")
                     .font(.caption).foregroundStyle(.secondary)
             }

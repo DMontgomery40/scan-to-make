@@ -3,7 +3,8 @@ import { randomUUID } from 'node:crypto';
 import {ModelSizeStore} from './model-size.js';
 import {createModelSizeRunner,installedBambuProcess} from './model-size-runner.js';
 import {fusionCalls} from './fusion-calls.js';
-import {readFile} from 'node:fs/promises';
+import {mkdir,readFile} from 'node:fs/promises';
+import {existsSync} from 'node:fs';
 import {ScanProcessingStore,createScanCleanupRunner} from './scan-processing.js';
 import {dirname,isAbsolute,join} from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -17,7 +18,7 @@ import { computerName, discoverAddresses, localHostName, macDisplayName } from '
 import { RemoteAuthStore } from './remote-auth.js';
 import { createPrintHandoffServices, type PrintHandoffServices } from './print-handoff-http.js';
 import { remoteDestinationsFor } from './remote-mcp-http.js';
-import { PrinterMcpClient, PrinterSessionPool, readPrinterHandoffConfig, toolResultJson } from '@scan-to-make/printer-handoff';
+import { PrinterMcpClient, PrinterSessionPool, printerHandoffConfigSchema, readPrinterHandoffConfig, toolResultJson } from '@scan-to-make/printer-handoff';
 import { PrinterDirectory } from './printing/directory.js';
 import { CameraFrames } from './printing/camera.js';
 import { CompanionSettingsStore, autoUpdatesMcps } from './settings.js';
@@ -29,7 +30,7 @@ import { pruneLegacyDevices } from './devices/legacy.js';
 import { McpOverrides, McpUpdater, inFlight } from './printing/mcp-updates.js';
 import { McpAutoUpdater, companionBusy, contractCheck, settingUp } from './printing/mcp-auto-update.js';
 import { PrintGate } from './printing/print-gate.js';
-import { hostEnvironment } from './printing/mcp-install.js';
+import { appInstall, hostEnvironment } from './printing/mcp-install.js';
 import { IcloudEnrolment } from './icloud-enrolment.js';
 import {startLocalControl} from './local-control.js';
 import {diagnosticsBundle, directorySource} from './diagnostics.js';
@@ -53,6 +54,8 @@ import {mcpPackageName} from './printing/print-settings.js';
 import {loadPrinterCatalog,type PrinterCatalog} from './objects/printers.js';
 import {PrinterSetup,findMcpFolders} from './printing/setup.js';
 import {homedir} from 'node:os';
+import {ControlFailure} from './local-control-protocol.js';
+import {NO_PRINTER,NO_SOFTWARE_FOR_CODE_ENGINE,noSoftwareToCheck} from './no-printer.js';
 
 // Presence is explicit opt-in. Invalid/empty configuration must fail, never fall back.
 const directory = process.env.SCAN_TO_MAKE_REMOTE_AUTH_DIR;
@@ -77,15 +80,42 @@ if(scanTool!==undefined||scanBlender!==undefined){
   ai:{access:{kind:'none'},cli:fileURLToPath(new URL('./ai-tweak-cli.js',import.meta.url)),judgeTool:process.env.SCAN_TO_MAKE_AI_JUDGE_TOOL??join(dirname(scanTool),'../ai-tweak-judge')}}))});
 }
 const handoffConfigPath=process.env.SCAN_TO_MAKE_PRINTER_HANDOFF_CONFIG||undefined;
-const handoffDirectory=process.env.SCAN_TO_MAKE_PRINTER_HANDOFF_DIR||undefined;
-if((handoffConfigPath===undefined)!==(handoffDirectory===undefined))throw new Error('Printer handoff requires both its config path and bundle directory');
-if(handoffConfigPath!==undefined&&(!remoteAuth||!isAbsolute(handoffConfigPath)||!isAbsolute(handoffDirectory!)))throw new Error('Printer handoff requires authentication and absolute config and directory paths');
-const handoffConfig=handoffConfigPath===undefined?undefined:await readPrinterHandoffConfig(handoffConfigPath);
+const handoffDirectoryEnv=process.env.SCAN_TO_MAKE_PRINTER_HANDOFF_DIR||undefined;
+if((handoffConfigPath===undefined)!==(handoffDirectoryEnv===undefined))throw new Error('Printer handoff requires both its config path and bundle directory');
+if(handoffConfigPath!==undefined&&(!remoteAuth||!isAbsolute(handoffConfigPath)||!isAbsolute(handoffDirectoryEnv!)))throw new Error('Printer handoff requires authentication and absolute config and directory paths');
+// #834: a fresh Mac has no printer handoff config (nothing there writes one). The companion builds the same placeholder
+// the Linux host writes to a file (tools/linux-host default_printer_config): the app's own copy of bambu-printer-mcp,
+// never listed as a printer. Printers added in Settings → Printers then join the catalog live, with no restart.
+const builtIn=handoffConfigPath===undefined&&remoteAuth?(()=>{
+  const entry=appInstall('bambu-printer-mcp',hostEnvironment(dirname(remoteAuth.directory))).entry!;
+  return {entry,directory:join(dirname(remoteAuth.directory),'printer-handoff'),
+    config:printerHandoffConfigSchema.parse({backend:'bambu-printer-mcp',process:{command:process.execPath,args:[entry]}})};
+})():undefined;
+if(builtIn)await mkdir(builtIn.directory,{recursive:true,mode:0o700});
+const handoffDirectory=handoffDirectoryEnv??builtIn?.directory;
+const handoffConfig=handoffConfigPath===undefined?builtIn?.config:await readPrinterHandoffConfig(handoffConfigPath);
+const placeholderEntryPoint=process.env.SCAN_TO_MAKE_DEFAULT_PRINTER_ENTRY??builtIn?.entry;
 let mcpUpdates:McpUpdater|undefined;
 let blenderAddon:BlenderAddonRepair|undefined;
-// PRD §8.10: every process started from the Mac's own profile runs the version an Update installed.
-const runningHandoff=()=>handoffConfig&&mcpUpdates?mcpUpdates.effective('current',handoffConfig):handoffConfig;
-const printerCheck=handoffConfig===undefined?undefined:createPrinterCheck(()=>runningHandoff()!);
+/**
+ * PRD §8.10: every process started from the Mac's own profile runs the version an Update installed. While `current` is
+ * only the placeholder (#834), design passes, the code engine, Fusion, the Blender check and STL sizes run through the
+ * listed default printer's MCP; with no printer listed, through Counterpart's own copy (the placeholder) when it is
+ * installed, since none of them needs a printer; with neither, there is none (they say to download printer software).
+ * Printing needs a listed printer whatever this returns (ObjectService.printerListed).
+ */
+const runningHandoff=():import('@scan-to-make/printer-handoff').PrinterHandoffConfig|undefined=>{
+  if(!handoffConfig)return undefined;
+  const catalog=printerCatalog;
+  if(placeholderEntryPoint!==undefined&&(!catalog||catalog.placeholder)){
+    const id=catalog?.destinations.length?catalog.defaultDestinationId:undefined;
+    const config=id===undefined?undefined:catalog!.resolve(id);
+    if(config)return mcpUpdates?mcpUpdates.effective(id!,config):config;
+    if(!existsSync(placeholderEntryPoint))return undefined;
+  }
+  return mcpUpdates?mcpUpdates.effective('current',handoffConfig):handoffConfig;
+};
+const printerCheck=handoffConfig===undefined?undefined:createPrinterCheck(()=>runningHandoff()??handoffConfig);
 // PRD §8.3: one long-lived MCP session per printer destination, shared by every call to it.
 const printerPool=new PrinterSessionPool();
 let printerDirectory:PrinterDirectory|undefined;
@@ -94,6 +124,13 @@ const printHandoff=handoffConfig===undefined?undefined:createPrintHandoffService
 // PRD §8.10: a print and an update of its printer's MCP never overlap (the phone's handoff route prints on `current`).
 const printGate=new PrintGate();
 if(printHandoff)printHandoff.admit=()=>printGate.hold('current');
+// #827: with no printer listed, the phone's handoff route and `/v1/mcp` say so instead of reaching the placeholder MCP
+// (the same live check ObjectService's print and estimate use).
+// Review R4: read from the printer catalog (reloaded in place), not from ObjectService, which a companion without
+// capture doesn't have.
+const printerListed=()=>printerCatalog?printerCatalog.destinations.length>0:objects?.printerListed()??true;
+const noPrinterListed=()=>printerListed()?undefined:NO_PRINTER;
+if(printHandoff)printHandoff.refuse=noPrinterListed;
 // docs/design/remote-mcp.md: `/v1/mcp` reaches every configured destination through its own shared session and relay.
 // It reads the live destination map below (Add, Remove and Complete Settings change it in place).
 if(printHandoff)printHandoff.remoteRelays=()=>[...(printerDestinations?.values()??[])].map(services=>services.relay);
@@ -123,8 +160,10 @@ const eventLog=remoteAuth?await new EventLog(join(dataRoot,'events.ndjson'),{con
 const runtimeSettings=remoteAuth&&eventLog?new RuntimeSettings({modelAccess,emit:async draft=>{await eventLog.append(draft);}}):undefined;
 // Settings → the code design engine (PRD §8.9): cad_status and cad_setup on the printer MCP as it runs. Set Up takes
 // the same turn as a code pass, so it never starts while one runs.
-const cadSettings=handoffConfig&&eventLog?new CadSettings({calls:cadCalls(()=>runningHandoff()!),emit:async draft=>{await eventLog.append(draft);},
-  lock:waitMs=>acquireBlenderLock(CODE_LOCK_PATH,{signal:AbortSignal.timeout(waitMs)})}):undefined;
+// #827: with no printer yet the row is there and says to add one (it comes with the printer MCP); nothing is started.
+const cadSettings=eventLog?new CadSettings({calls:cadCalls(()=>runningHandoff()!),emit:async draft=>{await eventLog.append(draft);},
+  lock:waitMs=>acquireBlenderLock(CODE_LOCK_PATH,{signal:AbortSignal.timeout(waitMs)}),
+  unavailable:()=>runningHandoff()===undefined?NO_SOFTWARE_FOR_CODE_ENGINE:undefined}):undefined;
 const liveActivityTokens=remoteAuth?new LiveActivityTokenStore(join(dataRoot,'live-activity-tokens.json')):undefined;
 const presence=remoteAuth?new DevicePresence(join(remoteAuth.directory,'device-presence.json')):undefined;
 // Audit M4: legacy device rows (paired before stable identity) unused for 14 days are removed; checked at start and every 6 h.
@@ -204,7 +243,7 @@ const printerSetup=mcpUpdates?new PrinterSetup({env:printerEnv,gate:printGate,co
 if(handoffConfig&&printHandoff){
   const services=printHandoff;
   printerCatalog=await loadPrinterCatalog(handoffConfig,{profilesPath:printerProfiles,setupCachePath:printerSetupCache,
-    placeholderEntryPoint:process.env.SCAN_TO_MAKE_DEFAULT_PRINTER_ENTRY});
+    placeholderEntryPoint});
   const catalog=printerCatalog;
   // `current` is the Mac app's own config and keeps the phone handoff route's services.
   printerDestinations=new Map(catalog.destinations.map(destination=>{
@@ -221,10 +260,13 @@ if(handoffConfig&&printHandoff){
   // missing-settings notes follow the installed MCPs' own fields from the first minute, not from the first Add printer….
   setTimeout(()=>{void printerSetup?.mcps().catch(()=>undefined);},5000).unref();
 }
-if(handoffConfig&&printHandoff&&captureDirectory){
+// #827: projects, settings and the AI rows work on a computer with no printer yet (a fresh Mac has no printer handoff
+// config). Only printing and the passes that run through a printer's MCP need one; they say "Add a printer" until then.
+const stlSize=(path:string)=>{const running=runningHandoff();return running?printerStlSize(running,path):Promise.resolve(undefined);};
+if(captureDirectory){
   const objectStore=new ObjectStore(join(captureDirectory,'objects'));
   // Earlier designs and prints (#616). Never gates serving projects: a project it can't migrate is logged and stays as it was.
-  const versionsReport=await objectStore.migrateVersions({eventsPath: join(dataRoot,'events.ndjson'), stlInfo: path=>printerStlSize(runningHandoff()!,path)})
+  const versionsReport=await objectStore.migrateVersions({eventsPath: join(dataRoot,'events.ndjson'), stlInfo: stlSize})
     .catch((error:unknown)=>({migrated:[],skipped:[],failed:[{id:'*',reason:String(error)}]}));
   for(const row of versionsReport.skipped)console.warn(`designs: project ${row.id} not migrated yet: ${row.reason}`);
   for(const row of versionsReport.failed)console.warn(`designs: project ${row.id} not migrated (tried again next start): ${row.reason}`);
@@ -232,12 +274,15 @@ if(handoffConfig&&printHandoff&&captureDirectory){
   objectStoreForEvents=objectStore;
   // Dispatched prints keep printing: ObjectService.resume() picks their monitors back up.
   await objectStore.recoverInterrupted({keepPrinting:true});
-  const catalog=printerCatalog!, destinations=printerDestinations!;
-  objects=new ObjectService({store:objectStore,runTouchup:input=>{if(!input.worker)throw Error('AI settings are unavailable. Open AI Settings on your Mac and retry.');return runTouchup(input);},modelAccess,requireModelAccess:true,claudePath:claudePath??'',handoff:handoffConfig,runningHandoff:()=>runningHandoff()!,printerCatalog:catalog,printers:printerDirectory,
-    stlInfo:path=>printerStlSize(runningHandoff()!,path),
+  const catalog=printerCatalog, destinations=printerDestinations;
+  objects=new ObjectService({store:objectStore,runTouchup:input=>{if(!input.worker)throw Error('AI settings are unavailable. Open AI Settings on your Mac and retry.');return runTouchup(input);},modelAccess,requireModelAccess:true,claudePath:claudePath??'',
+    // No `handoff` fallback: with only the placeholder there is no MCP to run a pass through (#834).
+    runningHandoff:()=>runningHandoff(),
+    ...(catalog?{printerCatalog:catalog}:{}),...(printerDirectory?{printers:printerDirectory}:{}),
+    stlInfo:stlSize,
     // A Mac rebuilds a phone's Object Capture photos with Apple's PhotogrammetrySession and keeps a scan as a model without a touch-up.
     ...(process.platform==='darwin'?{scanToStl:macScanToStl(),objectCaptureRebuild:!!findMacReconstruct(),...(findMacReconstruct()?{drawPicture:macDrawPicture(findMacReconstruct()!)}:{})}:{}),
-    print:{services:printHandoff,destinations},
+    ...(printHandoff&&destinations?{print:{services:printHandoff,destinations}}:{}),
     settings:companionSettings,runtimeSettings,...(cadSettings?{cadSettings}:{}),camera:new CameraFrames(),printGate,
     passTimings:new PassTimings(join(dataRoot,'pass-timings.json')),
     titleFor:async request=>modelAccess?generateTitle(request,'',{worker:modelAccess.projectWorker()}):undefined,
@@ -245,14 +290,16 @@ if(handoffConfig&&printHandoff&&captureDirectory){
     ...(eventLog?{events:{emit:async draft=>{await eventLog.append(draft);}}}:{})});
   await companionSettings.load();
   // A project printing there counts too.
-  const service=objects, directory=printerDirectory!;
-  printerBusy=async id=>await service.printerBusy(id)||await directory.printing(id);
+  const service=objects, directory=printerDirectory;
+  printerBusy=async id=>await service.printerBusy(id)||(directory?await directory.printing(id):false);
   await mcpUpdates!.applyOverrides();
   // The printer MCP checks and replaces the add-on (blender_mcp_setup); the companion keeps the gate and the lock.
   blenderAddon=new BlenderAddonRepair({gate:printGate,
     lock:()=>acquireBlenderLock(undefined,{signal:AbortSignal.timeout(10_000)}),
     setup:async update=>{
-      const config=runningHandoff()!, client=new PrinterMcpClient(config);
+      const config=runningHandoff();
+      if(!config)throw new Error(noSoftwareToCheck('Blender'));
+      const client=new PrinterMcpClient(config);
       const signal=AbortSignal.timeout(update?180_000:90_000);
       try{
         await client.connect(signal);
@@ -265,7 +312,11 @@ if(handoffConfig&&printHandoff&&captureDirectory){
   await objects.resume();
 }
 // fusion_mcp_setup and fusion_mcp_status on the printer MCP as it runs (with its Update override); the Mac renders the answers.
-const {fusionSetup,fusionStatus}=handoffConfig===undefined?{fusionSetup:undefined,fusionStatus:undefined}:fusionCalls(()=>runningHandoff()!);
+// #827: with no printer yet, Fusion's row says to add one: the printer MCP is what finds and sets up Fusion.
+const noFusion=async():Promise<never>=>{throw new ControlFailure('unavailable',noSoftwareToCheck('Fusion'));};
+const fusion=fusionCalls(()=>runningHandoff()!);
+const {fusionSetup,fusionStatus}=remoteAuth?{fusionSetup:(install:boolean)=>runningHandoff()?fusion.fusionSetup(install):noFusion(),
+  fusionStatus:()=>runningHandoff()?fusion.fusionStatus():noFusion()}:{fusionSetup:undefined,fusionStatus:undefined};
 // The objects setup applies saved MCP overrides itself; otherwise apply them here, so every session (the phone's and
 // `/v1/mcp`'s) starts the version an Update chose.
 if(mcpUpdates){if(!objects)await mcpUpdates.applyOverrides();mcpUpdates.start();}
@@ -326,6 +377,7 @@ const server = await startCompanionServer({
     bundleRoot: handoffDirectory!,
     // The gate is held for the destination whose session actually serves the call (a duplicate's winner, as above).
     admit: (id: string) => printGate.hold(printerCatalog?.canonical(id) ?? id),
+    refuse: noPrinterListed,
     // Each id is served by its live winner, read on every request like the gate's key above.
     destinations: () => remoteDestinationsFor(printerDestinations ?? new Map(), id => printerCatalog?.canonical(id), printHandoff),
   }} : {}),
@@ -348,7 +400,7 @@ try {
   if (remoteAuth) control = await startLocalControl({
     // The auth directory is private even when its state/volume parent is not.
     path:process.env.SCAN_TO_MAKE_CONTROL_SOCKET ?? join(remoteAuth.directory,'control.sock'),
-    dispatch:createControlDispatcher({auth:remoteAuth,modelAccess,runtimeSettings,printerCheck,companionVersion:await companionVersion(),...(displayName?{name:displayName}:{}),capture,
+    dispatch:createControlDispatcher({auth:remoteAuth,modelAccess,runtimeSettings,printerCheck,printerListed,companionVersion:await companionVersion(),...(displayName?{name:displayName}:{}),capture,
       captureDirectory:captureDirectory ? join(captureDirectory,'captures') : undefined,printHandoff,
       ...(objects ? {objects} : {}),
       ...(eventLog ? {events: eventLog} : {}),

@@ -1085,7 +1085,12 @@ function AddPrinter({
           }>("printers.discover");
           setFound(r.found);
           setOptions(r.options);
-          if (r.network === "unavailable")
+          // #826: nothing is installed to listen, so nothing else is to blame.
+          if (r.network === "no-software")
+            setError(
+              "No printer software is installed yet. Install it first under Printer software in Settings, then look again.",
+            );
+          else if (r.network === "unavailable")
             setError(
               "Network discovery is unavailable. You can enter the printer address below.",
             );

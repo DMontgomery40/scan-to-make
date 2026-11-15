@@ -212,3 +212,35 @@ final class DiagnosticsTests: XCTestCase {
         XCTAssertFalse(files.keys.contains { $0.contains("/companion/") })
     }
 }
+
+/// #827: the three states a fresh Mac can be in, each saying only what's missing, with its next step.
+final class SetupNeedsTests: XCTestCase {
+    func testEachStateSaysOnlyWhatIsMissing() {
+        let none = SetupNeeds.lines(printers: 0, aiChosen: false)
+        XCTAssertEqual(none.map(\.place), [.printers, .ai])
+        XCTAssertEqual(none.first?.text, "In Settings › Printers, add your printer. Counterpart installs the printer software it needs.")
+        XCTAssertEqual(none.first?.action, "Add a Printer…")
+        // A printer and no AI is the beta's main path: printing an existing file needs no AI, so nothing says it does.
+        let printerOnly = SetupNeeds.lines(printers: 1, aiChosen: false)
+        XCTAssertEqual(printerOnly.map(\.place), [.ai])
+        XCTAssertTrue(printerOnly[0].text.contains("Printing published models needs none of this."), printerOnly[0].text)
+        XCTAssertEqual(SetupNeeds.lines(printers: 0, aiChosen: true).map(\.place), [.printers])
+        XCTAssertEqual(SetupNeeds.lines(printers: 2, aiChosen: true), [])
+        // Not known yet (the companion hasn't answered): nothing is claimed missing.
+        XCTAssertEqual(SetupNeeds.lines(printers: nil, aiChosen: nil), [])
+        for line in none + printerOnly { XCTAssertFalse(line.text.contains("Claude Code"), line.text) }
+    }
+
+    /// Settings → AI with no printer: Fusion's row says why in plain words, never "ControlRemoteError error 1".
+    func testFusionWithNoPrinterSaysSoPlainly() {
+        let refusal = ControlRemoteError(code: "unavailable", message: "Counterpart checks Fusion through your printer software. Add a printer in Settings › Printers, then check again.")
+        let (state, words) = FusionSetup.Row.afterCheck(failed: refusal)
+        XCTAssertEqual(state, .unavailable)
+        XCTAssertEqual(words, refusal.message)
+        let (other, plain) = FusionSetup.Row.afterCheck(failed: ControlRemoteError(code: "unavailable", message: ""))
+        XCTAssertEqual(other, .unavailable)
+        XCTAssertFalse(plain.contains("ControlRemoteError"), plain)
+        XCTAssertEqual(FusionSetup.Row.afterCheck(failed: FusionSetup.Failure.busy).0, .unchecked)
+        XCTAssertEqual(SetupNeeds.cleanupGuide.absoluteString, "https://counterpart.dtmont.com/beta.html#cleanup")
+    }
+}

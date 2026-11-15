@@ -181,7 +181,41 @@ public struct PreparedDoor: Decodable, Sendable {
 }
 public struct ControlRemoteError: Error, Decodable, Sendable, Equatable {
     public let code: String, message: String
+    public init(code: String, message: String) { self.code = code; self.message = message }
+}
+/// #827: a refusal shown anywhere with `localizedDescription` reads as the companion's own sentence, or a plain one for
+/// its code, never "The operation couldn’t be completed. (Counterpart.ControlRemoteError error 1.)".
+extension ControlRemoteError: LocalizedError {
+    public var errorDescription: String? {
+        let said = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        if code != "internal", !said.isEmpty, !Self.legacyDefaults.contains(said) { return said }
+        switch code {
+        case "conflict": return "That can’t be done right now."
+        case "not-found": return "This one is no longer on your Mac."
+        case "unavailable": return "That isn’t available on your Mac right now."
+        case "invalid-request", "unsupported-version": return "Update Counterpart on this Mac, then try again."
+        case "timed-out": return "Your Mac took too long to answer. It may still finish; this page updates when it does."
+        case "busy": return "Your Mac is answering too many requests at once. Try again in a moment."
+        default: return "Something went wrong on your Mac."
+        }
+    }
+    /// The words a companion from before Nov 6 sent with each code: written for developers, never shown.
+    static let legacyDefaults: Set<String> = [
+        "Invalid local control request", "Unsupported local control version", "The requested item is no longer available",
+        "The requested operation conflicts with current state", "The requested capability is unavailable", "The local control operation failed",
+    ]
 }
 public enum ControlClientError: Error, Sendable, Equatable {
     case invalidEndpoint, oversizedRequest, unavailable, timedOut, invalidResponse, cancelled
+}
+extension ControlClientError: LocalizedError {
+    public var errorDescription: String? {
+        switch self {
+        case .unavailable, .invalidEndpoint: return "Counterpart couldn’t start in the background."
+        case .timedOut: return "That's taking longer than usual. Try again in a moment."
+        case .cancelled: return "That was stopped before it finished."
+        case .invalidResponse: return "Your Mac didn’t answer. Try again in a moment."
+        case .oversizedRequest: return "Update Counterpart on this Mac, then try again."
+        }
+    }
 }

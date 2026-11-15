@@ -289,6 +289,12 @@ export interface PrinterSetupDeps {
   client?(config: PrinterHandoffConfig): ProbeClient;
 }
 
+/**
+ * What `printers.discover` says about listening on the network: `complete`, `unavailable` (printer software is
+ * installed but none could listen), or `no-software` (none is installed, so nothing listened: install it first, #826).
+ */
+export type DiscoveryNetwork = 'complete' | 'unavailable' | 'no-software';
+
 /** `counterpart_discover_printers` (docs/protocols/mcp-contract.md): printers an MCP heard on the network itself. */
 const DiscoverySchema = z.object({
   contract: z.literal('counterpart/1'),
@@ -585,8 +591,8 @@ export class PrinterSetup {
    * (`counterpart_discover_printers`), asked one MCP at a time so two never listen on the same port. A printer both
    * MCPs find is listed once, with the MCP listed first for its kind (PRD §8.2). About 4 s per MCP.
    */
-  discover(): Promise<{found: SetupCandidate[]; network: 'complete' | 'unavailable'; options: SetupOptions}> { return this.#tracked(() => this.#discover()); }
-  async #discover(): Promise<{found: SetupCandidate[]; network: 'complete' | 'unavailable'; options: SetupOptions}> {
+  discover(): Promise<{found: SetupCandidate[]; network: DiscoveryNetwork; options: SetupOptions}> { return this.#tracked(() => this.#discover()); }
+  async #discover(): Promise<{found: SetupCandidate[]; network: DiscoveryNetwork; options: SetupOptions}> {
     // All of it inside the request's 15 s: what doesn't fit is left out, never the whole answer.
     const until = Date.now() + (this.deps.discoverBudgetMs ?? 13_000), remainingMs = () => Math.max(0, until - Date.now());
     const [folders, saved, setups] = await Promise.all([
@@ -600,7 +606,8 @@ export class PrinterSetup {
     const configured = folders.filter(folder => folder.hasEnv && !runs.some(path => path === folder.dir || path.startsWith(folder.dir + sep)));
     const reading = Promise.all(configured.map(folder => this.#folder(folder.dir, {budgetMs: remainingMs()}).catch(() => undefined)));
     const announced: {package: PrinterBackend; printer: DiscoveredPrinter}[] = [];
-    let network: 'complete' | 'unavailable' = 'unavailable';
+    // No printer software on this computer: nothing could listen, and the clients say to install it first (#826).
+    let network: DiscoveryNetwork = setups.some(item => item.installed) ? 'unavailable' : 'no-software';
     // Each MCP gets an equal share of the time left, so a stalled first one can't take the second's.
     const listening = setups.filter(item => item.entry && item.setup);
     for (const [i, item] of listening.entries()) {

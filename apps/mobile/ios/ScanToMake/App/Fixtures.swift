@@ -719,6 +719,22 @@ enum Fixtures {
         // whose picture boxes the whole bottle, and a scan of 130 frames. The pictures are `ask-bottle.jpg` and
         // `bottle-capture/NNNN.heic` in the assets folder, never in Git. `COUNTERPART_ASK_NO_PHOTO` drops the ask's picture.
         if set == "ask-bottle" { shown = shown.map { $0["id"] as? String == ids.plush ? bottle(ago) : $0 } }
+        // `-CounterpartFixtureSet ask-stranded` (#825): the plush is David's DAD project, started from its words alone while
+        // its 68-photo scan stopped on the phone: no scan, no model, and a question asking for photos.
+        if set == "ask-stranded" {
+            shown = shown.map { project in
+                guard project["id"] as? String == ids.plush else { return project }
+                var stranded = project
+                for key in ["scan", "capture", "question"] { stranded[key] = nil }
+                stranded["title"] = "DAD desk replica"
+                stranded["instructions"] = "A replica of this DAD desk thing"
+                let question = "No photo or scan came through. Can you photograph the DAD desk thing from the front, one side and the top?"
+                stranded["status"] = ["phase": "needs-you", "text": "Needs you · \(question)", "detail": question, "symbol": "hand.raised", "tint": "orange"]
+                stranded["ask"] = ["id": "5105ec68-0678-4676-a896-615f17a7ce16", "question": question, "kind": "closeup",
+                                   "answers": ["camera", "photos", "best-guess", "text"], "status": "open", "askedAtMs": ago(12)]
+                return stranded
+            }
+        }
         // `-CounterpartFixtureSet stale-printer` / `no-printers` (review F3): the mic mount, never sliced, with a printer
         // chosen that's no longer on the Mac, or with no printers set up at all.
         if ["stale-printer", "no-printers", "printers-slow", "printers-refused"].contains(set) {
@@ -998,7 +1014,7 @@ struct FixtureTransport: HTTPTransport {
         let objects = Fixtures.objects()
         func object(_ id: String) -> [String: Any]? { objects.first { $0["id"] as? String == id } }
         let parts = path.split(separator: "/").map(String.init)
-        if path == "/healthz" { return json(["status": "ok", "protocolVersion": "0.1.0", "capabilities": ["genericConfirmations": Fixtures.macAnswers, "fitFields": true, "mcpUpdates": true, "mcpCopies": ["mcp-profile-copies.json", "mcp-printer-software.json"].contains { FileManager.default.fileExists(atPath: folder.appending(path: $0).path) }, "projectSettings": true, "projectRename": true, "makeFromScan": true, "projectPreferences": true, "printCopies": true, "printLayerPauses": true, "printerChoices": true, "printerAdd": FileManager.default.fileExists(atPath: folder.appending(path: "printer-setup-phone.json").path)]]) }
+        if path == "/healthz" { return json(["status": "ok", "protocolVersion": "0.1.0", "capabilities": ["genericConfirmations": Fixtures.macAnswers, "fitFields": true, "mcpUpdates": true, "mcpCopies": ["mcp-profile-copies.json", "mcp-printer-software.json"].contains { FileManager.default.fileExists(atPath: folder.appending(path: $0).path) }, "projectSettings": true, "projectRename": true, "makeFromScan": true, "projectPreferences": true, "printCopies": true, "printLayerPauses": true, "printerChoices": true, "objectCaptureImages": true, "captureForget": true, "captureOnAsk": true, "printerAdd": FileManager.default.fileExists(atPath: folder.appending(path: "printer-setup-phone.json").path)]]) }
         let completingMove = FileManager.default.fileExists(atPath: folder.appending(path: "mcp-profile-copies-moved.json").path)
         if path == "/v1/printers/mcps" {
             // #775: a whole `printers.mcps` answer (both packages), as the companion writes `mcp-printer-software-*.json`.

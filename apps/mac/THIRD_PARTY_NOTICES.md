@@ -16,7 +16,7 @@ and its bundled third-party notices. Node's complete upstream licence includes i
 
 | Component | Version | Licence | Source |
 |---|---|---|---|
-| Node.js | 24.22.2 | MIT AND Apache-2.0 AND BSD-2-Clause AND BSD-3-Clause AND ISC AND Zlib AND Unicode-3.0 AND ICU | https://github.com/nodejs/node/tree/v24.22.2 |
+| Node.js | 24.22.2 | MIT AND Apache-2.0 AND BSD-2-Clause AND BSD-3-Clause AND ISC AND Zlib AND Unicode-3.0 AND ICU AND Artistic-2.0 AND BlueOak-1.0.0 AND CC0-1.0 AND CC-BY-3.0 | https://github.com/nodejs/node/tree/v24.22.2 |
 | CPython standalone | 3.12.16+20261026 | Python-2.0 AND CNRI-Python AND bzip2-1.0.6 AND MIT AND X11 AND BSD-2-Clause AND Apache-2.0 AND 0BSD AND Zlib AND TCL AND BSD-3-Clause AND LicenseRef-SQLite-Public-Domain | https://github.com/astral-sh/python-build-standalone/tree/20261026 |
 | Sparkle | 2.9.3 | MIT AND BSD-2-Clause AND Zlib | https://github.com/sparkle-project/Sparkle/tree/2.9.3 |
 | Pillow | 13.0.0 | MIT-CMU AND MIT AND BSD-2-Clause AND BSD-3-Clause AND bzip2-1.0.6 AND FTL AND IJG AND Libpng AND libpng-2.0 AND libtiff AND 0BSD AND Zlib AND TCL AND X11 | https://github.com/python-pillow/Pillow/tree/13.0.0 |
@@ -24,9 +24,9 @@ and its bundled third-party notices. Node's complete upstream licence includes i
 
 ## Node.js
 
-Unmodified standalone companion runtime; npm is used only to build and removed before packaging.
+Unmodified standalone companion runtime. Its npm (the same release's lib/node_modules/npm, unmodified, behind a small launcher in bin/npm) installs and updates printer software; npx and corepack are removed before packaging.
 
-Composite licence for the runtime and embedded libraries: Node/Acorn/amaro/merve/c-ares/libuv/llhttp/undici/nghttp2/ngtcp2/nghttp3/brotli (MIT); swc/LIEF/OpenSSL/simdjson (Apache-2.0); V8/ittapi/ICU dictionaries/zstd (BSD-3-Clause); HdrHistogram selects BSD-2-Clause; internal rimraf/minimatch (ISC); zlib (Zlib); ICU (Unicode-3.0 and retained ICU/third-party data terms). simdutf and ada select MIT. ICU Autoconf scripts referenced by the full upstream notice are build inputs, not present in the runtime archive; no GPL exception is requested.
+Composite licence for the runtime and embedded libraries: Node/Acorn/amaro/merve/c-ares/libuv/llhttp/undici/nghttp2/ngtcp2/nghttp3/brotli (MIT); swc/LIEF/OpenSSL/simdjson (Apache-2.0); V8/ittapi/ICU dictionaries/zstd (BSD-3-Clause); HdrHistogram selects BSD-2-Clause; internal rimraf/minimatch (ISC); zlib (Zlib); ICU (Unicode-3.0 and retained ICU/third-party data terms). npm 11.19.1 (Artistic-2.0, its notice in the upstream licence) and its bundled dependencies, each with its own licence file in place: ISC, MIT, BlueOak-1.0.0, Apache-2.0, BSD-2-Clause, BSD-3-Clause, CC0-1.0 (spdx-license-ids data) and CC-BY-3.0 (spdx-exceptions data). simdutf and ada select MIT. ICU Autoconf scripts referenced by the full upstream notice are build inputs, not present in the runtime archive; no GPL exception is requested.
 
 - [Licenses/Node.txt](Licenses/Node.txt) — [upstream](https://github.com/nodejs/node/blob/v24.22.2/LICENSE), SHA-256 `5888dbb9a1d2b18f2c3e6c5f6af1b39de658372b402a0577b002777f14c62ace`.
 
@@ -132,7 +132,7 @@ THIS SOFTWARE.
 
 ## Companion npm production dependencies
 
-Development dependencies, npm itself, pip and ensurepip are not shipped.
+Development dependencies, npx, corepack, pip and ensurepip are not shipped. npm ships unmodified inside Node.js (above).
 
 ### @hono/node-server 2.1.5
 

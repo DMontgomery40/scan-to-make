@@ -4,7 +4,7 @@
     {
       "name": "Node.js",
       "version": "24.22.2",
-      "licence": "MIT AND Apache-2.0 AND BSD-2-Clause AND BSD-3-Clause AND ISC AND Zlib AND Unicode-3.0 AND ICU",
+      "licence": "MIT AND Apache-2.0 AND BSD-2-Clause AND BSD-3-Clause AND ISC AND Zlib AND Unicode-3.0 AND ICU AND Artistic-2.0 AND BlueOak-1.0.0 AND CC0-1.0 AND CC-BY-3.0",
       "sourceUrl": "https://github.com/nodejs/node/tree/v24.22.2",
       "downloadUrl": "https://nodejs.org/dist/v24.22.2/node-v24.22.2-darwin-arm64.tar.gz",
       "sha256": "aa9549349e47dffaa42dcf95d6e06ade8c4bdafc980979883b88767670df385a",
@@ -15,8 +15,10 @@
           "sourceUrl": "https://github.com/nodejs/node/blob/v24.22.2/LICENSE"
         }
       ],
-      "role": "Unmodified standalone companion runtime; npm is used only to build and removed before packaging.",
-      "licenceDetails": "Composite licence for the runtime and embedded libraries: Node/Acorn/amaro/merve/c-ares/libuv/llhttp/undici/nghttp2/ngtcp2/nghttp3/brotli (MIT); swc/LIEF/OpenSSL/simdjson (Apache-2.0); V8/ittapi/ICU dictionaries/zstd (BSD-3-Clause); HdrHistogram selects BSD-2-Clause; internal rimraf/minimatch (ISC); zlib (Zlib); ICU (Unicode-3.0 and retained ICU/third-party data terms). simdutf and ada select MIT. ICU Autoconf scripts referenced by the full upstream notice are build inputs, not present in the runtime archive; no GPL exception is requested.",
+      "npmVersion": "11.19.1",
+      "npmTreeSha256": "1565a022ea1d9724e7985cdb64da154e8b7410a32482b9e23be233341cfa84ab",
+      "role": "Unmodified standalone companion runtime. Its npm (the same release's lib/node_modules/npm, unmodified, behind a small launcher in bin/npm) installs and updates printer software; npx and corepack are removed before packaging.",
+      "licenceDetails": "Composite licence for the runtime and embedded libraries: Node/Acorn/amaro/merve/c-ares/libuv/llhttp/undici/nghttp2/ngtcp2/nghttp3/brotli (MIT); swc/LIEF/OpenSSL/simdjson (Apache-2.0); V8/ittapi/ICU dictionaries/zstd (BSD-3-Clause); HdrHistogram selects BSD-2-Clause; internal rimraf/minimatch (ISC); zlib (Zlib); ICU (Unicode-3.0 and retained ICU/third-party data terms). npm 11.19.1 (Artistic-2.0, its notice in the upstream licence) and its bundled dependencies, each with its own licence file in place: ISC, MIT, BlueOak-1.0.0, Apache-2.0, BSD-2-Clause, BSD-3-Clause, CC0-1.0 (spdx-license-ids data) and CC-BY-3.0 (spdx-exceptions data). simdutf and ada select MIT. ICU Autoconf scripts referenced by the full upstream notice are build inputs, not present in the runtime archive; no GPL exception is requested.",
       "runtimeNotice": "Licenses/Node.txt",
       "runtimeNoticePath": "node/LICENSE"
     },

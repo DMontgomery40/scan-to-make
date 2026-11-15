@@ -1,4 +1,5 @@
 import {CadSetupRefused} from './cad-settings.js';
+import {NO_PRINTER} from './no-printer.js';
 import {lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile} from 'node:fs/promises';
 import {dirname, join, sep} from 'node:path';
 import {createHash} from 'node:crypto';
@@ -32,6 +33,8 @@ export interface ControlServices {
   /** The objects list the Mac app shows (spec §5.6), the same one the phone sees. */
   objects?: ObjectService;
   printerCheck?: ReturnType<typeof createPrinterCheck>;
+  /** Whether a printer is listed, from the printer catalog (review R4: also without objects). */
+  printerListed?: () => boolean;
   modelAccess?: ModelAccessService;
   runtimeSettings?: import('./runtime-settings.js').RuntimeSettings;
   auth: RemoteAuthStore;
@@ -168,6 +171,10 @@ export function createControlDispatcher(services: ControlServices) {
     try {
       switch (method) {
         case 'printer.check': {
+          // #827: with no printer listed there is only the placeholder MCP to ask; say what's missing instead.
+          // Review R4: from the printer catalog, so a companion without objects says it too.
+          const listed=services.printerListed?.()??services.objects?.printerListed()??true;
+          if(!listed)throw new ControlFailure('conflict',NO_PRINTER);
           if(!services.printerCheck)throw new ControlFailure('unavailable');
           return services.printerCheck.get(parameters[method].parse(raw).start);
         }

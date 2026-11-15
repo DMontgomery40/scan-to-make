@@ -155,6 +155,22 @@ test('printing with no model is refused', async () => {
   await assert.rejects(service.print(bare.id), InvalidStateError);
 });
 
+// #827: a Mac with no printer yet still lists and shows its projects; printing and estimates say what's missing.
+test('with no printer set up, projects list and show, and print and estimate say to add a printer', async () => {
+  const root = await tempDir('objects-noprinter-');
+  const store = new ObjectStore(join(root, 'objects'));
+  const service = new ObjectService({store, runTouchup: async () => { throw new Error('not used'); }, claudePath: ''});
+  const object = await store.create('A hook.');
+  await mkdir(join(store.dir(object.id), 'current'), {recursive: true});
+  await writeFile(join(store.dir(object.id), 'current', 'model.stl'), STL);
+  await store.update(object.id, o => ({...o, state: 'ready', current: {model: 'current/model.stl', renders: []}}));
+  assert.deepEqual((await service.list()).map(item => item.id), [object.id]);
+  assert.equal((await service.get(object.id)).id, object.id);
+  assert.deepEqual(service.printers(), {defaultDestinationId: undefined, destinations: []});
+  for (const call of [() => service.print(object.id), () => service.estimate(object.id)])
+    await assert.rejects(call(), error => error instanceof InvalidStateError && error.message === 'Add a printer in Settings › Printers first.');
+});
+
 test('chosen live filament sets slicing profile and AMS slot; a changed spool is refused', async () => {
   const tray = {slot:1, loaded:true, tray_color:'FEC600FF', tray_type:'PLA', tray_info_idx:'GFA00',
     display_name:'PLA Basic PLA #FEC600', spool_name:'Sunflower Yellow PLA Basic', label:'A2', resolved_profile_path:'/profiles/yellow-pla.json'};

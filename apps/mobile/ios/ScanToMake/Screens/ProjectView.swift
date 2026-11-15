@@ -676,6 +676,8 @@ struct ProjectView: View {
 
     @ViewBuilder private func stateCard(_ object: Project, _ words: ProjectWords) -> some View {
         switch words.phase {
+        // A scan stopped before the fix, sent by itself to the project asking for it (#825): said before the question.
+        case _ where store.recovering(object.id) != nil: workingCard(object, words)
         case .working, .sending: workingCard(object, words)
         // A printer question needs you too (an older Mac sends no status); it's answered in its sheet, not with photos.
         case .needsYou where object.printConfirmation != nil:
@@ -758,18 +760,21 @@ struct ProjectView: View {
             // While the Mac isn't answering, time left stays as it was when the phone last heard (the line above says when),
             // never counting down as if it were live.
             let work = WorkProgress(object, now: away ? (store.heard[object.id] ?? context.date) : context.date)
+            let recovering = store.recovering(object.id)
+            let sending = words.phase == .sending || recovering != nil
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
-                    Image(systemName: words.phase.symbol).foregroundStyle(.blue).symbolEffect(.pulse)
-                    Text(words.phase == .sending ? "Sending to your Mac" : "Your Mac is working on it").font(.headline)
+                    Image(systemName: sending ? ProjectPhase.sending.symbol : words.phase.symbol).foregroundStyle(.blue).symbolEffect(.pulse)
+                    Text(recovering.map(MacConnection.recoveringWords) ?? (sending ? "Sending to your Mac" : "Your Mac is working on it")).font(.headline)
+                        .accessibilityIdentifier(recovering != nil ? "stranded-scan-sending" : "working-title")
                     Spacer()
                     if let left = work.remainingSec, let about = Format.about(max(60, left)) {
                         Text(about).font(.subheadline.monospacedDigit()).foregroundStyle(.secondary)
                     }
                 }
-                if let fraction = words.phase == .sending ? store.sendProgress[object.id] : work.fraction { ProgressView(value: fraction).tint(.blue) }
+                if let fraction = sending ? store.sendProgress[object.id] : work.fraction { ProgressView(value: fraction).tint(.blue) }
                 else { ProgressView().progressViewStyle(.linear).tint(.blue) }
-                Text(words.phase == .sending ? "Keep the app open until your files are sent." : ProjectWords.putDown)
+                Text(sending ? "Keep the app open until your files are sent." : ProjectWords.putDown)
                     .font(.footnote).foregroundStyle(.secondary)
             }
             .padding(16)
@@ -799,7 +804,12 @@ struct ProjectView: View {
                 Text("Update Counterpart on this \(UIDevice.current.userInterfaceIdiom == .pad ? "iPad" : "iPhone") to answer this kind of question here.")
                     .font(.footnote).foregroundStyle(.secondary).accessibilityIdentifier("ask-update")
             }
-            if answerable { AskButtons(store: store, project: object, sizes: sizesForm(object), working: $askWorking, problem: $askProblem) }
+            // The photos it asks for may already be on this phone: a scan stopped before it was sent (#825). Sending it is a
+            // tap; so is taking it off. The way out, too, when the phone's own send of it was refused.
+            let kept = MacConnection.asksForScan(object) ? store.stoppedScans[object.id] : nil
+            if let kept { keptScanAnswer(object, kept) }
+            if answerable { AskButtons(store: store, project: object, sizes: sizesForm(object), keptScan: kept != nil && store.macCapabilities.contains("captureOnAsk"),
+                                       working: $askWorking, problem: $askProblem) }
             // The Mac takes a typed answer when it says so (KAN-214 #204, `answers` includes "text").
             if answerable, object.openAsk?.answers.contains("text") == true {
                 HStack(spacing: 8) {
@@ -816,6 +826,54 @@ struct ProjectView: View {
         }
         .padding(16)
         .glassEffect(.regular.tint(.orange.opacity(0.15)), in: .rect(cornerRadius: 24))
+    }
+
+    /// A stopped scan on this phone, on the card that asks for photos (#825): Send, or Remove. A Mac that can't take a scan
+    /// here yet says to update it; Remove still works.
+    private func keptScanAnswer(_ object: Project, _ stopped: MacConnection.StoppedScan) -> some View {
+        let device = UIDevice.current.userInterfaceIdiom == .pad ? "iPad" : "iPhone"
+        let takes = store.macCapabilities.contains("captureOnAsk")
+        return VStack(alignment: .leading, spacing: 10) {
+            Label("Your stopped scan's \(stopped.photos) photos are on this \(device).", systemImage: "photo.stack")
+                .font(.subheadline.weight(.semibold))
+                .accessibilityIdentifier("ask-kept-scan")
+            if !takes {
+                Text("Update Counterpart on your Mac to send them here.").font(.footnote).foregroundStyle(.secondary)
+            }
+            GlassEffectContainer(spacing: 8) {
+                // At accessibility sizes two side by side break their names letter by letter: they stack, full width.
+                let row = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(spacing: 8)) : AnyLayout(HStackLayout(spacing: 8))
+                row {
+                    if takes {
+                        Button {
+                            act {
+                                let next = try await store.mac.sendStoppedScan(object.id, run: stopped.run)
+                                MacConnection.setRecoveryRefusal(project: object.id, message: nil)
+                                return next
+                            }
+                        } label: {
+                            Label("Send Them", systemImage: "arrow.up.circle").frame(maxWidth: .infinity).frame(minHeight: 30)
+                        }
+                        .buttonStyle(.glassProminent)
+                        .accessibilityIdentifier("ask-kept-scan.send")
+                    }
+                    Button(role: .destructive) {
+                        act {
+                            try await store.mac.removeStoppedScan(object.id, run: stopped.run)
+                            MacConnection.setRecoveryRefusal(project: object.id, message: nil)
+                            store.sendFailures[object.id] = nil
+                            return nil
+                        }
+                    } label: {
+                        Label("Remove", systemImage: "trash").frame(maxWidth: takes && !typeSize.isAccessibilitySize ? nil : .infinity).frame(minHeight: 30)
+                    }
+                    .buttonStyle(.glass)
+                    .accessibilityIdentifier("ask-kept-scan.remove")
+                }
+                .controlSize(.large).font(.subheadline)
+                .disabled(working || away)
+            }
+        }
     }
 
     /// The size card's numbers as they stand now, for whichever button is pressed; nil when the open question isn't

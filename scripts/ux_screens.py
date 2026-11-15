@@ -306,6 +306,14 @@ def screens(ids: dict, record: str, offline_record: str, fixtures: Path, offline
     add('fx-home-empty', 'Home: no projects (starters)', 'empty Mac', 'fixture', fixture(set_='empty'), pages=3)
     add('fx-working', 'Project: working', 'pass running', 'fixture', fixture('-CounterpartScreen', 'working'), pages=2)
     add('fx-ask', 'Project: question', 'close-up asked', 'fixture', fixture('-CounterpartScreen', 'ask'), pages=2)
+    # A scan stopped before the #795 fix, sent by itself to the project asking for it (#825).
+    add('fx-ask-stranded-sending', 'Project: sending a stranded scan', 'sending 68 kept photos', 'fixture',
+        fixture('-CounterpartScreen', 'ask', '-CounterpartRecoveringScan', '68', set_='ask-stranded'), pages=1)
+    # The question asking for photos that a stopped scan on this phone can answer: Send or Remove (review of #831).
+    add('fx-ask-stranded', 'Project: question, stopped scan kept', '68 photos on this phone', 'fixture',
+        fixture('-CounterpartScreen', 'ask', set_='ask-stranded'), pages=2)
+    add('fx-ask-stranded-large', 'Project: question, stopped scan kept (largest text)', '68 photos, AX5', 'fixture',
+        fixture('-CounterpartScreen', 'ask', '-UIPreferredContentSizeCategoryName', 'UICTContentSizeCategoryAccessibilityXXXL', set_='ask-stranded'), pages=6)
     add('fx-failed', 'Project: failed (Activity)', 'Blender closed', 'fixture', fixture('-CounterpartScreen', 'failed'), pages=2)
     for screen, state in [('print', 'AMS printer'), ('print-noams', 'one spool'), ('print-loaded', 'printer that doesn\'t report'),
                           ('print-pauses', 'layer pauses')]:

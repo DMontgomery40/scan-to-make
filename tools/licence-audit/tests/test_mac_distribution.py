@@ -10,7 +10,7 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from audit import run_audit
 from inventory import detect_app_gpl_tool_imports
-from mac_distribution import EARCUT, MANIFEST, NOTICES, RECONSTRUCTION_HELPER, inventory_mac, render_notices, verify_payload
+from mac_distribution import EARCUT, MANIFEST, NOTICES, RECONSTRUCTION_HELPER, inventory_mac, npm_tree_sha256, render_notices, verify_payload
 
 REPO = Path(__file__).resolve().parents[3]
 
@@ -118,6 +118,122 @@ class MacDistributionTests(unittest.TestCase):
         self.add_helper(payload)
         with self.assertRaisesRegex(ValueError, 'package-manager'):
             verify_payload(self.root, payload)
+
+    def test_only_the_pinned_npm_ships_in_the_node_runtime(self):
+        # #826: npm installs printer software, so it stays; nothing else from the Node.js archive's package managers does.
+        payload = self.root / 'Payload'
+        for name in [Path(p).name for p in self.manifest['sourcePaths'] if p.startswith('tools/')]:
+            (payload / 'source/tools' / name).mkdir(parents=True)
+        (payload / 'python').mkdir()
+        self.add_helper(payload)
+        pinned = next(c for c in self.manifest['components'] if c['name'] == 'Node.js')['npmVersion']
+        npm = payload / 'node/lib/node_modules/npm'
+        npm.mkdir(parents=True)
+        (npm / 'package.json').write_text(json.dumps({'name': 'npm', 'version': pinned}))
+        (payload / 'node/bin').mkdir()
+        (payload / 'node/bin/npm').write_text('#!/bin/sh\n')
+        self.pin_npm_tree(npm)
+        verify = lambda: verify_payload(self.root, payload)
+        # The pinned npm passes the package-manager checks (the fixture has no wheels, so a later check may stop it).
+        try:
+            verify()
+        except (ValueError, OSError) as error:
+            self.assertNotIn('package-manager', str(error))
+        (npm / 'package.json').write_text(json.dumps({'name': 'npm', 'version': '10.0.0'}))
+        with self.assertRaisesRegex(ValueError, 'npm differs from the pinned'):
+            verify()
+        (npm / 'package.json').write_text(json.dumps({'name': 'npm', 'version': pinned}))
+        (payload / 'node/lib/node_modules/corepack').mkdir()
+        with self.assertRaisesRegex(ValueError, 'package-manager payload: node/lib/node_modules'):
+            verify()
+        (payload / 'node/lib/node_modules/corepack').rmdir()
+        (payload / 'node/bin/npx').write_text('')
+        with self.assertRaisesRegex(ValueError, 'package-manager payload: node/bin'):
+            verify()
+
+    def pin_npm_tree(self, npm):
+        next(c for c in self.manifest['components'] if c['name'] == 'Node.js')['npmTreeSha256'] = npm_tree_sha256(npm)
+        self.write_manifest()
+
+    def npm_payload(self):
+        payload = self.root / 'Payload'
+        for name in [Path(p).name for p in self.manifest['sourcePaths'] if p.startswith('tools/')]:
+            (payload / 'source/tools' / name).mkdir(parents=True)
+        (payload / 'python').mkdir()
+        self.add_helper(payload)
+        pinned = next(c for c in self.manifest['components'] if c['name'] == 'Node.js')['npmVersion']
+        npm = payload / 'node/lib/node_modules/npm'
+        (npm / 'bin').mkdir(parents=True)
+        (npm / 'package.json').write_text(json.dumps({'name': 'npm', 'version': pinned}))
+        (npm / 'bin/npm-cli.js').write_text("require('../lib/cli.js')(process)\n")
+        (payload / 'node/bin').mkdir()
+        (payload / 'node/bin/npm').write_text('#!/bin/sh\n')
+        self.pin_npm_tree(npm)
+        return payload, npm
+
+    def assert_package_manager_checks_pass(self, payload):
+        try:
+            verify_payload(self.root, payload)
+        except (ValueError, OSError) as error:
+            self.assertNotIn('package-manager', str(error))
+            self.assertNotIn('symlink', str(error))
+
+    def test_npm_is_pinned_by_its_whole_tree_not_only_its_version(self):
+        # Review F7: anything added to, removed from or changed in npm's tree fails, whatever its package.json says.
+        payload, npm = self.npm_payload()
+        self.assert_package_manager_checks_pass(payload)
+        (npm / 'lib').mkdir()
+        (npm / 'lib/extra.js').write_text('process.exit(0)\n')
+        with self.assertRaisesRegex(ValueError, 'npm differs from the pinned Node.js release'):
+            verify_payload(self.root, payload)
+        (npm / 'lib/extra.js').unlink()
+        (npm / 'bin/npm-cli.js').write_text("require('./elsewhere')\n")
+        with self.assertRaisesRegex(ValueError, 'npm differs from the pinned Node.js release'):
+            verify_payload(self.root, payload)
+        (npm / 'bin/npm-cli.js').write_text("require('../lib/cli.js')(process)\n")
+        (npm / 'bin/npm-cli.js').chmod(0o755)
+        with self.assertRaisesRegex(ValueError, 'npm differs from the pinned Node.js release'):
+            verify_payload(self.root, payload)
+
+    def test_no_symlink_ships_under_the_node_runtime(self):
+        # Review F7: the payload has no symlinks under node/ (the archive's bin/npm, npx and corepack links are removed).
+        payload, npm = self.npm_payload()
+        for link, target in [(payload / 'node/bin/npx', '../lib/node_modules/npm/bin/npm-cli.js'),
+                             (npm / 'node_modules/.bin/semver', '../semver/bin/semver.js'),
+                             (payload / 'node/include', '/usr/local/include')]:
+            link.parent.mkdir(parents=True, exist_ok=True)
+            link.symlink_to(target)
+            with self.assertRaisesRegex(ValueError, 'symlink under node/: ' + str(link.relative_to(payload / 'node'))):
+                verify_payload(self.root, payload)
+            link.unlink()
+        self.assert_package_manager_checks_pass(payload)
+
+    def test_the_npm_launcher_finds_its_node_when_run_through_a_symlink(self):
+        # Review F7: prepare-payload.py's bin/npm resolves its own real path, so a link to it elsewhere still runs the
+        # node beside it (and that release's npm-cli.js), with nothing on PATH.
+        import ast, os, subprocess
+        source = (REPO / 'apps/mac/scripts/prepare-payload.py').read_text()
+        launcher = next(node.value.value for node in ast.parse(source).body if isinstance(node, ast.Assign)
+                        and getattr(node.targets[0], 'id', None) == 'NPM_LAUNCHER')
+        node = self.root / 'Payload with spaces/node'
+        (node / 'bin').mkdir(parents=True)
+        (node / 'bin/node').write_text('#!/bin/sh\nprintf "%s|" "$0" "$@"\n')
+        (node / 'bin/node').chmod(0o755)
+        (node / 'bin/npm').write_text(launcher)
+        (node / 'bin/npm').chmod(0o755)
+        cli = (node / 'bin/../lib/node_modules/npm/bin/npm-cli.js').as_posix()
+        elsewhere = self.root / 'elsewhere/bin'
+        elsewhere.mkdir(parents=True)
+        (elsewhere / 'npm').symlink_to(node / 'bin/npm')
+        (elsewhere / 'npm-relative').symlink_to(os.path.relpath(node / 'bin/npm', elsewhere))
+        (elsewhere / 'npm-twice').symlink_to(elsewhere / 'npm-relative')
+        for call, env in [([str(node / 'bin/npm')], {'PATH': ''}), ([str(elsewhere / 'npm')], {'PATH': ''}),
+                          ([str(elsewhere / 'npm-relative')], {'PATH': ''}), ([str(elsewhere / 'npm-twice')], {'PATH': ''}),
+                          (['npm'], {'PATH': str(elsewhere)})]:
+            answer = subprocess.run(call + ['--version', 'a b'], capture_output=True, text=True, env=env, check=True).stdout
+            self.assertEqual(answer.split('|')[2:4], ['--version', 'a b'], call)
+            self.assertEqual(Path(answer.split('|')[0]).resolve(), (node / 'bin/node').resolve(), call)
+            self.assertEqual(Path(answer.split('|')[1]).resolve(strict=False), Path(cli).resolve(strict=False), call)
 
     def test_unlisted_python_wheel_is_rejected(self):
         payload = self.root / 'Payload'

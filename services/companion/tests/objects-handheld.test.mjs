@@ -2,11 +2,17 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {chmod, mkdir, readdir, readFile, rm, stat, symlink, writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
+import {createHash} from 'node:crypto';
 import {ObjectStore} from '../dist/objects/store.js';
 import {ObjectService, InvalidStateError, InvalidCaptureManifestError, scanSummary, tooFewPhotos, SCANS_NEED_A_MAC, KEEP_SCAN_UNAVAILABLE, PREVIEW_ONLY} from '../dist/objects/service.js';
 import {macReconstructArgs, macReconstructRunner, macScanToStl, linuxReconstructRunner, progressWords, NEEDS_MACOS_27, OBJECT_CAPTURE_NEEDS_MAC, RECONSTRUCTION_FAILED} from '../dist/objects/reconstruct.js';
 import {tempDir} from './support/temp.mjs';
 
+function jpeg(width, height, filler) {
+  const sof = Buffer.alloc(2 + 1 + 2 + 2 + 1 + 9);
+  sof.writeUInt16BE(17, 0); sof[2] = 8; sof.writeUInt16BE(height, 3); sof.writeUInt16BE(width, 5); sof[7] = 3;
+  return Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xc0]), sof, Buffer.from([0xff, 0xd9]), Buffer.alloc(8, filler)]);
+}
 const STL = 'solid m\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid m\n';
 const manifest = images => ({version: 1, images, depthRequired: true});
 /** What the phone sends with every image of an Object Capture session (MacConnection.sendCapture). */
@@ -16,7 +22,8 @@ const RUN_A = '6b1f5a52-6a8f-4d43-9a4e-0f6f6f2a1c01', RUN_B = '0c7d2e9b-3f10-4b5
 const APPLE = ['0001.heic', '0002.heic'];
 
 /** `scanToStl` stands in for `mac-reconstruct stl` (a Mac); `scanToStl: null` is a computer without it. */
-async function setup({reconstruct, scanToStl, deps = {}} = {}) {
+/** `outcomes`: what each touch-up returns in turn (a question with no model, say); a model and done otherwise. */
+async function setup({reconstruct, scanToStl, deps = {}, outcomes = []} = {}) {
   const root = await tempDir('objects-handheld-');
   const store = new ObjectStore(join(root, 'objects'));
   const touchups = [], builds = [], changes = [], converted = [];
@@ -25,7 +32,9 @@ async function setup({reconstruct, scanToStl, deps = {}} = {}) {
     const passDir = join(root, 'pass-' + touchups.length), out = join(passDir, 'out');
     await mkdir(out, {recursive: true});
     await writeFile(join(out, 'touched.stl'), STL);
-    return {status: 'done', summary: 'Smoothed it.', renders: [], checkpoints: [], stats: {seconds: 1, toolCalls: 1}, passDir, model: join(out, 'touched.stl')};
+    const {noModel, ...outcome} = outcomes[touchups.length - 1] ?? {};
+    return {status: 'done', summary: 'Smoothed it.', renders: [], checkpoints: [], stats: {seconds: 1, toolCalls: 1}, passDir,
+      ...(noModel ? {} : {model: join(out, 'touched.stl')}), ...outcome};
   };
   const service = new ObjectService({store, runTouchup, stlInfo: async () => [60.6, 45.2, 21.7], claudePath: '/c',
     handoff: {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true'}},
@@ -184,6 +193,208 @@ test('a draft whose scan is still on the phone never starts from its words alone
   // Once part of it is here, the refusal is the resume one.
   await service.addCapturePhoto(object.id, '0001.heic', Buffer.from('a'));
   await assert.rejects(service.start(object.id), /Resume sending it from the phone that recorded it/);
+});
+
+/** The words-only pass of a project whose scan was stranded on the phone: it asks for photos and makes no model (#825). */
+const ASKS_FOR_PHOTOS = {status: 'needs_closeup', noModel: true, summary: 'No scan came through.',
+  closeup: 'No photo or scan came through. Can you photograph the DAD desk thing from the front, one side and the top?'};
+const SIXTY_EIGHT = Array.from({length: 68}, (_, i) => `${String(i + 1).padStart(4, '0')}.heic`);
+
+/** A stranded project as the old phone build left it: started from its words alone, now asking for photos (#825). */
+async function stranded(service, words = 'A replica of this DAD desk thing') {
+  const object = await service.create();
+  await service.updateInstructions(object.id, words);
+  await service.start(object.id);
+  const asking = await service.settled(object.id);
+  assert.equal(asking.state, 'needs-closeup');
+  assert.equal(asking.current, undefined, 'no model: it ran from the words alone');
+  assert.equal(asking.ask.status, 'open');
+  return asking;
+}
+
+test('a scan stranded on the phone joins its project that asks for photos and has no model, and starts it (#825)', async () => {
+  // David, Nov 15: "i sent it once why would i send it again?" His 68-photo scan stopped on the phone; the build before
+  // #795 started the project from its words alone, the pass asked for photos, and the Mac refused the scan for good.
+  const {service, builds, touchups} = await setup({outcomes: [ASKS_FOR_PHOTOS]});
+  const asking = await stranded(service);
+  const askId = asking.ask.id;
+  // The phone's own send, as for a new project: declare, every frame, then start with the same list.
+  const declared = await service.declareCapture(asking.id, {...objectCaptureManifest(SIXTY_EIGHT), run: RUN_A});
+  assert.deepEqual(declared.captureDeclared.images, SIXTY_EIGHT);
+  assert.equal(declared.state, 'needs-closeup', 'still asking until the start');
+  // Arriving: nothing designs on part of it, and Best Guess waits for the scan.
+  await service.addCapturePhoto(asking.id, '0001.heic', Buffer.from('0001.heic'));
+  await assert.rejects(service.answerCloseup(asking.id, {bestGuess: true}), /Resume sending it from the phone that recorded it/);
+  assert.equal((await service.get(asking.id)).ask.status, 'open', 'the question is still open for the scan');
+  for (const name of SIXTY_EIGHT) await service.addCapturePhoto(asking.id, name, Buffer.from(name));
+  const started = await service.start(asking.id, objectCaptureManifest(SIXTY_EIGHT));
+  assert.equal(started.state, 'touching-up');
+  assert.equal(started.progress, 'Building the model from your photos.');
+  assert.equal(started.captureDeclared, undefined);
+  assert.notEqual(started.ask.status, 'open', 'the question for photos is answered by them');
+  const done = await service.settled(asking.id);
+  // The rebuild first (Apple's folder mode), then the pass the person asked for, from their own words.
+  assert.equal(builds.length, 1);
+  assert.equal(builds[0].objectCapture, true);
+  assert.equal(touchups.length, 2);
+  assert.deepEqual(touchups[1].scan, [join(service.dir(asking.id), 'scan', 'scan.usdz')]);
+  assert.match(JSON.stringify(touchups[1]), /A replica of this DAD desk thing/);
+  assert.deepEqual(done.passes.at(-1).stages.map(stage => stage.id).slice(0, 1), ['building']);
+  assert.equal(done.state, 'ready');
+  assert.ok(done.current, 'the scan became its model');
+  assert.equal(done.ask.id, askId);
+  assert.equal(done.ask.status, 'answered');
+  // Starting again (the reply was lost) changes nothing.
+  assert.equal((await service.start(asking.id, objectCaptureManifest(SIXTY_EIGHT))).state, 'ready');
+  assert.equal(builds.length, 1);
+});
+
+test('a stranded scan taken off with Remove leaves the project asking for photos (#825)', async () => {
+  const {service, builds} = await setup({outcomes: [ASKS_FOR_PHOTOS]});
+  const asking = await stranded(service);
+  await service.declareCapture(asking.id, {...objectCaptureManifest(SIXTY_EIGHT), run: RUN_A});
+  await service.addCapturePhoto(asking.id, '0001.heic', Buffer.from('a'));
+  // The forget, run and list rules of #819 apply here too.
+  await assert.rejects(service.forgetCapture(asking.id, {run: RUN_B, images: SIXTY_EIGHT}), /A different scan is waiting/);
+  const forgotten = await service.forgetCapture(asking.id, {run: RUN_A, images: SIXTY_EIGHT});
+  assert.equal(forgotten.state, 'needs-closeup');
+  assert.equal(forgotten.ask.status, 'open', 'still asking');
+  assert.deepEqual([forgotten.captureDeclared, forgotten.capture], [undefined, undefined]);
+  assert.deepEqual(await readdir(service.dir(asking.id)).then(names => names.includes('capture')), false);
+  assert.equal(builds.length, 0);
+});
+
+test('a project with a model, or one waiting on anything but photos, still refuses a scan (#825)', async () => {
+  // With a model: a scan is no longer what it waits for, on any route.
+  const {service, store} = await setup({outcomes: [{status: 'needs_closeup', closeup: 'the underside'}]});
+  const made = await service.create();
+  await service.updateInstructions(made.id, 'A replica of this DAD desk thing');
+  await service.start(made.id);
+  const asked = await service.settled(made.id);
+  assert.deepEqual([asked.state, asked.ask.status, !!asked.current], ['needs-closeup', 'open', true], 'asking, with a model');
+  const refused = /can only be (added|changed) before the touch-up starts/;
+  await assert.rejects(service.declareCapture(asked.id, {...objectCaptureManifest(APPLE), run: RUN_A}), refused);
+  await assert.rejects(service.addCapturePhoto(asked.id, '0001.heic', Buffer.from('a')), refused);
+  await assert.rejects(service.addCaptureDepth(asked.id, '0001.depth.plist', Buffer.from('bplist00xx')), /can only be added before/);
+  await assert.rejects(service.forgetCapture(asked.id, {run: RUN_A, images: APPLE}), refused);
+  await assert.rejects(service.start(asked.id, objectCaptureManifest(APPLE)), InvalidStateError);
+
+  // No model, but the open question isn't for photos: a file, a choice, sizes, or a reconstruction review.
+  for (const ask of [
+    {kind: 'file', type: 'file', answers: ['file']},
+    {kind: 'choice', type: 'choice', answers: ['choice'], options: [{id: 'a', label: 'A'}]},
+    {kind: 'sizes', answers: ['sizes', 'text', 'camera'], sizes: [{id: 'size-1', label: 'Width', mm: 10, from: 'estimate'}]},
+  ]) {
+    const object = await service.create();
+    await store.update(object.id, o => ({...o, state: 'needs-closeup', ask: {id: '5105ec68-0678-4676-a896-615f17a7ce16', question: 'Which one?', status: 'open', askedAtMs: 1, ...ask}}));
+    await assert.rejects(service.declareCapture(object.id, {...objectCaptureManifest(APPLE), run: RUN_A}), refused, ask.kind);
+    await assert.rejects(service.addCapturePhoto(object.id, '0001.heic', Buffer.from('a')), refused, ask.kind);
+  }
+  const review = await service.create();
+  await store.update(review.id, o => ({...o, state: 'needs-closeup', reconstructionReview: {id: 'r', kind: 'region'},
+    ask: {id: '5105ec68-0678-4676-a896-615f17a7ce16', question: 'Which part is it?', status: 'open', askedAtMs: 1, answers: ['choice']}}));
+  await assert.rejects(service.declareCapture(review.id, {...objectCaptureManifest(APPLE), run: RUN_A}), refused);
+  // An answered question waits on nothing.
+  const answered = await service.create();
+  await store.update(answered.id, o => ({...o, state: 'needs-closeup',
+    ask: {id: '5105ec68-0678-4676-a896-615f17a7ce16', question: 'Photo?', status: 'answered', askedAtMs: 1, kind: 'closeup', answers: ['camera', 'photos', 'best-guess', 'text']}}));
+  await assert.rejects(service.declareCapture(answered.id, {...objectCaptureManifest(APPLE), run: RUN_A}), refused);
+});
+
+test('an asking project that already has a scan takes no walk-around, and its question still answers (review of #831, F1)', async () => {
+  // A pass ran from a scan, asked for a close-up and made no model. A declare there would lock every route but itself.
+  const {service, store} = await setup();
+  const object = await service.create();
+  await store.update(object.id, o => ({...o, state: 'needs-closeup', scan: 'scan.usdz', instructions: 'Copy this',
+    ask: {id: '5105ec68-0678-4676-a896-615f17a7ce16', question: 'The underside?', status: 'open', askedAtMs: 1, kind: 'closeup', answers: ['camera', 'photos', 'best-guess', 'text']}}));
+  await store.addFile(object.id, 'scan', 'scan.usdz', Buffer.from('usdz'));
+  await assert.rejects(service.declareCapture(object.id, {...objectCaptureManifest(APPLE), run: RUN_A}), /can only be added before the touch-up starts/);
+  assert.equal((await service.get(object.id)).captureDeclared, undefined);
+  const answered = await service.answerCloseup(object.id, {bestGuess: true});
+  assert.equal(answered.state, 'touching-up', 'Best Guess still answers it');
+  await service.settled(object.id);
+});
+
+test('a scan declared on an asking project holds its question only while it is arriving (review of #831, F2)', async () => {
+  // A lease, not a lock: an answer clears a declaration that never sent a frame, waits ten minutes after the last
+  // frame, then clears that too, so a project is never stuck waiting for a scan no phone will send.
+  let now = 1_000_000;
+  const {service} = await setup({outcomes: [ASKS_FOR_PHOTOS, ASKS_FOR_PHOTOS, ASKS_FOR_PHOTOS], deps: {now: () => now}});
+  const asking = await stranded(service);
+  await service.declareCapture(asking.id, {...objectCaptureManifest(SIXTY_EIGHT), run: RUN_A});
+  // Review R3: within ten minutes of the declare the answer is refused, frames or not (the first may be on its way).
+  await assert.rejects(service.answerCloseup(asking.id, {bestGuess: true}), /Resume sending it from the phone that recorded it/);
+  now += 10 * 60_000 + 1;
+  const accepted = await service.answerCloseup(asking.id, {bestGuess: true});
+  assert.equal(accepted.captureDeclared, undefined, 'ten minutes and no frame came: the declaration goes and the answer runs');
+  assert.equal(accepted.state, 'touching-up');
+  const again = await service.settled(asking.id);
+  assert.equal(again.state, 'needs-closeup');
+
+  await service.declareCapture(asking.id, {...objectCaptureManifest(SIXTY_EIGHT), run: RUN_A});
+  now += 60_000;
+  await service.addCapturePhoto(asking.id, '0001.heic', Buffer.from('0001.heic'));
+  now += 9 * 60_000;
+  await assert.rejects(service.answerCloseup(asking.id, {bestGuess: true}), /Resume sending it from the phone that recorded it/);
+  assert.equal((await service.get(asking.id)).ask.status, 'open', 'arriving: the question waits for it');
+  now += 60_000 + 1;
+  const late = await service.answerCloseup(asking.id, {text: 'Just make it 10 cm wide'});
+  assert.equal(late.captureDeclared, undefined, 'ten minutes with no frame: the scan stopped coming');
+  assert.deepEqual(late.capture ?? [], []);
+  assert.equal(late.state, 'touching-up');
+  await service.settled(asking.id);
+});
+
+test('an answer is checked before a stopped scan is dropped, and a declaration from before the lease keeps its frames (review R3, R5)', async () => {
+  let now = 1_000_000;
+  const {service, store} = await setup({outcomes: [ASKS_FOR_PHOTOS, ASKS_FOR_PHOTOS, ASKS_FOR_PHOTOS], deps: {now: () => now}});
+  const asking = await stranded(service);
+  await service.declareCapture(asking.id, {...objectCaptureManifest(SIXTY_EIGHT), run: RUN_A});
+  await service.addCapturePhoto(asking.id, '0001.heic', Buffer.from('0001.heic'));
+  now += 10 * 60_000 + 1;
+  // R3: a rejected answer leaves the scan alone.
+  await assert.rejects(service.answerCloseup(asking.id, {}), /Choose photos for this answer/);
+  await assert.rejects(service.answerCloseup(asking.id, {photoNames: ['nope.heic']}), /That photo is not in this project/);
+  const kept = await service.get(asking.id);
+  assert.deepEqual([kept.captureDeclared?.run, kept.capture], [RUN_A, ['0001.heic']], 'the declaration and its frame stay');
+  assert.equal(kept.ask.status, 'open');
+
+  // R5: a declaration written before the lease existed has no atMs. With frames it counts from now; without, it goes.
+  await store.update(asking.id, o => ({...o, captureDeclared: {source: o.captureDeclared.source, images: o.captureDeclared.images, run: RUN_A}}));
+  await assert.rejects(service.answerCloseup(asking.id, {bestGuess: true}), /Resume sending it from the phone that recorded it/);
+  now += 10 * 60_000 + 1;
+  const late = await service.answerCloseup(asking.id, {bestGuess: true});
+  assert.equal(late.captureDeclared, undefined, 'ten minutes from when it was first seen');
+  await service.settled(asking.id);
+
+  const legacy = await stranded(service, 'Another desk thing');
+  await service.declareCapture(legacy.id, {...objectCaptureManifest(SIXTY_EIGHT), run: RUN_B});
+  await store.update(legacy.id, o => ({...o, captureDeclared: {source: o.captureDeclared.source, images: o.captureDeclared.images, run: RUN_B}}));
+  const cleared = await service.answerCloseup(legacy.id, {bestGuess: true});
+  assert.equal(cleared.captureDeclared, undefined, 'old and frameless: cleared at once, as before');
+  await service.settled(legacy.id);
+});
+
+test('camera information arriving renews the scan\'s lease (review R5)', async () => {
+  let now = 1_000_000;
+  const {service, object} = await setup({deps: {now: () => now}});
+  const one = jpeg(640, 480, 3);
+  await service.declareCapture(object.id, objectCaptureManifest(['0001.jpg']));
+  await service.addCapturePhoto(object.id, '0001.jpg', one);
+  now += 9 * 60_000;
+  const camera = {version: 1, kind: 'capture-camera', objectAnchor: null, frames: [{image: '0001.jpg', sha256: createHash('sha256').update(one).digest('hex'),
+    width: 640, height: 480, fx: 500, fy: 500, cx: 320, cy: 240, timestampMs: 1730000000000, tracking: 'tracking', center: [0, 1.2, 0]}]};
+  const withCamera = await service.addCaptureCamera(object.id, camera);
+  assert.equal(withCamera.captureDeclared.atMs, now, 'the camera file counts as the scan still arriving');
+});
+
+test('a new project takes a scan exactly as before (#825)', async () => {
+  const {service, object, builds} = await setup();
+  await service.declareCapture(object.id, {...objectCaptureManifest(APPLE), run: RUN_A});
+  for (const name of APPLE) await service.addCapturePhoto(object.id, name, Buffer.from(name));
+  assert.equal((await service.start(object.id, objectCaptureManifest(APPLE))).state, 'touching-up');
+  assert.equal((await service.settled(object.id)).state, 'ready');
+  assert.equal(builds.length, 1);
 });
 
 test('a scan taken off before its touch-up starts is forgotten with its frames, and a newer one never meets them (Remove, #791)', async () => {

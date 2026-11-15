@@ -2,12 +2,12 @@ import {spawn, type ChildProcess} from 'node:child_process';
 import {StringDecoder} from 'node:string_decoder';
 import {mkdir, readdir, readFile, rename, rm as fsRm, writeFile} from 'node:fs/promises';
 import {createHash, randomUUID} from 'node:crypto';
-import {dirname, join} from 'node:path';
+import {dirname, isAbsolute, join} from 'node:path';
 import {printerBackendSchema, type PrinterBackend, type PrinterHandoffConfig, type PrinterSession} from '@scan-to-make/printer-handoff';
 import {newerVersion} from './directory.js';
 import type {PrintGate} from './print-gate.js';
 import type {PrinterCatalog} from '../objects/printers.js';
-import {appInstall, appMcpId, autoUpdateKind, autoUpdateReason, findNpm, installedVersion, mcpIdFor, resolveMcpInstall, type InstallEnvironment, type McpInstall, type ResolvedMcpInstall} from './mcp-install.js';
+import {appInstall, appMcpId, autoUpdateKind, autoUpdateReason, findNpm, installedVersion, npmCli, mcpIdFor, resolveMcpInstall, type InstallEnvironment, type McpInstall, type ResolvedMcpInstall} from './mcp-install.js';
 
 export const MCP_UPDATE_TIMEOUT_MS = 10 * 60_000;
 /** PRD §8.10: the latest version is checked once a day, and when Settings opens (a list read after an hour). */
@@ -377,6 +377,38 @@ export class UpdateJournals {
 }
 
 /**
+ * What a failed `npm view` says, from npm's own output (#826: it was called "this Mac's internet connection" when npm
+ * itself was missing). npm's network error codes say the registry wasn't reached; anything else is npm's own words.
+ */
+export function npmLookupSentence(pkg: string, code: number | null, output: string): string {
+  // Review F3: runCommand never throws. npm that can't start answers `spawn <path> EACCES` (or ENOENT), and the app's
+  // npm-cli.js gone answers node's module stack: both are this install, not the registry.
+  if (/^spawn .+ E(?:ACCES|NOENT|PERM|NOEXEC)\s*$/m.test(output)
+      || (/\bMODULE_NOT_FOUND\b/.test(output) && /Cannot find module '[^']*\/npm-cli\.js'/.test(output)))
+    return `Counterpart couldn't run npm to look up the latest ${pkg}. Reinstall Counterpart, then try again.`;
+  const lines = output.split('\n').map(line => line.trim()).filter(Boolean);
+  const errors = lines.filter(line => /^npm (?:error|ERR!)/.test(line));
+  const said = (errors.find(line => !/^npm (?:error|ERR!) code\b/.test(line)) ?? errors[0] ?? lines.at(-1) ?? '').slice(0, 240);
+  const because = said ? ` (${said})` : '';
+  if (/\b(?:ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ECONNRESET|ETIMEDOUT|ESOCKETTIMEDOUT|ENETUNREACH|EHOSTUNREACH|ENETDOWN|ERR_SOCKET_TIMEOUT|socket hang up)\b/.test(output))
+    return `Counterpart couldn't reach the npm registry to look up the latest ${pkg}${because}. Check this computer's internet connection, then try again.`;
+  if (/\bE5\d\d\b/.test(output)) return `The npm registry couldn't answer for ${pkg} just now${because}. Try again in a moment.`;
+  if (code === 0) return `npm answered without a version for ${pkg}${because}. Try again in a moment.`;
+  return `npm couldn't look up the latest ${pkg}${because}.`;
+}
+
+/**
+ * Review F10: the app's npm runs under the copy's own node (so native parts match it), and refuses a node older than its
+ * `engines` (`^20.17 || >=22.9`); a package may refuse it too (EBADENGINE). One sentence instead of npm's words.
+ */
+export function nodeTooOldSentence(output: string, node?: string): string | undefined {
+  if (!/does not support Node\.js v\d|is known not to run on Node\.js v\d|\bEBADENGINE\b/.test(output)) return undefined;
+  const version = output.match(/Node\.js (v\d+\.\d+\.\d+)/)?.[1] ?? output.match(/Actual:.*"node":\s*"v?(\d+\.\d+\.\d+)"/)?.[1]?.replace(/^/, 'v');
+  const which = [node && isAbsolute(node) ? node : undefined, version].filter(Boolean).join(', ');
+  return `This printer software needs a newer Node.js than the one it runs on here${which ? ` (${which})` : ''}. Update that Node.js, then try again.`;
+}
+
+/**
  * PRD §8.10: Update actually updates the installation the companion runs, between jobs,
  * then restarts that MCP's sessions so the new version (and its capabilities) are used.
  */
@@ -387,6 +419,8 @@ export class McpUpdater {
   readonly #fs: UpdateFs;
   readonly #journals?: UpdateJournals;
   readonly #latest = new Map<string, {atMs: number; version?: string; pending?: Promise<string | undefined>}>();
+  /** Why the last lookup of a package's latest version had no answer (#826), until one answers. */
+  readonly #lookupFailures = new Map<string, string>();
   /** One operation per install: a second request gets the first one's answer and state. */
   readonly #active = new Map<string, McpUpdate>();
   readonly #starting = new Map<string, Promise<McpUpdate>>();
@@ -566,17 +600,28 @@ export class McpUpdater {
       .finally(() => clearTimeout(timer));
     return answer ?? this.#latest.get(pkg)?.version ?? known;
   }
-  /** `npm view <pkg> version`. */
+  /**
+   * `npm view <pkg> version`, with the app's own npm first, run by the app's own node (#826). When there is no answer,
+   * why is kept for the sentence Update and Download show: no npm, npm couldn't start, the registry didn't answer, or
+   * npm's own error.
+   */
   async checkLatest(pkg: string): Promise<string | undefined> {
     const known = this.#latest.get(pkg);
     if (known?.pending) return known.pending;
     const pending = (async () => {
-      const npm = findNpm(undefined, this.#deps.env, this.#deps.path);
-      if (!npm) return undefined;
-      const {code, output} = await this.#run(npm, ['view', pkg, 'version'], {env: this.#env(npm), timeoutMs: 60_000});
+      const node = this.#deps.node;
+      const npm = findNpm(undefined, this.#deps.env, this.#deps.path, node);
+      if (!npm) return this.#lookupFailed(pkg, `Counterpart couldn't find npm, which it uses to install ${pkg}. Reinstall Counterpart, or install Node.js, then try again.`);
+      // The app's npm is run by the node beside it, so it needs no shebang, PATH or Node.js on this Mac.
+      const cli = dirname(npm) === dirname(node) ? npmCli(npm, this.#deps.env) : undefined;
+      const [command, args] = cli ? [node, [cli]] : [npm, []];
+      let code: number | null, output: string;
+      try { ({code, output} = await this.#run(command, [...args, 'view', pkg, 'version'], {env: this.#env(npm, cli ? node : undefined), timeoutMs: 60_000})); }
+      catch (error) { return this.#lookupFailed(pkg, `Counterpart couldn't run npm (${npm}) to look up ${pkg}: ${(error as Error).message}. Reinstall Counterpart, then try again.`); }
       // npm may add notices on stderr after the version: take the line that is a version.
       const version = output.split('\n').map(line => line.trim()).find(line => /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(line));
-      return code === 0 ? version : undefined;
+      if (code === 0 && version) { this.#lookupFailures.delete(pkg); return version; }
+      return this.#lookupFailed(pkg, npmLookupSentence(pkg, code, output));
     })();
     this.#latest.set(pkg, {atMs: known?.atMs ?? 0, ...(known?.version ? {version: known.version} : {}), pending});
     try {
@@ -584,6 +629,11 @@ export class McpUpdater {
       this.#latest.set(pkg, {atMs: this.#now(), ...(version ?? known?.version ? {version: version ?? known?.version} : {})});
       return version;
     } catch (error) { this.#latest.set(pkg, {atMs: this.#now(), ...(known?.version ? {version: known.version} : {})}); throw error; }
+  }
+  #lookupFailed(pkg: string, sentence: string): undefined { this.#lookupFailures.set(pkg, sentence); return undefined; }
+  /** Why the latest version of `pkg` couldn't be looked up, in the person's words. */
+  #noLatest(pkg: string): string {
+    return this.#lookupFailures.get(pkg) ?? `npm didn't say which ${pkg} is the latest. Try again in a moment.`;
   }
   /** The daily check for every package in use. */
   start(): void {
@@ -794,7 +844,7 @@ export class McpUpdater {
       .finally(() => clearTimeout(timer));
     const latest = answer === 'slow' ? recent ?? 'slow' : answer ?? recent;
     if (latest === 'slow') throw new McpUpdateError('unavailable', `npm is slow to answer for ${pkg}. Try Update again in a moment.`);
-    if (!latest) throw new McpUpdateError('unavailable', `Counterpart couldn't ask npm for the latest ${pkg}. Check this Mac's internet connection, or install Node.js so npm is there.`);
+    if (!latest) throw new McpUpdateError('unavailable', this.#noLatest(pkg));
     if (!options.fresh && fromVersion && !newer(latest, fromVersion)) return {mcpId, state: 'current', fromVersion, toVersion: latest};
     const update: McpUpdate = {mcpId, state: 'started', ...(fromVersion ? {fromVersion} : {}), toVersion: latest};
     this.#active.set(mcpId, update);
@@ -925,7 +975,8 @@ export class McpUpdater {
     const run = async (label: string, command: string, args: string[], cwd: string | undefined, env: NodeJS.ProcessEnv) => {
       const result = await this.#run(command, args, {cwd, env, timeoutMs: MCP_UPDATE_TIMEOUT_MS});
       log += `$ ${[command, ...args].join(' ')}\n${result.output}\n`;
-      if (result.code !== 0) throw Object.assign(new Error(`${label} failed`), result.code === 3 && /local changes/.test(result.output) ? {sentence: 'This copy has local changes, so Counterpart left it as it is.'} : {});
+      const tooOld = nodeTooOldSentence(result.output, command);
+      if (result.code !== 0) throw Object.assign(new Error(`${label} failed`), result.code === 3 && /local changes/.test(result.output) ? {sentence: 'This copy has local changes, so Counterpart left it as it is.'} : tooOld ? {sentence: tooOld} : {});
       return result.output;
     };
     let undo: (() => Promise<void>) | undefined, finish: (() => Promise<void>) | undefined;
@@ -981,8 +1032,8 @@ export class McpUpdater {
           // checked: if one fails, the failure says the previous version couldn't be put back, rather than claiming it.
           for (const [label, command, args, cwd, env] of [
             ['git reset', plan.git, ['-C', plan.dir, 'reset', '--hard', head], undefined, process.env],
-            ['npm ci', plan.npm, ['ci'], plan.dir, plan.env],
-            ['npm run build', plan.npm, ['run', 'build'], plan.dir, plan.env],
+            ['npm ci', plan.npm, [...plan.npmArgs, 'ci'], plan.dir, plan.env],
+            ['npm run build', plan.npm, [...plan.npmArgs, 'run', 'build'], plan.dir, plan.env],
           ] as const) {
             const result = await this.#run(command, [...args], {...(cwd ? {cwd} : {}), env, timeoutMs: MCP_UPDATE_TIMEOUT_MS});
             log += `$ ${[command, ...args].join(' ')}\n${result.output}\n`;
@@ -991,8 +1042,8 @@ export class McpUpdater {
           }
         };
         await run('git pull', plan.git, ['-C', plan.dir, 'pull', '--ff-only'], undefined, process.env);
-        await run('npm ci', plan.npm, ['ci'], plan.dir, plan.env);
-        await run('npm run build', plan.npm, ['run', 'build'], plan.dir, plan.env);
+        await run('npm ci', plan.npm, [...plan.npmArgs, 'ci'], plan.dir, plan.env);
+        await run('npm run build', plan.npm, [...plan.npmArgs, 'run', 'build'], plan.dir, plan.env);
       } else await this.#note(update, pkg, {phase: 'changing', change: {kind: 'none'}, overrides: saved});
       // npx: each profile runs the new version; fresh: each runs the app's own copy, started the way its own profile
       // started its MCP (its own variables and directory: printers differ by them).
@@ -1093,7 +1144,7 @@ export class McpUpdater {
       const latest = await Promise.race([looking, new Promise<'slow'>(resolve => { timer = setTimeout(() => resolve('slow'), this.#deps.lookupTimeoutMs ?? LOOKUP_TIMEOUT_MS); })])
         .finally(() => clearTimeout(timer));
       if (latest === 'slow') throw new McpUpdateError('unavailable', `npm is slow to answer for ${pkg}. Try ${options.update ? 'Update' : 'Download'} again in a moment.`);
-      if (!latest) throw new McpUpdateError('unavailable', `Counterpart couldn't ask npm for the latest ${pkg}. Check this Mac's internet connection.`);
+      if (!latest) throw new McpUpdateError('unavailable', this.#noLatest(pkg));
       const fromVersion = options.update ? installedVersion(install, this.#deps.env) : undefined;
       if (fromVersion && !newer(latest, fromVersion)) return {mcpId, state: 'current', fromVersion, toVersion: latest};
       // A fresh copy or update of the same files is running: this waits for the next tap.
@@ -1125,7 +1176,7 @@ export class McpUpdater {
       await this.#note(update, pkg, {phase: 'changing', change: swap, overrides: {}});
       const result = await this.#run(plan.command, [...plan.args, 'install', '--global', '--prefix', staging, `--allow-scripts=${pkg}`, '--ignore-scripts=false', '--foreground-scripts', '--loglevel=notice', `${pkg}@${latest}`], {env: plan.env, timeoutMs: MCP_UPDATE_TIMEOUT_MS});
       log += `$ ${[plan.command, ...plan.args, 'install', '--global', '--prefix', staging, `--allow-scripts=${pkg}`, '--ignore-scripts=false', '--foreground-scripts', '--loglevel=notice', `${pkg}@${latest}`].join(' ')}\n${result.output}\n`;
-      if (result.code !== 0) throw new Error('npm install failed');
+      if (result.code !== 0) { const sentence = nodeTooOldSentence(result.output, plan.command); throw Object.assign(new Error('npm install failed'), sentence ? {sentence} : {}); }
       if (!this.#deps.env.exists(join(staged, 'package.json'))) throw new Error('npm install left no package');
       this.#verifyPostinstall(staged, result.output);
       await this.#fs.mkdir(dirname(live));
@@ -1160,8 +1211,15 @@ export class McpUpdater {
     }
   }
 
+  /**
+   * Review F10: a lifecycle script's bare `npm` is the app's, never an old Homebrew one. npm's own `bin` folder (npm,
+   * npx and node-gyp, no node) comes first, then the node that runs the copy, so bare `node` and node-gyp's
+   * `#!/usr/bin/env node` stay that node and native parts match it. Not the app npm's folder itself: the app's node is
+   * there too. Then npm's folder, then the companion's PATH.
+   */
   #env(npm: string, node?: string): NodeJS.ProcessEnv {
-    const dirs = [...(node ? [dirname(node)] : []), dirname(npm)];
+    const cli = npmCli(npm, this.#deps.env);
+    const dirs = [...new Set([...(cli ? [dirname(cli)] : []), ...(node ? [dirname(node)] : []), dirname(npm)])];
     return {...process.env, PATH: [...dirs, this.#deps.path ?? process.env.PATH ?? '/usr/bin:/bin'].join(':')};
   }
 
@@ -1169,23 +1227,28 @@ export class McpUpdater {
   #plan(install: McpInstall, _latest: string):
     | {kind: 'none'} | {fail: string}
     | {kind: 'npm'; prefix: string; command: string; args: string[]; env: NodeJS.ProcessEnv}
-    | {kind: 'checkout'; dir: string; git: string; npm: string; env: NodeJS.ProcessEnv} {
+    | {kind: 'checkout'; dir: string; git: string; npm: string; npmArgs: string[]; env: NodeJS.ProcessEnv} {
     const env = this.#deps.env;
     if (install.type === 'unresolved') return {fail: `Counterpart can't tell how this copy is installed: ${install.found}.`};
     if (install.type === 'npx') return {kind: 'none'};
     if (install.type === 'global' || install.type === 'app') {
       const own = join(install.prefix, 'bin');
       const node = install.type === 'global' && env.exists(join(own, 'node')) ? join(own, 'node') : install.node;
-      const npm = (install.type === 'global' && env.exists(join(own, 'npm')) ? join(own, 'npm') : undefined) ?? findNpm(node, env, this.#deps.path);
+      // The app's own npm first, else the one beside the prefix's own node (#826: an older npm can't take --allow-scripts).
+      const npm = findNpm(node, env, this.#deps.path, this.#deps.node);
       if (!npm) return {fail: 'Counterpart needs npm to update this copy, and there is none on this Mac. Install Node.js, then try again.'};
-      const cli = join(dirname(env.realpath(npm)), 'npm-cli.js');
+      const cli = npmCli(npm, env);
       // The installation's own node runs npm, so native parts are built for the node that runs the MCP.
-      const [command, args] = node && env.exists(cli) ? [node, [cli]] : [npm, []];
+      const [command, args] = node && cli ? [node, [cli]] : [npm, []];
       return {kind: 'npm', prefix: install.prefix, command, args, env: this.#env(npm, node)};
     }
-    const npm = findNpm(install.node, env, this.#deps.path);
+    const npm = findNpm(install.node, env, this.#deps.path, this.#deps.node);
     if (!npm) return {fail: 'Counterpart needs npm to build this copy, and there is none on this Mac. Install Node.js, then try again.'};
-    return {kind: 'checkout', dir: install.dir, git: env.exists('/usr/bin/git') ? '/usr/bin/git' : 'git', npm, env: this.#env(npm, install.node)};
+    // The app's npm runs under the checkout's own node, so native parts are built for the node that runs the MCP;
+    // the npm beside that node runs as it is.
+    const cli = install.node && dirname(npm) !== dirname(install.node) ? npmCli(npm, env) : undefined;
+    const [command, npmArgs] = cli ? [install.node!, [cli]] : [npm, []];
+    return {kind: 'checkout', dir: install.dir, git: env.exists('/usr/bin/git') ? '/usr/bin/git' : 'git', npm: command, npmArgs, env: this.#env(npm, install.node)};
   }
 
   async #emit(type: McpUpdateEventType, pkg: string, update: McpUpdate, log?: string, reason?: string): Promise<void> {

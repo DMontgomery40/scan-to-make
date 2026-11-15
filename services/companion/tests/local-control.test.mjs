@@ -23,10 +23,10 @@ async function fixture(t, extra={}) {
   t.after(()=>server.close());
   return {root,auth,services,server,call:(method,params={})=>wire(server.path,{v:1,id:randomUUID(),method,params})};
 }
-function wire(path,request, split=false) {
+function wire(path,request, split=false, timeoutMs=5000) {
   return new Promise((resolve,reject)=>{
     const socket=connect(path);let response='';
-    socket.setTimeout(5000,()=>socket.destroy(Error('test timeout')));
+    socket.setTimeout(timeoutMs,()=>socket.destroy(Error('test timeout')));
     socket.on('error',reject);socket.on('data',chunk=>response+=chunk);
     socket.on('end',()=>{try{resolve(JSON.parse(response));}catch(error){reject(error);}});
     socket.on('connect',()=>{
@@ -249,6 +249,155 @@ test('server CLI owns the control socket lifecycle without exposing admin method
   assert.equal(status,404);
   child.kill('SIGTERM');await exited;
   await assert.rejects(stat(path),error=>error.code==='ENOENT');
+});
+
+// #827: a fresh Mac has no printer handoff config. Projects, settings and the Blender, Fusion and code engine rows
+// still answer (in words a person can read), over the control socket and over HTTP; nothing about printing is offered.
+/** The companion as a fresh Mac starts it: no printer handoff env (#827, #834). `project` is one ready STL project. */
+async function freshCompanion(t,{project=false}={}) {
+  const f=await fixture(t);await f.server.close();
+  const capture=join(f.root,'capture');await mkdir(capture,{mode:0o700});
+  let projectId;
+  if(project){
+    const {ObjectStore}=await import('../dist/objects/store.js');
+    const store=new ObjectStore(join(capture,'objects'));
+    const made=await store.create('A hook.');
+    await mkdir(join(store.dir(made.id),'current'),{recursive:true});
+    await writeFile(join(store.dir(made.id),'current','model.stl'),'solid m\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid m\n');
+    await store.update(made.id,o=>({...o,state:'ready',current:{model:'current/model.stl',renders:[]}}));
+    projectId=made.id;
+  }
+  const path=join(f.auth.directory,'control.sock');
+  const call=(method,params={},timeoutMs=5000)=>wire(path,{v:1,id:randomUUID(),method,params},false,timeoutMs);
+  const child=spawn(process.execPath,[new URL('../dist/server-cli.js',import.meta.url).pathname],{
+    env:{PATH:process.env.PATH,HOME:f.root,SCAN_TO_MAKE_REMOTE_AUTH_DIR:f.auth.directory,SCAN_TO_MAKE_CAPTURE_DIR:capture,SCAN_TO_MAKE_GENERATION_PORT:'0'},stdio:['ignore','pipe','pipe'],
+  });
+  const exited=new Promise(resolve=>child.once('exit',resolve));
+  t.after(async()=>{if(child.exitCode===null&&child.signalCode===null){child.kill('SIGTERM');await exited;}});
+  let stderr='';child.stderr.on('data',chunk=>stderr+=chunk);
+  const address=await new Promise((resolve,reject)=>{
+    let stdout='';const timer=setTimeout(()=>reject(Error('CLI startup timeout')),15000);
+    child.once('error',error=>{clearTimeout(timer);reject(error);});
+    child.once('exit',()=>{clearTimeout(timer);reject(Error('CLI exited before readiness: '+stderr));});
+    child.stdout.on('data',chunk=>{stdout+=chunk;const match=/ready at (http:\/\/[^\s]+)/.exec(stdout);if(match){clearTimeout(timer);resolve(match[1]);}});
+  });
+  return {f,call,address,projectId,stop:async()=>{child.kill('SIGTERM');await exited;},stderr:()=>stderr};
+}
+/** Counterpart's own copy of a printer MCP, where Settings → Printers → Download installs it (#834's stand-in). */
+async function installAppMcp(root,pkg,version,fields){
+  const dir=join(root,'printers',pkg==='bambu-printer-mcp'?'bambu':'generic','lib','node_modules',pkg);
+  await mkdir(join(dir,'dist'),{recursive:true});
+  await writeFile(join(dir,'package.json'),JSON.stringify({name:pkg,version,type:'module'}));
+  await writeFile(join(dir,'dist','index.js'),await readFile(new URL('./fixtures/app-printer-mcp.mjs',import.meta.url)));
+  await writeFile(join(dir,'dist','setup-fields.json'),await readFile(new URL(`./fixtures/${fields}`,import.meta.url)));
+  return dir;
+}
+
+test('server CLI with no printer set up answers projects, settings and the design tool rows', async t => {
+  const {f,call,address,stop}=await freshCompanion(t);
+  const {request}=await import('node:http');
+  assert.deepEqual((await call('objects.list')).result,{objects:[]});
+  assert.ok((await call('settings.get')).result?.settings,'settings answer');
+  assert.deepEqual((await call('objects.printers')).result?.destinations,[]);
+  const status=(await call('status.get')).result.capabilities;
+  // #834: printing is wired from the start (the built-in placeholder); clients read whether a printer is listed.
+  assert.equal(status.printerHandoff,true);assert.equal(status.printSettings,true);assert.equal(status.printControl,true);
+  // The design tools run through printer software (a printer MCP), not a printer: with none installed, each row says to
+  // download it (Add printer doesn't), in plain words.
+  const noPrinter=/none is installed yet\. Download it in Settings › Printers/;
+  const blender=(await call('blender.check')).result?.blender;
+  assert.ok(blender,'blender.check answers');
+  const settled=blender.state==='checking'?await (async()=>{for(let i=0;i<100;i++){const now=(await call('blender.status')).result.blender;if(now.state!=='checking')return now;await new Promise(r=>setTimeout(r,20));}})():blender;
+  assert.equal(settled.state,'unavailable');assert.match(settled.message,noPrinter);
+  const fusion=await call('fusion.status');
+  assert.equal(fusion.error?.code,'unavailable');assert.match(fusion.error.message,noPrinter);
+  const cad=(await call('cad.status')).result?.cad;
+  assert.equal(cad?.state,'unavailable');assert.match(cad.message,noPrinter);assert.equal(cad.canSetUp,false);
+  // A paired phone's project list answers too (not 404, which phones read as "isn't ready").
+  const invitation=(await call('pairing.create')).result;
+  const phone=await f.auth.exchange('owner@example.test',{code:invitation.code,deviceName:'Local fixture'});
+  const listed=await new Promise((resolve,reject)=>{
+    const req=request(address+'/v1/objects',{headers:{host:f.auth.host,'x-forwarded-host':f.auth.host,'x-forwarded-proto':'https','tailscale-user-login':'owner@example.test','x-scan-device':phone.deviceId,authorization:`Bearer ${phone.token}`}},res=>{let body='';res.on('data',c=>body+=c);res.once('end',()=>resolve({status:res.statusCode,body}));});req.once('error',reject);req.end();
+  });
+  assert.equal(listed.status,200,listed.body);
+  await stop();
+});
+
+// Review R4: whether a printer is listed comes from the printer catalog, so a companion without objects (no capture
+// folder) also refuses printer.check instead of asking the placeholder MCP.
+test('review R4: printer.check says to add a printer on a companion without objects too', async t => {
+  const f=await fixture(t);
+  let asked=0;
+  const printerCheck={get:async()=>{asked++;return {state:'idle'};},close:async()=>{}};
+  const none=createControlDispatcher({auth:f.services.auth,companionVersion:'0.1.0',printerCheck,printerListed:()=>false});
+  await assert.rejects(none('printer.check',{start:true}),error=>error.code==='conflict'&&error.message==='Add a printer in Settings › Printers first.');
+  assert.equal(asked,0,'the placeholder MCP is never asked');
+  const listed=createControlDispatcher({auth:f.services.auth,companionVersion:'0.1.0',printerCheck,printerListed:()=>true});
+  await listed('printer.check',{start:true});
+  assert.equal(asked,1);
+});
+
+// #834: a fresh Mac goes from Add printer to an estimate in the same companion, with no restart.
+test('a fresh companion prints to the first printer added, with no restart', async t => {
+  const {f,call,address,projectId,stop,stderr}=await freshCompanion(t,{project:true});
+  // The app's own copy is already where the placeholder points: nothing may reach it before a printer is listed.
+  const mcp=await installAppMcp(f.root,'bambu-printer-mcp','1.1.94','setup-fields-bambu-printer-mcp-1.1.82.json');
+  const NO_PRINTER='Add a printer in Settings › Printers first.';
+  assert.deepEqual((await call('objects.printers')).result?.destinations,[]);
+  const refused=await call('objects.estimate',{id:projectId});
+  assert.equal(refused.error?.code,'conflict');assert.equal(refused.error.message,NO_PRINTER);
+  const checkRefused=await call('printer.check',{start:true});
+  assert.equal(checkRefused.error?.code,'conflict');assert.equal(checkRefused.error.message,NO_PRINTER);
+  // The phone's older handoff route and /v1/mcp say the same, over HTTP.
+  const {request}=await import('node:http');
+  const invitation=(await call('pairing.create')).result;
+  const phone=await f.auth.exchange('owner@example.test',{code:invitation.code,deviceName:'Local fixture'});
+  // A remote MCP client (`pair-mcp`: read is always granted).
+  const client=await f.auth.exchange('owner@example.test',{code:(await f.auth.createPairing('owner@example.test',['mcp:read'])).code,deviceName:'MCP client'});
+  const post=(device,path,type,body)=>new Promise((resolve,reject)=>{
+    const req=request(address+path,{method:'POST',headers:{host:f.auth.host,'x-forwarded-host':f.auth.host,'x-forwarded-proto':'https','tailscale-user-login':'owner@example.test','x-scan-device':device.deviceId,
+      authorization:`Bearer ${device.token}`,'content-type':type,'content-length':Buffer.byteLength(body)}},res=>{let text='';res.on('data',c=>text+=c);res.once('end',()=>resolve({status:res.statusCode,body:JSON.parse(text||'{}')}));});
+    req.once('error',reject);req.end(body);
+  });
+  for(const [device,path,type,body] of [[phone,'/v1/printer-handoff/bundles','model/stl','solid m\nendsolid m\n'],[client,'/v1/mcp','application/json',JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/list'})]]){
+    const answer=await post(device,path,type,body);
+    assert.equal(answer.status,409,path+' '+JSON.stringify(answer));assert.deepEqual(answer.body.error,{code:'no-printer',message:NO_PRINTER},path);
+  }
+  // Nothing printer-facing reached it (Settings may read its setup fields in the background).
+  const before=(await readFile(join(mcp,'dist','calls.ndjson'),'utf8').catch(()=>'')).trim().split('\n').filter(Boolean).map(line=>JSON.parse(line).tool);
+  assert.deepEqual(before.filter(tool=>tool!=='counterpart_setup_fields'),[],'the placeholder MCP saw no printer call');
+  // Designing needs printer software, not a printer: the code engine row reaches the app's own copy (the placeholder)
+  // with no printer added, and printing still asks for one.
+  const cadBefore=(await call('cad.status',{},30000)).result?.cad;
+  assert.equal(cadBefore?.state,'ready',JSON.stringify(cadBefore)+stderr());
+  assert.equal((await call('objects.estimate',{id:projectId})).error?.message,NO_PRINTER);
+  const added=await call('printers.add',{printer:{backend:'bambu-printer-mcp',printerType:'bambu',host:'192.0.2.10',serial:'01P00A000000001',model:'p1s',secret:'12345678'}},30000);
+  assert.ok(added.result?.destinationId,JSON.stringify(added)+stderr());
+  const listed=(await call('objects.printers')).result.destinations;
+  assert.deepEqual(listed.map(item=>item.id),[added.result.destinationId]);
+  const estimate=await call('objects.estimate',{id:projectId},60000);
+  assert.equal(estimate.result?.seconds,3720,JSON.stringify(estimate)+stderr());
+  // Once a printer is listed, the printer check reaches it as before.
+  assert.ok((await call('printer.check',{start:true})).result,'printer.check starts');
+  for(let i=0;i<200&&(await call('printer.check')).result?.state==='checking';i++)await new Promise(r=>setTimeout(r,50));
+  const tools=(await readFile(join(mcp,'dist','calls.ndjson'),'utf8')).trim().split('\n').map(line=>JSON.parse(line).tool);
+  assert.ok(tools.includes('slice_stl')&&tools.includes('inspect_print_file'),tools.join());
+  assert.ok(tools.includes('get_printer_status'),tools.join());
+  await stop();
+});
+
+// #834: the design tools follow the printer listed (here on mcp-3d-printer-server only), never the app's bambu copy.
+test('the code engine row reaches the first printer added on a generic-only Mac', async t => {
+  const {f,call,stop,stderr}=await freshCompanion(t);
+  assert.equal((await call('cad.status')).result?.cad?.state,'unavailable');
+  const mcp=await installAppMcp(f.root,'mcp-3d-printer-server','1.2.76','setup-fields-mcp-3d-printer-server-1.2.63.json');
+  const added=await call('printers.add',{printer:{backend:'mcp-3d-printer-server',printerType:'octoprint',host:'192.0.2.20',secret:'abcdef0123456789'}},30000);
+  assert.ok(added.result?.destinationId,JSON.stringify(added)+stderr());
+  const cad=(await call('cad.status',{},30000)).result?.cad;
+  assert.equal(cad?.state,'ready',JSON.stringify(cad)+stderr());
+  const tools=(await readFile(join(mcp,'dist','calls.ndjson'),'utf8')).trim().split('\n').map(line=>JSON.parse(line).tool);
+  assert.ok(tools.includes('cad_status'),tools.join());
+  await stop();
 });
 
 test('long methods get their own socket deadline; everything else keeps 10 s', async () => {

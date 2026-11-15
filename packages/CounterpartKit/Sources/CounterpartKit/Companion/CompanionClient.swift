@@ -245,6 +245,9 @@ public final class CompanionClient: @unchecked Sendable {
         throw refusal(reply, path: path)
     }
 
+    /// What's missing when an older Mac won't list projects: it has no printer yet (#827), not that it isn't open.
+    public static let noPrinterYet = "Add your printer on your Mac first: in Counterpart, open Settings › Printers."
+
     /// The Mac's refusal in plain words. A 409's message is written for the person, so it's shown as is.
     static func refusal(_ reply: HTTPReply, path: String) -> CompanionError {
         let error = JSONValue.object(from: reply.body)?["error"]?.object
@@ -254,7 +257,10 @@ public final class CompanionClient: @unchecked Sendable {
             || path.hasPrefix("/v1/printers/") || (path.hasPrefix("/v1/objects/printers/") && (path.hasSuffix("/route") || path.hasSuffix("/mcp")))
         switch reply.status {
         case 401, 403: return CompanionError(code: "pairing", message: "Connect to your Mac again.")
-        case 404 where path == "/v1/objects": return CompanionError(code: "not-set-up", message: "Your Mac isn't ready to make things yet. Open Counterpart on your Mac.")
+        // #827: only a companion from before the fix refuses the project list, and it does so when no printer is set up.
+        // A newer companion refuses it only when it runs without a capture folder; that companion is unsupported (the
+        // Mac app's agent always has one), so it isn't told apart here (review F8).
+        case 404 where path == "/v1/objects": return CompanionError(code: "not-set-up", message: Self.noPrinterYet)
         case 404 where path.hasSuffix("/filaments"): return CompanionError(code: "not-set-up", message: "Update Counterpart on your Mac to choose a filament here.")
         case 404 where path.hasSuffix("/colour-mapping"): return CompanionError(code: "not-set-up", message: "Update Counterpart on your Mac to choose a spool for each colour here.")
         case 404 where path.hasSuffix("/camera.jpg") && code == "not-found" && message?.contains("camera") == true:

@@ -40,6 +40,25 @@ def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def npm_tree_sha256(npm: Path) -> str:
+    """Review F7: npm's whole tree, pinned: every file's path, executable bit and SHA-256, in order. A symlink or anything
+    but a file or folder makes it unpinnable (the shipped tree has none)."""
+    digest = hashlib.sha256()
+    for path in sorted(npm.rglob("*"), key=lambda p: p.relative_to(npm).as_posix()):
+        relative = path.relative_to(npm).as_posix()
+        if path.is_symlink() or not (path.is_file() or path.is_dir()):
+            raise ValueError("Unapproved package-manager payload: npm has a symlink or special file: " + relative)
+        if path.is_file():
+            executable = "x" if path.stat().st_mode & 0o111 else "-"
+            digest.update(f"{relative}\0{executable}\0{sha256(path)}\n".encode())
+    return digest.hexdigest()
+
+
+def node_symlinks(node: Path) -> list[str]:
+    """Review F7: symlinks anywhere under the payload's node/ (the archive's bin links are removed before packaging)."""
+    return sorted(p.relative_to(node).as_posix() for p in node.rglob("*") if p.is_symlink()) if node.is_dir() else []
+
+
 def load_manifest(root: Path) -> dict:
     return json.loads((root / MANIFEST).read_text())
 
@@ -179,7 +198,7 @@ def render_notices(root: Path, manifest: dict, records: list[dict]) -> str:
                       "Adapted in " + ", ".join(f"`{f}`" for f in code["files"]) + f"; notice also in `{code['noticePath']}`.",
                       "", "~~~~", (root / code['licencePath']).read_text().strip(), "~~~~"]
     lines += ["", "## Companion npm production dependencies", "",
-              "Development dependencies, npm itself, pip and ensurepip are not shipped.", ""]
+              "Development dependencies, npx, corepack, pip and ensurepip are not shipped. npm ships unmodified inside Node.js (above).", ""]
     seen = set()
     for item in sorted(records, key=lambda i: (i["name"], i["version"])):
         if item["ecosystem"] != "npm" or (item["name"], item["version"]) in seen:
@@ -226,9 +245,26 @@ def verify_payload(root: Path, payload: Path) -> None:
     # code is not in the approved binary distributions and is never allowlisted.
     if any(p.name in {"jsonchecker", "aclocal.m4", "config.guess"} for p in payload.rglob("*")):
         raise ValueError("Unapproved source/build-only component in runtime payload")
-    for path in ["node/lib/node_modules", "python/lib/python3.12/ensurepip"]:
-        if (payload / path).exists():
-            raise ValueError(f"Unapproved package-manager payload: {path}")
+    if (payload / "python/lib/python3.12/ensurepip").exists():
+        raise ValueError("Unapproved package-manager payload: python/lib/python3.12/ensurepip")
+    # No symlinks under node/: the archive's bin/npm, npx and corepack links are replaced or removed (review F7).
+    links = node_symlinks(payload / "node")
+    if links:
+        raise ValueError("Unapproved symlink under node/: " + ", ".join(links))
+    # npm alone stays (#826: it installs printer software), at the version the pinned Node.js archive carries, file for
+    # file (review F7: `npmTreeSha256`, not only its package.json).
+    modules = payload / "node/lib/node_modules"
+    if modules.exists():
+        npm = modules / "npm"
+        if modules.is_symlink() or {p.name for p in modules.iterdir()} != {"npm"} or npm.is_symlink():
+            raise ValueError("Unapproved package-manager payload: node/lib/node_modules")
+        node_component = next(c for c in manifest["components"] if c["name"] == "Node.js")
+        if json.loads((npm / "package.json").read_text()).get("version") != node_component.get("npmVersion") \
+                or npm_tree_sha256(npm) != node_component.get("npmTreeSha256"):
+            raise ValueError("Unapproved package-manager payload: npm differs from the pinned Node.js release")
+    node_bin = payload / "node/bin"
+    if node_bin.is_dir() and not {p.name for p in node_bin.iterdir()} <= {"node", "npm"}:
+        raise ValueError("Unapproved package-manager payload: node/bin")
     expected_wheels = {c["pythonPackage"].replace("-", "_"): c for c in manifest["components"] if "pythonPackage" in c}
     site = payload / "python/lib/python3.12/site-packages"
     allowed_roots = {"README.txt"} | {p for c in expected_wheels.values() for p in c["pythonPaths"]}

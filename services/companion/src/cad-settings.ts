@@ -157,7 +157,9 @@ export class CadSettings {
     /** Waits for the code engine's turn (passes hold it while they run); refuses after `waitMs`. */
     lock?: (waitMs: number) => Promise<() => Promise<void>>;
     /** When to check again after each timeout in a row (tests make it short). */
-    retryMs?: readonly number[]}) {
+    retryMs?: readonly number[];
+    /** #827: why there is no printer MCP to ask right now (no printer yet), in words for the row; nothing is started then. */
+    unavailable?: () => string | undefined}) {
     this.#now = deps.now ?? Date.now;
     this.#retryMs = deps.retryMs ?? RETRY_MS;
   }
@@ -169,6 +171,7 @@ export class CadSettings {
 
   /** The row every layout shows. Reads `cad_status` again when the last answer is older than 30 s. */
   async view(): Promise<CadView> {
+    if (this.deps.unavailable?.() !== undefined) return this.current();
     if (!this.#setup && (!this.#status || this.#now() - this.#status.at > STALE_MS)) await this.refresh().catch(() => undefined);
     return this.current();
   }
@@ -186,6 +189,8 @@ export class CadSettings {
     const engine = this.#status?.status;
     const sized = storageWords(engine?.storage, engine?.configured === true);
     const size = sized ? {size: sized} : {};
+    const missing = this.#setup ? undefined : this.deps.unavailable?.();
+    if (missing !== undefined) return {state: 'unavailable', message: missing, canSetUp: false};
     if (this.#setup) return {state: 'setting-up', message: `Setting up… ${this.#setup.seconds} s so far.`, seconds: this.#setup.seconds, canSetUp: false, ...named, ...size};
     if (!this.#status) return {state: 'checking', message: 'Checking…', canSetUp: false, ...result};
     const status = this.#status.status;
@@ -205,7 +210,7 @@ export class CadSettings {
 
   /** Asks the printer MCP's `cad_status` now, and tells every client when the row changed. */
   refresh(): Promise<void> {
-    if (this.#closed) return Promise.resolve();
+    if (this.#closed || this.deps.unavailable?.() !== undefined) return Promise.resolve();
     this.#refreshing ??= (async () => {
       const before = JSON.stringify(this.current());
       try {

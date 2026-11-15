@@ -12,6 +12,8 @@ import ControlKit
 
 struct MainWindow: View {
     @ObservedObject var model: ObjectsModel
+    /// The AI choice, for what the start page says is still missing (#827).
+    @ObservedObject var ai: ModelAccessModel = AppModels.modelAccess
     @ObservedObject private var opened = OpenedFiles.shared
     @State private var inspector = true
     @State private var deleting: Project?
@@ -124,8 +126,14 @@ struct MainWindow: View {
             ProgressView().controlSize(.small).frame(maxWidth: .infinity, maxHeight: .infinity)
                 .navigationTitle("Counterpart")
         case .notSetUp:
-            QuietMessage(title: "Not Set Up Yet", text: "Counterpart needs Claude Code and your printer set up on this Mac first.")
-                .navigationTitle("Counterpart")
+            // Only a companion from before #827 refuses projects with no printer; this one lists them regardless.
+            VStack(spacing: 16) {
+                QuietMessage(title: "Add Your Printer", text: "In Settings › Printers, add your printer. Printing published models needs no AI.")
+                    .frame(maxHeight: 260)
+                Button("Add a Printer…") { SettingsTab.open(.printers) }.buttonStyle(.glassProminent)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .navigationTitle("Counterpart")
         // A project already shown stays, with one line that the companion isn't answering (board X100); the whole page
         // says so only when there is nothing to show.
         case .notRunning where model.selected == nil:
@@ -138,12 +146,20 @@ struct MainWindow: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 24) {
                         Text(model.objects.isEmpty ? "Your next project starts here" : "Choose a project, or make something new").font(.largeTitle.bold())
+                        SetupNeedsView(lines: setupNeeds)
                         StarterProjectsView { starter in try await model.addStarter(starter) }
                         Button("New Project", systemImage: "plus") { startNewProject(NewProjectDraft()) }.buttonStyle(.glassProminent)
                     }.padding(32).frame(maxWidth: 820)
                 }.navigationTitle("Projects")
+                .task { if ai.snapshot == nil { await ai.refresh() } }
             }
         }
+    }
+
+    /// #827: what this Mac still needs, each with its next step; nothing while the companion hasn't said.
+    private var setupNeeds: [SetupNeeds.Line] {
+        let ai: Bool? = self.ai.snapshot.map { $0.choice != .none }
+        return SetupNeeds.lines(printers: model.printerCatalog?.destinations.count, aiChosen: ai)
     }
 
     @ToolbarContentBuilder private var toolbar: some ToolbarContent {
@@ -607,5 +623,33 @@ private struct SidebarPrinter: View {
             }
         }
         .padding(24).frame(width: 520, height: 420)
+    }
+}
+
+/// #827: the start page's "still to do on this Mac" rows: what's missing, in the setup page's words, and the button
+/// that opens the Settings tab where it's done. Starters and New Project stay usable beside them.
+struct SetupNeedsView: View {
+    let lines: [SetupNeeds.Line]
+    var body: some View {
+        if !lines.isEmpty {
+            VStack(alignment: .leading, spacing: 12) {
+                ForEach(lines) { line in
+                    HStack(alignment: .center, spacing: 12) {
+                        Image(systemName: line.place == .printers ? "printer" : "sparkles").font(.title3).foregroundStyle(Color.filament)
+                            .frame(width: 36, height: 36).glassEffect(.regular, in: .rect(cornerRadius: 10))
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(line.title).font(.headline)
+                            Text(line.text).font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer(minLength: 12)
+                        Button(line.action) { SettingsTab.open(line.place == .printers ? .printers : .ai) }
+                            .buttonStyle(.glass)
+                            .accessibilityIdentifier("setup-\(line.place == .printers ? "printer" : "ai")")
+                    }
+                }
+            }
+            .padding(16)
+            .glassEffect(.regular, in: .rect(cornerRadius: 18))
+        }
     }
 }
