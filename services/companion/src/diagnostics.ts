@@ -65,22 +65,33 @@ export interface SoftwarePackage {
 const SECRET_WORDS = new Set(['password', 'passwd', 'passcode', 'passphrase', 'pwd', 'secret', 'secrets', 'token', 'tokens', 'key',
   'apikey', 'accesscode', 'accesskey', 'privatekey', 'authorization', 'auth', 'cookie', 'cookies', 'credential', 'credentials', 'signature',
   'ticket', 'login', 'email', 'userinfo', 'session', 'sessionid', 'sid', 'pin', 'otp', 'jwt', 'bearer', 'certificate', 'cert', 'sha256', 'fingerprint']);
-const SECRET_PAIRS = new Set(['access code', 'lan code', 'pair code', 'pairing code', 'user info', 'id token']);
-// Long words that are secrets even inside one unbroken name (`accesstoken`, `CLIENTSECRET`).
-const SECRET_INSIDE = /password|passwd|passcode|passphrase|secret|token|credential|cookie|authorization|signature|apikey|accesscode|privatekey/;
+const SECRET_PAIRS = new Set(['access code', 'lan code', 'pair code', 'pairing code', 'device code', 'unlock code', 'user info', 'id token']);
+// Long words that are secrets even inside one unbroken name (`accesstoken`, `CLIENTSECRET`), read over the whole name
+// lowercased and joined, so alternating case (`PaSsWoRd`, `AcCeSsCoDe`) can't split them apart.
+const SECRET_INSIDE = /password|passwd|passcode|passphrase|secret|token|credential|cookie|authorization|signature|apikey|accesscode|privatekey|(?:lan|pair|pairing|device|unlock)code/;
+
+/** Text with `\uXXXX`, `\xXX` and `%XX` escapes read, so `\x70assword` and `pass%77ord` read `password`. */
+export function decodeEscapes(text: string): string {
+  return text.replace(/\\{1,2}u([0-9a-fA-F]{4})|\\{1,2}x([0-9a-fA-F]{2})|%([0-9a-fA-F]{2})/g,
+    (_, u?: string, x?: string, p?: string) => String.fromCharCode(Number.parseInt((u ?? x ?? p)!, 16)));
+}
 
 export function isSecretName(name: string): boolean {
-  const decoded = name.replace(/\\u([0-9a-fA-F]{4})/g, (_, hex: string) => String.fromCharCode(Number.parseInt(hex, 16)));
+  const decoded = decodeEscapes(name);
+  if (SECRET_INSIDE.test(decoded.toLowerCase().replace(/[^a-z0-9]/g, ''))) return true;
   const words = decoded.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
   if (words.some(word => SECRET_WORDS.has(word))) return true;
-  if (words.some((word, i) => i > 0 && SECRET_PAIRS.has(`${words[i - 1]} ${word}`))) return true;
-  return SECRET_INSIDE.test(words.join(''));
+  // `pass` names a secret as the name's last word (`pass`, `mqtt_pass`, `lanPass`), not as a count (`passIndex`).
+  if (words.at(-1) === 'pass') return true;
+  return words.some((word, i) => i > 0 && SECRET_PAIRS.has(`${words[i - 1]} ${word}`));
 }
 
 /** A value that is already safe after a secret's name, as a whole value: a "[set]" or "[redacted…]" marker, "", true/false/null. */
 function safeValue(value: string): boolean {
   return /^(?:"(?:\[set\]|\[redacted[^"\]]*\])?"|\[set\]|\[redacted[^\]]*\]|true|false|null|'')$/.test(value);
 }
+/** A bare number under a measure's name (`tokenCount: 5`, `sessionTimeoutSec=30`) is not a secret. */
+const measure = (key: string, value: string) => /^-?\d+(?:\.\d+)?$/.test(value) && MEASURE_NAME.test(key);
 const KEY_CHARS = String.raw`(?:[A-Za-z0-9_.\-]|\\u[0-9a-fA-F]{4})+`;
 // A bare value: up to the next delimiter; a leading [marker] doesn't end it (`[set]hunter2` is one value).
 const BARE = String.raw`(?:\[[^\]\s]*\])?[^\s,;&}\]"'<>]*`;
@@ -90,10 +101,10 @@ const NAMED: [RegExp, (match: string, ...groups: string[]) => string][] = [
     (match, head, key, value) => isSecretName(key!) && value !== '\\"\\"' && value !== '\\"[set]\\"' ? `${head}\\"[redacted]\\"` : match],
   // JSON: "accessCode": "1234", a number, or a bare word.
   [new RegExp(String.raw`("(${KEY_CHARS})"\s*:\s*)("(?:[^"\\]|\\.)*"|${BARE})`, 'g'),
-    (match, head, key, value) => isSecretName(key!) && value && !safeValue(value) ? `${head}"[redacted]"` : match],
+    (match, head, key, value) => isSecretName(key!) && value && !safeValue(value) && !measure(key!, value) ? `${head}"[redacted]"` : match],
   // key=value, key: value, ?key=value&, #key=value (on one line: `KEY=` with nothing after it stays empty).
   [new RegExp(String.raw`(^|[^A-Za-z0-9_.\\])([A-Za-z][A-Za-z0-9_.\-]*)([ \t]*[=:](?!\/\/)[ \t]*)("[^"\n]*"|'[^'\n]*'|${BARE})`, 'gm'),
-    (match, before, key, sep, value) => isSecretName(key!) && value && !safeValue(value) ? `${before}${key}${sep}[redacted]` : match],
+    (match, before, key, sep, value) => isSecretName(key!) && value && !safeValue(value) && !measure(key!, value) ? `${before}${key}${sep}[redacted]` : match],
   // --key value.
   [/(--)([A-Za-z][A-Za-z0-9_.-]*)([ \t]+)("[^"\n]*"|'[^'\n]*'|[^\s"']+)/g,
     (match, dashes, key, space) => isSecretName(key!) ? `${dashes}${key}${space}[redacted]` : match],
@@ -120,7 +131,7 @@ const VALUES: [RegExp, string][] = [
   [/\b(?:hf_[A-Za-z0-9]{20,}|xox[abprs]-[A-Za-z0-9-]{10,})/g, '[redacted key]'],
   // Any long run of mixed case and digits (a pairing code, an unlabelled key). Serials (no lowercase) and hashes (no
   // uppercase) stay.
-  [/\b(?=[A-Za-z0-9_]*[A-Z])(?=[A-Za-z0-9_]*[a-z])(?=[A-Za-z0-9_]*[0-9])[A-Za-z0-9_]{24,}\b/g, '[redacted token]'],
+  [/\b(?=[A-Za-z0-9_]*[A-Z])(?=[A-Za-z0-9_]*[a-z])(?=[A-Za-z0-9_]*[0-9])[A-Za-z0-9_]{24,}\b(?!\.[A-Za-z][A-Za-z0-9]{1,5}\b)/g, '[redacted token]'],
   // A long base64 run (a DER certificate, a key), digits or not.
   [/\b(?=[A-Za-z0-9+]*[A-Z])(?=[A-Za-z0-9+]*[a-z])[A-Za-z0-9+]{40,}={0,2}/g, '[redacted token]'],
   // A pairing code or PIN said in words: "The pairing code is 482913", "Enter PIN 482913". Never a bare "code": a
@@ -205,6 +216,168 @@ export function redact(text: string, secrets: readonly string[] = [], home?: str
   return out;
 }
 
+// ---------------------------------------------------------------------------------------------------------------------
+// Fail closed (#839). `redact` above is a denylist of named forms, and free text keeps finding spellings it misses.
+// What the bundle carries goes through `cleanText`: known secrets in every encoded form, then JSON by its structure,
+// then any free-text line that names a secret withheld whole. Format-agnostic: no file names, log shapes or printer
+// codes of any MCP (AGENTS.md); an MCP withholds or keeps its own lines before they get here.
+
+const MARK = '[redacted]';
+export const WITHHELD = '[line withheld: may contain a secret]';
+
+/** The forms a known secret takes in text: as written, URL-encoded, JSON-escaped, and base64 at any byte offset. */
+function encodedForms(secret: string): string[] {
+  const forms = new Set([secret, encodeURIComponent(secret), JSON.stringify(secret).slice(1, -1)]);
+  const raw = Buffer.from(secret, 'utf8');
+  for (const before of [0, 1, 2]) {
+    // The base64 characters only this secret's bytes decide, wherever it sits in an encoded run (`bblp:<code>`).
+    const encoded = Buffer.concat([Buffer.alloc(before), raw]).toString('base64');
+    const start = before ? 4 : 0, end = Math.floor((before + raw.length) / 3) * 4;
+    if (end - start >= 8) forms.add(encoded.slice(start, end));
+    if (!before) { forms.add(encoded); forms.add(encoded.replace(/=+$/, '')); forms.add(encoded.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')); }
+  }
+  return [...forms].filter(form => form.length >= 6);
+}
+
+/** Text with every known secret removed in each encoded form. Runs before any cut, so no part of one survives a cut. */
+export function removeSecrets(text: string, secrets: readonly string[]): string {
+  const forms = [...new Set(secrets.flatMap(encodedForms))].sort((a, b) => b.length - a.length);
+  let out = text;
+  for (const form of forms) out = out.split(form).join(MARK);
+  return out;
+}
+
+/**
+ * Words that make a line suspect, read in the line lowercased, its escapes read and all but letters and digits removed
+ * ("pass word", "Pa_Ss-WoRd", "\x70assword" all read "password"); LINE_WORDS only as a whole word ("mqtt pass=…").
+ */
+const LINE_SECRETS = /pass(?:word|wd|code|phrase|key)|secret|token|apikey|accesscode|accesskey|(?:lan|pair|pairing|device|unlock|auth|verification|security|otp)code|authoriz|authkey|cookie|session|credential|privatekey|signature|bearer|userinfo|ticket/;
+const LINE_WORDS = new Set(['pass', 'passwd', 'pwd', 'pin', 'otp', 'auth', 'sid', 'key', 'keys', 'digest', 'negotiate', 'ntlm', 'jwt']);
+/** A name whose bare number is a measure, not a secret: tokenCount, sessionTimeoutSec, passwordMinLength, passIndex. */
+const MEASURE_NAME = /(?:count|counts|total|num|number|sec|secs|seconds|ms|millis|minutes|length|len|size|bytes|timeout|ttl|max|min|limit|retries|attempts|index|level|version)$/i;
+/** Generic values that say nothing secret: a marker, empty, a boolean, a version string. Never a bare number (an access code is one). */
+const SAFE = String.raw`\[set\]|\[redacted[^\]]*\]|true|false|null|""|''|v?\d{1,4}(?:\.\d{1,4}){1,3}(?:[-+][0-9A-Za-z.]+)?`;
+const SAFE_PAIR = new RegExp(String.raw`^[\s"'{\[,]*([A-Za-z0-9_.\-]{1,96})["']?[ \t]*[:=][ \t]*(?:["']?(${SAFE})["']?|(-?\d+(?:\.\d+)?))?[\s,}\]]*$`);
+/** A log line's leading time and level, kept on a withheld line. */
+const LINE_PREFIX = /^(?:\[?\d{4}-\d\d-\d\d[T ][\d:.,]+(?:Z|[+-]\d\d:?\d\d)?\]?\s+(?:\[?(?:error|warn(?:ing)?|info|debug|trace|fatal|notice)\]?:?\s+)?|\[?(?:error|warn(?:ing)?|info|debug|trace|fatal|notice)\]?:?\s+)/i;
+
+/** Whether a line may carry a secret: a secret word anywhere in it, in any spelling or encoding. */
+export function suspectLine(line: string): boolean {
+  const plain = decodeEscapes(line).toLowerCase();
+  if (LINE_SECRETS.test(plain.replace(/[^a-z0-9]/g, ''))) return true;
+  return plain.split(/[^a-z0-9]+/).some(word => LINE_WORDS.has(word));
+}
+
+/** Whether a suspect line is only a name and a value that says nothing secret (`accessCodeSet: true`, `TOKEN=[set]`). */
+function safeLine(line: string): boolean {
+  const m = SAFE_PAIR.exec(line.replace(LINE_PREFIX, ''));
+  return !!m && (m[3] === undefined || MEASURE_NAME.test(m[1]!));
+}
+
+/** Quotes and brackets left open so far, read on through a line. */
+interface Open {depth: number; quote: string}
+function readOpen(state: Open, line: string): Open {
+  let {depth, quote} = state;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (quote) { if (c === '\\') i++; else if (c === quote) quote = ''; continue; }
+    if (c === '"') quote = c;
+    else if (c === '{' || c === '[') depth++;
+    else if (c === '}' || c === ']') depth = Math.max(0, depth - 1);
+  }
+  return {depth, quote};
+}
+/** Most lines one withheld line takes with it, so a stray quote can't withhold the rest of a log. */
+const CONTINUATION_LIMIT = 200;
+
+/**
+ * Free text with each suspect line withheld whole, and the lines that continue it (indented, inside a quote or bracket
+ * it left open, or a YAML block it starts); its time and level stay. A line that is only a name and a safe value stays.
+ */
+export function withholdLines(text: string): string {
+  const lines = text.split('\n'), out: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    if (!suspectLine(line) || safeLine(line)) { out.push(line); continue; }
+    out.push((LINE_PREFIX.exec(line)?.[0] ?? '') + WITHHELD);
+    let open = readOpen({depth: 0, quote: ''}, line);
+    const block = /[:=]\s*[>|][-+]?\d?\s*$/.test(line);
+    for (let taken = 0; taken < CONTINUATION_LIMIT && i + 1 < lines.length; taken++) {
+      const next = lines[i + 1]!;
+      const inside = open.depth > 0 || open.quote !== '';
+      if (!inside && !/^[ \t]+\S/.test(next) && !(block && /^\s/.test(next))) break;
+      if (!inside && LINE_PREFIX.test(next)) break;
+      open = readOpen(open, next);
+      i++;
+    }
+  }
+  return out.join('\n');
+}
+
+const PEM = /-----BEGIN [A-Z0-9 ]+-----[\s\S]*?(?:-----END [A-Z0-9 ]+-----|$)/g;
+/** Free text, failing closed: known secrets, PEM blocks (their bodies name nothing), suspect lines, then the named forms. */
+function freeText(text: string, secrets: readonly string[], home?: string): string {
+  return redact(withholdLines(removeSecrets(text, secrets).replace(PEM, '[redacted PEM block]')), [], home);
+}
+
+/** Fields that hold a setting's name: `{"name":"PRINTER_TOKEN"}` names a secret, it isn't one. */
+const NAME_FIELD = /^(?:name|key|env|env_?name|variable|var|field|id|label|property|setting_?name)$/i;
+const IDENTIFIER = /^[A-Za-z_][\w.\-:]{0,95}$/;
+
+/**
+ * A value redacted by its structure: a secret-named key's value goes (a marker, a boolean or a measure stays); an object
+ * where a field names a secret loses its other values, nested ones too; a string holding JSON is read and walked;
+ * an identifier (an event type, a setting's name) gets only the named forms; any other string is free text.
+ */
+export function redactValue(value: unknown, secrets: readonly string[] = [], home?: string, depth = 0): unknown {
+  if (depth > 32) return WITHHELD;
+  if (typeof value === 'string') {
+    const t = value.trim();
+    if ((t.startsWith('{') && t.endsWith('}')) || (t.startsWith('[') && t.endsWith(']'))) {
+      try { return JSON.stringify(redactValue(JSON.parse(t), secrets, home, depth + 1)); } catch { /* not JSON */ }
+    }
+    return IDENTIFIER.test(value) ? redact(value, [], home) : freeText(value, secrets, home);
+  }
+  if (Array.isArray(value)) return value.map(item => redactValue(item, secrets, home, depth + 1));
+  if (!value || typeof value !== 'object') return value;
+  const entries = Object.entries(value as Record<string, unknown>);
+  const names = (k: string, v: unknown): v is string => NAME_FIELD.test(k) && typeof v === 'string' && IDENTIFIER.test(v);
+  const named = entries.some(([k, v]) => names(k, v) && isSecretName(v));
+  const safe = (v: unknown) => typeof v === 'boolean' || v === null || v === undefined || v === '' || v === '[set]';
+  return Object.fromEntries(entries.map(([k, v]) => {
+    if (names(k, v) && isSecretName(v)) return [k, v];
+    if (isSecretName(k)) return [k, safe(v) || (typeof v === 'number' && MEASURE_NAME.test(k)) ? v : MARK];
+    if (named) return [k, safe(v) ? v : MARK];
+    return [k, redactValue(v, secrets, home, depth + 1)];
+  }));
+}
+
+/**
+ * Any text the bundle carries, failing closed and format-agnostic: a whole JSON document, or each line that is JSON
+ * (an event log), is redacted by its structure and written back in its own layout; the rest is free text.
+ */
+export function cleanText(text: string, secrets: readonly string[] = [], home?: string): string {
+  const swept = removeSecrets(text, secrets);
+  const whole = swept.trim();
+  if (whole.startsWith('{') || whole.startsWith('[')) {
+    try {
+      const pretty = /\n[ \t]+["{\[]/.test(swept) ? 2 : undefined;
+      return JSON.stringify(redactValue(JSON.parse(whole), secrets, home), null, pretty) + (swept.endsWith('\n') ? '\n' : '');
+    } catch { /* not one document */ }
+  }
+  const out: string[] = [], run: string[] = [];
+  const flush = () => { if (run.length) { out.push(freeText(run.join('\n'), secrets, home)); run.length = 0; } };
+  for (const line of swept.split('\n')) {
+    const t = line.trim();
+    if (t.startsWith('{') || t.startsWith('[')) {
+      try { const parsed: unknown = JSON.parse(t); flush(); out.push(JSON.stringify(redactValue(parsed, secrets, home))); continue; } catch { /* free text */ }
+    }
+    run.push(line);
+  }
+  flush();
+  return out.join('\n');
+}
+
 const bytes = (text: string) => Buffer.byteLength(text, 'utf8');
 /** What a string costs in the JSON reply, escapes included. */
 const jsonBytes = (text: string) => bytes(JSON.stringify(text));
@@ -279,7 +452,7 @@ export async function diagnosticsBundle(source: DiagnosticsSource): Promise<Diag
   const files: BundleFile[] = [], notes: string[] = [];
   const sessions = (() => { try { return source.sessions?.() ?? []; } catch { return []; } })();
   const secrets = configuredSecrets(sessions, source.ownEnv);
-  const clean = (text: string) => redact(text, secrets, source.home);
+  const clean = (text: string) => cleanText(text, secrets, source.home);
   const add = (name: string, content: string, truncated = false) => files.push({name, content: clean(content), truncated});
   const json = (value: unknown) => `${JSON.stringify(value, null, 2)}\n`;
 
@@ -322,7 +495,7 @@ export async function diagnosticsBundle(source: DiagnosticsSource): Promise<Diag
       let budget = maxBytes - SUMMARY_RESERVE;
       let kept = 0;
       for (const note of diagnostics.notes.slice(0, MAX_MCP_NOTES)) {
-        const line = oneLine(`${label} for ${printer}: ${note}`);
+        const line = oneLine(`${label} for ${printer}: ${removeSecrets(note, secrets)}`);
         if (jsonBytes(line) > budget) break;
         budget -= jsonBytes(line); said.push(line); kept++;
       }
@@ -336,7 +509,8 @@ export async function diagnosticsBundle(source: DiagnosticsSource): Promise<Diag
         const room = budget - jsonBytes(name) - FILE_OVERHEAD;
         if (room < 0) { left++; continue; }
         // The MCP keeps to max_bytes; a bundle that doesn't is cut here, keeping each file's newest lines.
-        const kept = tail(file.content, Math.floor(room / 2));
+        // Known secrets go before the cut, and the cut drops its partial first line, so no part of one survives it.
+        const kept = tail(removeSecrets(file.content, secrets), Math.floor(room / 2));
         budget -= jsonBytes(name) + FILE_OVERHEAD + jsonBytes(kept.content);
         out.push({name, content: kept.content, truncated: file.truncated || kept.truncated});
       }

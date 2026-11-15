@@ -126,7 +126,8 @@ test('no access code, token or email comes out, from the event log, the MCP\'s f
   ].join('\n') + '\n';
   const {eventsPath} = await fixture(t, events);
   const leaky = session('p1s', {diagnostics: true, env: {BAMBU_ACCESS_CODE: ACCESS_CODE, BAMBU_TOKEN: TOKEN}, bundle: {package: 'bambu-printer-mcp', version: '1.1.90',
-    files: [{name: 'fulu/control-trace.log', content: `serial=01P00A123456789 host=192.0.2.7 code ${ACCESS_CODE} user ${EMAIL} bearer ${TOKEN}\nkey sk-ant-api03-mcpfilesecretabcdefghij jwt eyJhbGciOiJIUzI1NiJ9.eyJtY3AiOiJmaWxlIn0.c2lnbWNwZmlsZQ\n`, truncated: false}],
+    // A line that names a secret is withheld whole (#839), its serial with it; a line that names none keeps its serial.
+    files: [{name: 'fulu/control-trace.log', content: `printer serial=01P00A123456789 host=192.0.2.7 ready\nserial=01P00A123456789 host=192.0.2.7 code ${ACCESS_CODE} user ${EMAIL} bearer ${TOKEN}\nkey sk-ant-api03-mcpfilesecretabcdefghij jwt eyJhbGciOiJIUzI1NiJ9.eyJtY3AiOiJmaWxlIn0.c2lnbWNwZmlsZQ\n`, truncated: false}],
     notes: [`signed in as ${EMAIL} with ${ACCESS_CODE}`]}});
   const bundle = await diagnosticsBundle({eventsPath, sessions: () => [{destinationId: 'p1s', printer: 'P1S', session: leaky.session}]});
   const all = JSON.stringify(bundle);
