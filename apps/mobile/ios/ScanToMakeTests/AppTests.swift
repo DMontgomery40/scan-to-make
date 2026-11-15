@@ -1002,6 +1002,9 @@ private actor HeldDownload {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: folder) }
         var lying = Self.boxSTL(); withUnsafeBytes(of: UInt32.max.littleEndian) { lying.replaceSubrange(80..<84, with: $0) }
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<4 { root.deleteLastPathComponent() }
+        let zips = root.appendingPathComponent("packages/CounterpartKit/Tests/CounterpartKitTests/Fixtures")
         let ascii = Data("solid p\nvertex 0 0 0\nvertex 10 0 0\nvertex 0 10 0\nvertex 0 0 0\nvertex 0 10 0\nvertex 0 0 10\nendsolid p\n".utf8)
         // true: a USDZ is made; false: nil; nil: either, so long as it doesn't crash.
         let cases: [(String, Data?, Bool?)] = [
@@ -1010,6 +1013,9 @@ private actor HeldDownload {
             ("84 bytes, no triangles", Data(count: 84), false),
             ("85 bytes", Data(count: 85), false),
             ("a 3MF under the STL's name", Data([0x50, 0x4B, 0x03, 0x04] + [UInt8](repeating: 0x20, count: 400)), false),
+            // Review R1 on #843: real zips, deflated and stored; the reader had invented thousands of triangles from them.
+            ("a real deflated 3MF under the STL's name", try Data(contentsOf: zips.appendingPathComponent("stl-reader-deflated.3mf")), false),
+            ("a real stored zip under the STL's name", try Data(contentsOf: zips.appendingPathComponent("stl-reader-stored.zip")), false),
             ("an ASCII STL", ascii, true),
             ("the pink box's slivers beside a part", Self.boxSTL(adding: Self.pinkBoxSlivers), true),
             ("the pink box's slivers alone", Self.boxSTL(adding: Self.pinkBoxSlivers).prefix(84) + Self.boxSTL(adding: Self.pinkBoxSlivers).suffix(5 * 50), nil),
@@ -1042,10 +1048,18 @@ private actor HeldDownload {
         let stl = folder.appendingPathComponent("model.stl")
         try Self.boxSTL().write(to: stl)
         let old = folder.appendingPathComponent("ar-\(UUID().uuidString).usda"), fresh = folder.appendingPathComponent("ar-\(UUID().uuidString).usda")
-        try Data("#usda 1.0".utf8).write(to: old); try Data("#usda 1.0".utf8).write(to: fresh)
-        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-3600)], ofItemAtPath: old.path)
+        let current = folder.appendingPathComponent("\(PartUSDZ.scratchPrefix)\(UUID().uuidString).usdz")
+        // Review R4 on #843: names that only look like scratch are never the cleanup's.
+        let notes = folder.appendingPathComponent("ar-notes.usda"), served = folder.appendingPathComponent("v17-current_model.neutral.ar.usdz")
+        for file in [old, fresh, current, notes, served] { try Data("#usda 1.0".utf8).write(to: file) }
+        for file in [old, current, notes, served] {
+            try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-3600)], ofItemAtPath: file.path)
+        }
         ARModel.removeStale(beside: stl)
         XCTAssertFalse(FileManager.default.fileExists(atPath: old.path), "an abandoned scratch file is cleared")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: current.path), "so is one this build's writer left")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: notes.path), "a name that isn't the writer's stays")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: served.path), "a served file is never scratch")
         XCTAssertTrue(FileManager.default.fileExists(atPath: fresh.path), "one a write may still be making is kept")
         XCTAssertTrue(FileManager.default.fileExists(atPath: stl.path), "the model itself is never touched")
     }

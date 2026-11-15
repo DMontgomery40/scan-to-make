@@ -96,7 +96,7 @@ struct PrintConfirmSheet: View {
         .glassEffect(.regular, in: .rect(cornerRadius: 24))
     }
 
-    static func clock(_ seconds: Double) -> String { String(format: "%d:%02d", Int(seconds) / 60, Int(seconds) % 60) }
+    static func clock(_ seconds: Double) -> String { let s = max(0, Int(saturating: seconds)); return "\(s / 60):" + String(format: "%02d", s % 60) }
 
     private func answer(_ action: PrintConfirmationResponse.Action) {
         guard !working else { return }
@@ -297,7 +297,7 @@ struct ConfirmationFieldView: View {
                         else if let number = Double(trimmed.replacingOccurrences(of: ",", with: ".")) { value = .number(number) }
                         else { value = .string(trimmed) }
                     }
-                    .onAppear { if case .number(let n) = value { text = field.type == .integer ? String(Int(n)) : String(n) } }
+                    .onAppear { if case .number(let n) = value { text = field.type == .integer && n.isFinite && abs(n) < 1e15 ? String(Int(n.rounded())) : String(n) } }
                 limits
             }
         case .unknown:
@@ -336,7 +336,7 @@ struct ConfirmationFieldView: View {
         if let words { Text(words).font(.caption).foregroundStyle(.secondary) }
     }
 
-    private static func number(_ n: Double) -> String { n.rounded() == n ? String(Int(n)) : String(n) }
+    static func number(_ n: Double) -> String { n.rounded() == n && abs(n) < 1e15 ? String(Int(n)) : String(n) }
 
     private var date: Date? { if case .string(let s) = value { field.format == "date" ? Self.day.date(from: s) : ISO.date(s) } else { nil } }
     private func format(_ date: Date) -> String { field.format == "date" ? Self.day.string(from: date) : ISO8601DateFormatter().string(from: date) }

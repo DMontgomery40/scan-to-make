@@ -110,7 +110,7 @@ import CounterpartKit
         #if DEBUG
         // UI tests: a wait that never hears from the canned Mac expires within the test.
         if Fixtures.folder != nil, let seconds = ProcessInfo.processInfo.environment["COUNTERPART_MCP_WAIT_SECONDS"].flatMap(Double.init) {
-            mcpWaits.waitingLimit = .milliseconds(Int(seconds * 1000))
+            mcpWaits.waitingLimit = .milliseconds(Int(saturating: seconds * 1000))
         }
         #endif
     }
