@@ -12,6 +12,13 @@ from urllib.parse import urlparse, unquote
 MAC = Path(__file__).resolve().parents[1]
 REPO = MAC.parents[1]
 MANIFEST = json.loads((MAC / 'distribution.json').read_text())
+# #826: the app's own npm, from the same Node.js release as its node, so Settings → Printers can install printer
+# software on a Mac without Node.js. Run by the node beside it: no PATH, shebang or Node.js install needed.
+NPM_LAUNCHER = '''#!/bin/sh
+# npm from the same Node.js release as the node beside it, run by that node (Scan to Make, #826).
+case $0 in */*) bin=${0%/*} ;; *) bin=. ;; esac
+exec "$bin/node" "$bin/../lib/node_modules/npm/bin/npm-cli.js" "$@"
+'''
 
 
 def run(*args, **kwargs):
@@ -62,10 +69,23 @@ with tempfile.TemporaryDirectory() as temporary:
         if 'pythonPackage' in component:
             wheel = download(component, work)
             run(python, '-m', 'pip', 'install', '--no-deps', '--no-index', wheel)
-    # Build tools are not runtime dependencies. Remove their vendored closures.
-    shutil.rmtree(payload / 'node/lib/node_modules')
+    # Build tools are not runtime dependencies. Remove their vendored closures, except npm, which installs and
+    # updates printer software (#826): kept unmodified from the checksum-verified Node.js archive.
+    shutil.rmtree(payload / 'node/lib/node_modules/corepack')
     for name in ['npm', 'npx', 'corepack']:
         (payload / 'node/bin' / name).unlink(missing_ok=True)
+    node_component = next(c for c in MANIFEST['components'] if c['name'] == 'Node.js')
+    npm_version = json.loads((payload / 'node/lib/node_modules/npm/package.json').read_text())['version']
+    if npm_version != node_component['npmVersion']:
+        raise ValueError(f"The Node.js archive's npm is {npm_version}, not the pinned {node_component['npmVersion']}")
+    launcher = payload / 'node/bin/npm'
+    launcher.write_text(NPM_LAUNCHER)
+    launcher.chmod(0o755)
+    # It runs with nothing on PATH, the way a Mac without Node.js runs it.
+    answered = subprocess.run([launcher, '--version'], check=True, capture_output=True, text=True,
+                              env={'PATH': '', 'HOME': str(work)}).stdout.strip()
+    if answered != npm_version:
+        raise ValueError(f'The bundled npm answered {answered!r}, not {npm_version}')
     site = payload / 'python/lib/python3.12/site-packages'
     for path in site.glob('pip*'):
         if path.is_dir(): shutil.rmtree(path)

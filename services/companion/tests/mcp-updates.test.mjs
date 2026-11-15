@@ -2212,3 +2212,111 @@ test('review F7: a copy whose version can\'t be read isn\'t updated by itself, a
   const known = await updater(t, {profile, files: {[`${live}/dist/index.js`]: '', [`${live}/package.json`]: pkgJson('1.1.46')}});
   assert.equal(known.updates.autoReason('p1s'), undefined);
 });
+
+// #826: a clean Mac has no Node.js. The app's own npm (beside its node, from the same Node.js release) is used first,
+// run by that node, for both the latest-version lookup and Download; and a failure says what really failed.
+test('#826: the app\'s own npm, run by its node, is used before PATH, Homebrew and nvm; a missing npm or registry says so', async t => {
+  const PAYLOAD = '/Applications/Scan to Make.app/Contents/Resources/Payload/node';
+  const node = `${PAYLOAD}/bin/node`, bundledCli = `${PAYLOAD}/lib/node_modules/npm/bin/npm-cli.js`;
+  // The app's npm is a launcher (realpath is itself), so its npm-cli.js is found by the release layout.
+  const everywhere = {[`${PAYLOAD}/bin/npm`]: '#!/bin/sh\n', [bundledCli]: '', '/b/npm': '', '/opt/homebrew/bin/npm': '', [`${HOME}/.nvm/versions/node/v22.1.0/bin/npm`]: ''};
+  const updaterWith = (files, run) => {
+    const commands = [], events = [];
+    const updates = new McpUpdater({destinations: () => [], env: mac(files), overrides: new McpOverrides(join(tempDirSync('mcp-826-'), 'o.json')),
+      session: () => undefined, busy: async () => false, runningVersion: () => undefined, node, path: '/b',
+      fs: {rename: async () => undefined, rm: async () => undefined, mkdir: async () => undefined},
+      emit: async event => { events.push(event); },
+      run: async (command, args, options) => { commands.push({line: [command, ...args].join(' '), env: options.env}); return run(command, args); }});
+    return {updates, commands, events};
+  };
+  const ok = async (_command, args) => args.includes('view') ? {code: 0, output: '1.1.94\n'} : {code: 0, output: ''};
+  // The lookup: the app's own npm, run by the app's own node (no shebang, no PATH needed).
+  const f = updaterWith(everywhere, ok);
+  assert.equal(await f.updates.checkLatest('bambu-printer-mcp'), '1.1.94');
+  assert.equal(f.commands[0].line, `${node} ${bundledCli} view bambu-printer-mcp version`);
+  assert.ok(f.commands[0].env.PATH.startsWith(`${PAYLOAD}/bin:`), 'npm\'s children find the app\'s node first');
+  // Download installs with the same npm and node.
+  await f.updates.download('bambu-printer-mcp');
+  await until(() => f.events.some(event => event.type === 'mcp.update.done' || event.type === 'mcp.update.failed'));
+  assert.match(f.commands.at(-1).line, new RegExp(`^${node.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} ${bundledCli.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} install --global `));
+
+  // No npm anywhere: Download says npm is missing, never the internet.
+  const none = updaterWith({}, ok);
+  const missing = await none.updates.download('bambu-printer-mcp').then(() => undefined, error => error);
+  assert.ok(missing, 'Download is refused');
+  assert.match(missing.message, /couldn't find npm/i);
+  assert.doesNotMatch(missing.message, /internet/i);
+  assert.equal(none.commands.length, 0, 'nothing ran');
+
+  // The registry doesn't answer: that is what it says.
+  const offline = updaterWith(everywhere, async () => ({code: 1, output: 'npm error code ENOTFOUND\nnpm error request to https://registry.npmjs.org/bambu-printer-mcp failed, reason: getaddrinfo ENOTFOUND registry.npmjs.org\n'}));
+  const unreachable = await offline.updates.download('bambu-printer-mcp').then(() => undefined, error => error);
+  assert.match(unreachable.message, /couldn't reach the npm registry/i);
+  assert.match(unreachable.message, /internet connection/i);
+
+  // npm answers with another error: its own words, not the internet.
+  const notFound = updaterWith(everywhere, async () => ({code: 1, output: 'npm error code E404\nnpm error 404 Not Found - GET https://registry.npmjs.org/bambu-printer-mcp - Not found\n'}));
+  const refused = await notFound.updates.download('bambu-printer-mcp').then(() => undefined, error => error);
+  assert.match(refused.message, /npm error 404 Not Found/);
+  assert.doesNotMatch(refused.message, /internet/i);
+
+  // npm can't be started at all.
+  const broken = updaterWith(everywhere, async () => { throw Object.assign(new Error('spawn EACCES'), {code: 'EACCES'}); });
+  const unstartable = await broken.updates.download('bambu-printer-mcp').then(() => undefined, error => error);
+  assert.match(unstartable.message, /couldn't run npm/i);
+  assert.doesNotMatch(unstartable.message, /internet/i);
+
+  // A later answer clears the earlier failure.
+  let fail = true;
+  const flaky = updaterWith(everywhere, async (_command, args) => fail ? {code: 1, output: 'npm error code ETIMEDOUT\n'} : ok(_command, args));
+  assert.equal(await flaky.updates.checkLatest('bambu-printer-mcp'), undefined);
+  fail = false;
+  assert.equal(await flaky.updates.checkLatest('bambu-printer-mcp'), '1.1.94');
+  assert.equal(flaky.updates.latestVersion('bambu-printer-mcp'), '1.1.94');
+});
+
+test('#826: npm-cli.js is found through a symlink (Homebrew) or beside a launcher (the app, Linux)', async () => {
+  const {npmCli} = await import('../dist/printing/mcp-install.js');
+  const brew = mac({'/opt/homebrew/bin/npm': '', '/opt/homebrew/lib/node_modules/npm/bin/npm-cli.js': ''}, {'/opt/homebrew/bin/npm': '/opt/homebrew/lib/node_modules/npm/bin/npm-cli.js'});
+  assert.equal(npmCli('/opt/homebrew/bin/npm', brew), '/opt/homebrew/lib/node_modules/npm/bin/npm-cli.js');
+  const app = mac({'/p/node/bin/npm': '', '/p/node/lib/node_modules/npm/bin/npm-cli.js': ''});
+  assert.equal(npmCli('/p/node/bin/npm', app), '/p/node/lib/node_modules/npm/bin/npm-cli.js');
+  assert.equal(npmCli('/b/npm', mac({'/b/npm': ''})), undefined);
+});
+
+test('#826: the app\'s own npm comes first, before npm beside another node, PATH, Homebrew and nvm (--allow-scripts needs its version)', () => {
+  const app = '/Applications/Scan to Make.app/Contents/Resources/Payload/node/bin/node';
+  const env = mac({[`${app.slice(0, -'node'.length)}npm`]: '', '/opt/homebrew/bin/npm': '', '/b/npm': ''});
+  assert.equal(findNpm('/opt/homebrew/bin/node', env, '/b', app), `${app.slice(0, -'node'.length)}npm`);
+  assert.equal(findNpm(undefined, env, '/b', app), `${app.slice(0, -'node'.length)}npm`);
+  // Without the app's npm (a development companion), the old order stands.
+  assert.equal(findNpm('/opt/homebrew/bin/node', mac({'/opt/homebrew/bin/npm': '', '/b/npm': ''}), '/b', app), '/opt/homebrew/bin/npm');
+});
+
+test('#826: Update of the app\'s copy run by another node still installs with the app\'s own npm', async t => {
+  const PAYLOAD = '/Applications/Scan to Make.app/Contents/Resources/Payload/node';
+  const prefix = `${APP}/printers/bambu`;
+  const files = {[`${prefix}/lib/node_modules/bambu-printer-mcp/package.json`]: pkgJson('1.1.46'), [`${prefix}/lib/node_modules/bambu-printer-mcp/dist/index.js`]: '',
+    [`${PAYLOAD}/bin/npm`]: '', [`${PAYLOAD}/lib/node_modules/npm/bin/npm-cli.js`]: '', '/opt/homebrew/bin/node': ''};
+  const f = await updater(t, {profile: bambu('/opt/homebrew/bin/node', [`${prefix}/lib/node_modules/bambu-printer-mcp/dist/index.js`]), files});
+  await f.updates.update(f.mcpId);
+  await f.done();
+  assert.equal(f.commands[0], `${PAYLOAD}/bin/node ${PAYLOAD}/lib/node_modules/npm/bin/npm-cli.js view bambu-printer-mcp version`);
+  assert.match(f.commands[1], new RegExp(`^/opt/homebrew/bin/node ${PAYLOAD.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/lib/node_modules/npm/bin/npm-cli\\.js install --global `),
+    'the MCP\'s own node runs the app\'s npm, so native parts match the node that runs it');
+});
+
+test('#826: a checkout run by another node builds with the app\'s npm under that node, so native parts match it', async t => {
+  const PAYLOAD = '/Applications/Scan to Make.app/Contents/Resources/Payload/node';
+  const dir = `${HOME}/src/bambu-printer-mcp`, cli = `${PAYLOAD}/lib/node_modules/npm/bin/npm-cli.js`;
+  const files = {[`${dir}/package.json`]: pkgJson('1.1.46'), [`${dir}/.git/HEAD`]: '', [`${dir}/dist/index.js`]: '', [`${PAYLOAD}/bin/npm`]: '', [cli]: ''};
+  const checkout = await updater(t, {profile: bambu('/opt/homebrew/bin/node', [`${dir}/dist/index.js`]), files});
+  await checkout.updates.update(checkout.mcpId);
+  await checkout.done();
+  assert.deepEqual(checkout.commands.slice(-2), [`/opt/homebrew/bin/node ${cli} ci (in ${dir})`, `/opt/homebrew/bin/node ${cli} run build (in ${dir})`]);
+  // A build that fails goes back the same way.
+  const broken = await updater(t, {profile: bambu('/opt/homebrew/bin/node', [`${dir}/dist/index.js`]), files, fail: 'run build'});
+  await broken.updates.update(broken.mcpId);
+  await broken.done();
+  assert.deepEqual(broken.commands.slice(-2), [`/opt/homebrew/bin/node ${cli} ci (in ${dir})`, `/opt/homebrew/bin/node ${cli} run build (in ${dir})`]);
+});

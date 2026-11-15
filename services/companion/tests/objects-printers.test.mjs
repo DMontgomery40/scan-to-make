@@ -1087,3 +1087,20 @@ test('a configured folder is found while the MCPs listen; Add names its printer 
   assert.ok(added.id);
   assert.ok(!started.includes('mcp-3d-printer-server'), 'naming the printer never starts the other MCP');
 });
+
+// #826: with no printer software installed, nothing listened, so discovery says to install it first (the clients'
+// words), never that another app may be holding the network.
+test('#826: discovery with no printer software installed says so, not "another app may be using it"', async t => {
+  const {PrinterSetup} = await import('../dist/printing/setup.js');
+  const {hostEnvironment} = await import('../dist/printing/mcp-install.js');
+  const home = await tempDir('printer-discover-none-');
+  t.after(() => rm(home, {recursive: true, force: true}));
+  const env = {...hostEnvironment(join(home, 'data')), home, path: '/nowhere'};
+  const started = [];
+  const setup = new PrinterSetup({env, configs: () => [], profilesPath: join(env.appPrinters, 'profiles.json'), node: '/usr/local/bin/node', discoverBudgetMs: 3_000,
+    client: config => { started.push(config.backend); throw new Error('no MCP is installed to start'); }});
+  const discovery = await setup.discover();
+  assert.equal(discovery.network, 'no-software');
+  assert.deepEqual(discovery.found, []);
+  assert.deepEqual(started, [], 'nothing was started');
+});

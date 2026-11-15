@@ -119,6 +119,37 @@ class MacDistributionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'package-manager'):
             verify_payload(self.root, payload)
 
+    def test_only_the_pinned_npm_ships_in_the_node_runtime(self):
+        # #826: npm installs printer software, so it stays; nothing else from the Node.js archive's package managers does.
+        payload = self.root / 'Payload'
+        for name in [Path(p).name for p in self.manifest['sourcePaths'] if p.startswith('tools/')]:
+            (payload / 'source/tools' / name).mkdir(parents=True)
+        (payload / 'python').mkdir()
+        self.add_helper(payload)
+        pinned = next(c for c in self.manifest['components'] if c['name'] == 'Node.js')['npmVersion']
+        npm = payload / 'node/lib/node_modules/npm'
+        npm.mkdir(parents=True)
+        (npm / 'package.json').write_text(json.dumps({'name': 'npm', 'version': pinned}))
+        (payload / 'node/bin').mkdir()
+        (payload / 'node/bin/npm').write_text('#!/bin/sh\n')
+        verify = lambda: verify_payload(self.root, payload)
+        # The pinned npm passes the package-manager checks (the fixture has no wheels, so a later check may stop it).
+        try:
+            verify()
+        except (ValueError, OSError) as error:
+            self.assertNotIn('package-manager', str(error))
+        (npm / 'package.json').write_text(json.dumps({'name': 'npm', 'version': '10.0.0'}))
+        with self.assertRaisesRegex(ValueError, 'npm differs from the pinned'):
+            verify()
+        (npm / 'package.json').write_text(json.dumps({'name': 'npm', 'version': pinned}))
+        (payload / 'node/lib/node_modules/corepack').mkdir()
+        with self.assertRaisesRegex(ValueError, 'package-manager payload: node/lib/node_modules'):
+            verify()
+        (payload / 'node/lib/node_modules/corepack').rmdir()
+        (payload / 'node/bin/npx').write_text('')
+        with self.assertRaisesRegex(ValueError, 'package-manager payload: node/bin'):
+            verify()
+
     def test_unlisted_python_wheel_is_rejected(self):
         payload = self.root / 'Payload'
         for name in [Path(p).name for p in self.manifest['sourcePaths'] if p.startswith('tools/')]:
