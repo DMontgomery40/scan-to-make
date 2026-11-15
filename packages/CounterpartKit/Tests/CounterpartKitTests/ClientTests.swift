@@ -1000,6 +1000,10 @@ final class CompanionClientTests: XCTestCase {
         let body = try XCTUnwrap(JSONSerialization.jsonObject(with: try XCTUnwrap(seen.body)) as? [String: Any])
         XCTAssertEqual(body["run"] as? String, run)
         XCTAssertEqual(body["images"] as? [String], ["0001.heic", "0002.heic"])
+        // Scoped as the Mac checks it (captures:import): an unscoped route never leaves the phone, so Remove would do
+        // nothing on the Mac (found on the Mac run of #819).
+        XCTAssertEqual(CompanionClient.scope("DELETE", "/v1/objects/\(id)/capture-manifest"), "captures:import")
+        XCTAssertNil(CompanionClient.scope("DELETE", "/v1/objects/\(id)/capture"))
     }
 
     /// Apple's Object Capture names become the Mac's capture frame names, NNNN in capture order; anything else stops the send.

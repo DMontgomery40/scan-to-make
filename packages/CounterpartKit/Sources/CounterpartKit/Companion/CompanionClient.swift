@@ -95,7 +95,8 @@ public final class CompanionClient: @unchecked Sendable {
             if is_(one + "/settings") { return "captures:import" }
             if is_("/v1/settings") { return "projects:write" }
         case "DELETE":
-            if is_(one) { return "captures:import" }
+            // A project, or a walk-around's declared list (Remove on a stopped scan, #819), as the Mac checks them.
+            if is_(one) || is_(one + "/capture-manifest") { return "captures:import" }
             if is_("/v1/devices/[^/]+") { return "projects:write" }
         case "PUT":
             if is_(one + "/scan") { return "captures:import" }
