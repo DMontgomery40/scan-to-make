@@ -113,7 +113,7 @@ const NAMED: [RegExp, (match: string, ...groups: string[]) => string][] = [
   [/(--)([A-Za-z][A-Za-z0-9_.-]*)([ \t]+)("[^"\n]*"|'[^'\n]*'|[^\s"']+)/g,
     (match, dashes, key, space) => isSecretName(key!) ? `${dashes}${key}${space}[redacted]` : match],
 ];
-const VALUES: [RegExp, string | ((match: string, ...groups: string[]) => string)][] = [
+const VALUES: [RegExp, string][] = [
   // PEM blocks of any type (private keys, certificates), whole.
   [/-----BEGIN [A-Z0-9 ]+-----[\s\S]*?(?:-----END [A-Z0-9 ]+-----|$)/g, '[redacted PEM block]'],
   // scheme://user:password@host keeps its host.
@@ -122,9 +122,7 @@ const VALUES: [RegExp, string | ((match: string, ...groups: string[]) => string)
   // A whole Authorization or Proxy-Authorization header line, whatever its scheme (a Digest header's username and
   // response are parameters, not one credential).
   [/(^|[^"\w-])((?:Proxy-)?Authorization[ \t]*:)[^\n]*/gim, '$1$2 [redacted]'],
-  // A state word after the scheme ("token expired", "token refresh failed") is not a credential: it stays.
-  [/\b(Bearer|Basic|Digest|Negotiate|Token)(\s+)([A-Za-z0-9._~+/=-]{6,})/gi,
-    (match, scheme, space, value) => AUTH_STATE.has(value!.toLowerCase()) ? match : `${scheme}${space}[redacted]`],
+  [/\b(Bearer|Basic|Digest|Negotiate|Token)(\s+)[A-Za-z0-9._~+/=-]{6,}/gi, '$1$2[redacted]'],
   // Cookie headers, whole line.
   [/^((?:Set-)?Cookie:).*$/gim, '$1 [redacted]'],
   // JSON web tokens.
@@ -214,7 +212,7 @@ export function configuredSecrets(sessions: readonly {session: PrinterSession}[]
 export function redact(text: string, secrets: readonly string[] = [], home?: string): string {
   let out = text;
   for (const secret of secrets) out = out.split(secret).join('[redacted]');
-  for (const [pattern, replacement] of VALUES) out = out.replace(pattern, replacement as (match: string, ...groups: string[]) => string);
+  for (const [pattern, replacement] of VALUES) out = out.replace(pattern, replacement);
   out = redactPairs(redactNested(out));
   for (const [pattern, replace] of NAMED) out = out.replace(pattern, replace as (match: string, ...rest: string[]) => string);
   if (home && home.length > 1) out = out.split(home).join('~').split(home.replaceAll('/', '\\/')).join('~');
@@ -312,63 +310,6 @@ function safeLine(line: string): boolean {
   return !!m && !isOpen(readOpen({depth: 0, quote: ''}, body, true)) && (m[3] === undefined || MEASURE_NAME.test(m[1]!));
 }
 
-/**
- * Auth-state lines: "login expired", "token refresh failed", "Access code is wrong", "401 Unauthorized". Their secret
- * words say a credential's state, never its value, and they are the most useful failure a tester's report carries. An
- * allowlist: a suspect line is kept only when every secret word in it sits by one of these state words or phrases, or
- * is a setting's name (`SOME_SERVICE_TOKEN`) with nothing after it, and nothing value-shaped is anywhere near. Generic
- * words only: no printer or MCP wording.
- */
-const AUTH_STATE = new Set(['expired', 'expires', 'expire', 'expiring', 'refresh', 'refreshed', 'failed', 'failure', 'fails', 'invalid',
-  'incorrect', 'wrong', 'rejected', 'revoked', 'missing', 'required', 'denied', 'unauthorized', 'unauthorised', 'unauthenticated',
-  'forbidden', 'authstate']);
-/** Phrases read as one state word: their own secret words (`auth login`, `setup-token`) name a command, not a value. */
-const AUTH_PHRASES = /\bnot\s+(?:set|authenticated|authori[sz]ed|logged\s+in|signed\s+in|valid|configured)\b|\b(?:sign|log)\s+in\s+again\b|\bauth\s+(?:login|logout|status)\b|\bsetup-token\b/gi;
-/** A word that could be a secret's value: digits in a run of four or more, a long run, or a token's shape. */
-const valueShaped = (word: string) => (/\d/.test(word) && word.length >= 4) || word.length >= 16 || /^eyJ/.test(word);
-const SETTING_NAME = /^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$/;
-const FILLER = new Set(['the', 'a', 'an', 'your', 'this', 'that', 'its', 'has', 'have', 'been', 'is', 'was', 'for', 'to', 'and', 'or', 'of']);
-
-/** Whether a suspect line only says a credential's state (see AUTH_STATE), with no value of one anywhere in it. */
-function authStateLine(line: string): boolean {
-  const body = decodeEscapes(line.replace(LINE_PREFIX, ''));
-  // No quoted value, no URL credentials, nothing left open.
-  if (body.includes('"') || /(?:^|[^A-Za-z0-9])'/.test(body) || /[^\s:/@]+:[^\s@/]*@|:\/\/[^\s/]*@/.test(body)) return false;
-  if (isOpen(readOpen({depth: 0, quote: ''}, body, true))) return false;
-  const items = body.replace(AUTH_PHRASES, ' authstate ').match(/[A-Za-z0-9_.+/-]+|[:=@]/g) ?? [];
-  // A separator anywhere followed by something value-shaped ("expired: eyJ…", "=abc123…").
-  if (items.some((item, i) => (item === ':' || item === '=' || item === '@') && items[i + 1] !== undefined && valueShaped(items[i + 1]!))) return false;
-  const words = items.map(item => item.replace(/[.+/]+$/g, ''));
-  const plain = (w: string) => w.toLowerCase().replace(/[^a-z0-9]/g, '');
-  const hit = (i: number): boolean => {
-    const w = words[i];
-    if (w === undefined || !/[A-Za-z]/.test(w) || plain(w) === 'authstate') return false;
-    if (LINE_SECRETS.test(plain(w)) || w.toLowerCase().split(/[^a-z0-9]+/).some(part => LINE_WORDS.has(part))) return true;
-    // Two words that spell one ("access code", "pass word").
-    return LINE_SECRETS.test(plain(w) + plain(words[i + 1] ?? '')) || LINE_SECRETS.test(plain(words[i - 1] ?? '') + plain(w));
-  };
-  const state = (w: string | undefined) => w !== undefined && AUTH_STATE.has(w.toLowerCase());
-  for (let i = 0; i < words.length; i++) {
-    if (!hit(i)) continue;
-    const w = words[i]!, next = items[i + 1], prev = items[i - 1];
-    if (next === ':' || next === '=' || next === '@' || prev === '@' || prev === '=') return false;
-    if (prev === ':' && i >= 2 && hit(i - 2)) return false;                       // user:pass
-    // Next and previous real words: never value-shaped; after "is"/"was", only a state ("Access code is wrong").
-    const after = words.slice(i + 1).filter(x => /[A-Za-z0-9]/.test(x)), before = words.slice(0, i).filter(x => /[A-Za-z0-9]/.test(x)).reverse();
-    if ((after[0] && valueShaped(after[0]) && !hit(i + 1)) || (before[0] && valueShaped(before[0]) && !hit(i - 1))) return false;
-    if (/^(?:is|was|are|were)$/i.test(after[0] ?? '') && !(state(after[1]) || /^not$/i.test(after[1] ?? ''))) return false;
-    if (state(w)) continue;                                                        // "Unauthorized" says its own state
-    if (SETTING_NAME.test(w)) continue;                                            // a setting's name, nothing after it
-    // A state word within three real words either side (filler words skipped).
-    const near = [...after.filter(x => !FILLER.has(x.toLowerCase())).slice(0, 3), ...before.filter(x => !FILLER.has(x.toLowerCase())).slice(0, 3)];
-    if (!near.some(state)) return false;
-  }
-  return true;
-}
-
-/** A rescued auth-state line with any secret-shaped run (long base64, hex, a JWT, a random run with digits) replaced. */
-const scrubRuns = (line: string) => line.replace(/\beyJ[\w-]*\.[\w-]*(?:\.[\w-]*)?|[A-Za-z0-9+/=_-]{16,}/g, run => /\d/.test(run) || /^eyJ/.test(run) ? MARK : run);
-
 /** Most lines a heuristic continuation (indented lines, a YAML block, a single quote) takes, so it stays bounded. */
 const CONTINUATION_LIMIT = 200;
 const indent = (line: string) => /^[ \t]*/.exec(line)![0].length;
@@ -420,7 +361,6 @@ export function withholdLines(text: string): string {
     if (!suspectLine(line)) { out.push(line); continue; }
     const taken = continuation(lines, i);
     if (safeLine(line)) { out.push(line); if (taken) out.push(WITHHELD); }
-    else if (!taken && authStateLine(line)) out.push(scrubRuns(line));
     else out.push((LINE_PREFIX.exec(line)?.[0] ?? '') + WITHHELD);
     i += taken;
   }
