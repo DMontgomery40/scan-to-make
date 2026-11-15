@@ -466,6 +466,42 @@ import CounterpartKit
         guard case .shown(let shown) = decide(load, kept: (key2, plate1)), shown === plate1 else { return XCTFail("its own kept picture shows") }
     }
 
+    /// #799: Settings → Share Diagnostics… gathers only what this phone keeps and makes the ZIP on the device itself (the
+    /// system's `.forUploading` archiver). The pairing's token, pin and device id are handed to the redactor by value, and
+    /// the Mac's name never leaves. The contents and every redaction rule are checked in CounterpartKit `PhoneDiagnosticsTests`.
+    func testShareDiagnosticsGathersThePhonesStateAndMakesAZIPOnTheDevice() throws {
+        let mac = SettingsMac()
+        let pairing = PairingClient(store: PairingStore(store: Fixtures.store()), transport: mac)
+        let store = ProjectsStore(mac: MacConnection(client: CompanionClient(pairing: pairing, transport: mac)), pairing: pairing)
+        let record = try XCTUnwrap(try pairing.store.read())
+        let token = try XCTUnwrap(record.token), pin = try XCTUnwrap(record.publicKeySha256), device = try XCTUnwrap(record.deviceId)
+        store.error = CompanionError(code: "unreachable", message: "No answer to \(token) for \(device)")
+        store.link = .notAnswering
+
+        let diagnostics = DiagnosticsShare.gather(store: store, cloud: MobileCloud())
+        XCTAssertTrue(Set([token, pin, device]).isSubset(of: Set(diagnostics.secrets)), "the phone's own secrets go by value")
+        XCTAssertEqual(diagnostics.pairing.state, "paired")
+        XCTAssertEqual(diagnostics.pairing.link, "not answering")
+        XCTAssertEqual(diagnostics.pairing.address, "https, IPv4 address")
+        XCTAssertTrue(diagnostics.pairing.certificatePinned)
+        XCTAssertEqual(diagnostics.errors.first, "Projects: unreachable: No answer to \(token) for \(device)")
+        XCTAssertFalse(diagnostics.about.build.isEmpty)
+        XCTAssertTrue(diagnostics.about.system.contains("OS"), diagnostics.about.system)
+        XCTAssertEqual(diagnostics.trace, MediaTrace.shared.url)
+
+        let folder = FileManager.default.temporaryDirectory.appending(path: "diagnostics-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let zip = try diagnostics.makeZIP(in: folder)
+        XCTAssertEqual(zip.lastPathComponent, PhoneDiagnostics.fileName())
+        let bytes = try Data(contentsOf: zip)
+        XCTAssertEqual(Array(bytes.prefix(4)), [0x50, 0x4B, 0x03, 0x04], "a ZIP")
+        // Entry names are stored as they are, so they can be read without unzipping.
+        let names = String(decoding: bytes, as: UTF8.self)
+        for name in ["about.txt", "pairing.json", "errors.txt", "drafts.json", "notes.txt"] {
+            XCTAssertTrue(names.contains("Counterpart Phone Diagnostics ") && names.contains(name), name)
+        }
+    }
+
     /// #720: a launch into one project's page reads that project alone, before (or without) the list. That one project is
     /// not the Mac's list, so the library must not take every other project as deleted and let its files go.
     func testOneProjectReadAloneIsNotTheMacsListForTheLibrary() {

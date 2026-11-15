@@ -1,65 +1,111 @@
 import Foundation
 
-/// The text rules every diagnostics file passes through before it leaves the phone (#799). They are the companion's
-/// (`services/companion/src/diagnostics.ts`, #813) ported to Swift, so the phone, the computers and the MCPs remove the
-/// same things, plus what only a phone has: its app container paths, a certificate pin, and addresses in free text.
+/// The text rules every diagnostics file passes through before it leaves the phone (#799). They start from the companion's
+/// (`services/companion/src/diagnostics.ts`, #813) and close the gaps the lead's review of #813 found (lowercase
+/// schemes, `key`/`pin`/`session` names, prefix-only safe values, more token shapes), plus what only a phone has.
 ///
-/// Removed: values of secret-named keys (JSON, escaped JSON, `key=value`, `key: value`, `--flag value`), URL credentials,
-/// authorization schemes, cookies, JWTs, `sk-`-style keys, PEM keys, emails, pairing links, 64-character hex values (a
-/// pin or a hash), IPv4 addresses and full home paths. Kept: `[set]`, empty values and `true`/`false`/`null` after a
-/// secret's name, so a report still says whether something is configured; and every word around them.
+/// Removed:
+/// - the phone's own secrets by value (pairing token, certificate or public-key pin, device id), in every encoding;
+/// - values of secret-named keys (JSON, escaped JSON, `key=value`, `key: value`, `--flag value`), whatever the case;
+/// - `Authorization` values, `bearer` credentials in any case, URL credentials, cookies;
+/// - JWTs, `sk-`/`ghp_`/`github_pat_`/`AKIA`/`AIza`/`xox?-` tokens, PEM blocks of any kind;
+/// - 64-hex, colon-hex and base64 SHA-256 values, 32- and 43-character base64url runs (pairing codes, tokens);
+/// - emails, pairing links, IPv4 addresses, home and container paths (also with JSON's escaped slashes).
+/// Kept: a whole value of `[set]`, `[redacted…]`, empty, `true`, `false` or `null` after a secret's name (only the whole
+/// value: `token=[set]hunter2` goes), so a report still says whether something is configured; and the words around them.
 public enum DiagnosticsRedaction {
-    // `auth` and `pin` only as a word of their own (`AUTH_TOKEN`, `pinCode`), so "Failed to authenticate", "colourMapping",
-    // "shipping" and "pinnedBaseURL" keep their letters.
-    static let secretWord = #"(?:password|passwd|passcode|pwd|secret|token|api[_-]?key|apikey|access[_-]?code|accesscode|access[_-]?key|authorization|auth(?:[_-]?key)?(?![a-z])|pin(?:[_-]?code)?(?![a-z])|cookie|credential|private[_-]?key|signature|ticket|login|email|user[_-]?info)"#
+    // `auth`, `key`, `pin` and `otp` only as a word of their own (`AUTH_TOKEN`, `session_key`, `PAIRING_PIN`, `pinCode`), so
+    // "Failed to authenticate", "keyboard", "colourMapping", "shipping" and "pinnedBaseURL" keep their letters.
+    static let secretWord = #"(?:password|passwd|passphrase|passcode|pwd|secret|token|api[_-]?key|apikey|access[_-]?code|accesscode|authorization|auth(?:[_-]?key)?(?![a-z])|key(?![a-z])|pin(?:[_-]?code)?(?![a-z])|pairing[_-]?code|otp(?![a-z])|session|cookie|credential|signature|ticket|login|email|user[_-]?info)"#
     static let secretKey = "[A-Za-z0-9_.-]*" + secretWord + "[A-Za-z0-9_.-]*"
-    /// Values already safe after a secret's name.
-    static let safe = #"(?!"(?:\[set\]|\[redacted[^"]*\])?"|\[set\]|\[redacted|true\b|false\b|null\b|"")"#
+    /// A value that is safe as a whole: a marker, empty, true, false or null, followed by the value's end.
+    static let safe = #"(?!(?:"(?:\[set\]|\[redacted[^"\]]*\])?"|\[set\]|\[redacted[^\]\s"]*\]|true|false|null)(?=[\s,;&}\]"']|$))"#
+    /// `/` or JSON's escaped `\/`.
+    static let slash = #"\\?/"#
 
     private static func rule(_ pattern: String, _ template: String, _ options: NSRegularExpression.Options = []) -> (NSRegularExpression, String) {
         (try! NSRegularExpression(pattern: pattern, options: options), template)
     }
 
     static let rules: [(NSRegularExpression, String)] = [
-        // PEM private keys, whole.
-        rule(#"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)"#, "[redacted private key]"),
+        // PEM blocks of any kind (private keys, certificates), whole.
+        rule(#"-----BEGIN [A-Z0-9 ]+-----[\s\S]*?(?:-----END [A-Z0-9 ]+-----|$)"#, "[redacted PEM block]"),
         // scheme://user:password@host keeps its host.
-        rule(#"\b([a-z][a-z0-9+.-]*://)[^/\s:@"'<>]+(?::[^/\s@"'<>]*)?@"#, "$1[redacted]@", .caseInsensitive),
-        // Authorization schemes, before `key: value`, so "Authorization: Bearer <token>" loses the token as well as the word.
-        rule(#"\b(Bearer|Basic|Digest|Token)\s+[A-Za-z0-9._~+/=-]{6,}"#, "$1 [redacted]"),
+        rule(#"\b([a-z][a-z0-9+.-]*:(?://|\\/\\/))[^/\\\s:@"'<>]+(?::[^/\\\s@"'<>]*)?@"#, "$1[redacted]@", .caseInsensitive),
+        // An Authorization header's whole value (`basic`, `digest`, `bearer`, anything), in any case and in JSON.
+        rule(#"(authorization["']?[ \t]*[:=][ \t]*["']?)[^\r\n"',}]+"#, "$1[redacted]", .caseInsensitive),
+        // A bearer credential anywhere, in any case; `Basic`/`Digest`/`Token` as written in headers.
+        rule(#"\b(bearer)\s+[A-Za-z0-9._~+/=-]{6,}"#, "$1 [redacted]", .caseInsensitive),
+        rule(#"\b(Basic|Digest|Token)\s+[A-Za-z0-9._~+/=-]{6,}"#, "$1 [redacted]"),
         // Escaped JSON inside a string: \"accessCode\":\"1234\".
         rule(#"(\\""# + secretKey + #"\\"\s*:\s*)\\"(?:[^"\\]|\\[^"])*\\""#, #"$1\\"[redacted]\\""#, .caseInsensitive),
         // JSON: "accessCode": "1234" (a number or bare word too).
-        rule(#"(""# + secretKey + #""\s*:\s*)"# + safe + #"(?:"(?:[^"\\]|\\.)*"|[^\s,}\]]+)"#, #"$1"[redacted]""#, .caseInsensitive),
+        rule(#"(""# + secretKey + #""\s*:\s*)"# + safe + #"(?:"(?:[^"\\]|\\.)*"|[^\s,}]+)"#, #"$1"[redacted]""#, .caseInsensitive),
         // key=value, key: value, ?key=value&, --key value (on one line).
-        rule(#"(\b"# + secretKey + #"[ \t]*[=:][ \t]*|--"# + secretKey + #"[ \t]+)"# + safe + #"(?:"[^"\n]*"|'[^'\n]*'|[^\s,;&}\]"']+)"#, "$1[redacted]", .caseInsensitive),
+        rule(#"(\b"# + secretKey + #"[ \t]*[=:][ \t]*|--"# + secretKey + #"[ \t]+)"# + safe + #"(?:"[^"\n]*"|'[^'\n]*'|[^\s,;&}"']+)"#, "$1[redacted]", .caseInsensitive),
         // Cookie headers, whole line.
         rule(#"^((?:Set-)?Cookie:).*$"#, "$1 [redacted]", [.caseInsensitive, .anchorsMatchLines]),
         // JSON web tokens.
         rule(#"\beyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]+"#, "[redacted token]"),
-        // API keys with a known prefix.
+        // Tokens and keys with a known prefix.
         rule(#"\b(?:sk|pk|rk)-[A-Za-z0-9_-]{16,}"#, "[redacted key]"),
-        // Email addresses (an Apple Account, a printer account).
-        rule(#"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}"#, "[redacted email]"),
-        // A pairing link carries its code.
-        rule(#"scantomake://pair\?[^\s"']+"#, "scantomake://pair?[redacted]"),
-        // The phone's own: a certificate pin or any 64-character hex value.
+        rule(#"\bgithub_pat_[A-Za-z0-9_]{20,}"#, "[redacted token]"),
+        rule(#"\bgh[pousr]_[A-Za-z0-9]{20,}"#, "[redacted token]"),
+        rule(#"\bA(?:KIA|SIA)[0-9A-Z]{16}\b"#, "[redacted key]"),
+        rule(#"\bAIza[0-9A-Za-z_-]{35}"#, "[redacted key]"),
+        rule(#"\bxox[abprs]-[A-Za-z0-9-]{10,}"#, "[redacted token]"),
+        // Email addresses (an Apple Account, a printer account), also percent-encoded.
+        rule(#"[A-Za-z0-9._%+-]+(?:@|%40)[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}"#, "[redacted email]"),
+        // A pairing link carries its code and pin, also percent-encoded.
+        rule(#"scantomake:(?://|\\/\\/)pair\?[^\s"']+"#, "scantomake://pair?[redacted]", .caseInsensitive),
+        rule(#"scantomake%3A%2F%2Fpair[^\s"'&]*"#, "scantomake://pair?[redacted]", .caseInsensitive),
+        // Certificate pins and hashes: 64 hex, colon-separated hex, base64 SHA-256.
         rule(#"\b[A-Fa-f0-9]{64}\b"#, "[redacted hex]"),
-        // Any app's container on a phone, and a Mac's home folder (the Simulator's paths hold the Mac's user name).
-        rule(#"(?:/private)?/var/mobile/Containers/(?:Data|Shared)/(?:Application|AppGroup)/[A-Fa-f0-9-]{36}"#, "~"),
-        rule(#"/Users/[^/\s"']+"#, "/Users/[redacted]"),
+        rule(#"\b(?:[A-Fa-f0-9]{2}:){31}[A-Fa-f0-9]{2}\b"#, "[redacted hex]"),
+        rule(#"(?<![A-Za-z0-9+])[A-Za-z0-9+/]{43}="#, "[redacted hash]"),
+        // Pairing codes (32) and pairing tokens (43): exact base64url runs; a 36-character UUID is never one.
+        rule(#"(?<![A-Za-z0-9_-])(?:[A-Za-z0-9_-]{43}|[A-Za-z0-9_-]{32})(?![A-Za-z0-9_-])"#, "[redacted token]"),
+        // Any app's container on a phone is `~`; another /var/mobile path keeps only its start.
+        rule(#"(?:\\?/private)?\\?/var\\?/mobile\\?/Containers\\?/(?:Data|Shared)\\?/(?:Application|AppGroup|PluginKitPlugin)\\?/[A-Fa-f0-9-]{36}"#, "~"),
+        rule(#"(\\?/var\\?/mobile)(?:\\?/[^\n"',;]*)?"#, "$1/[redacted path]"),
+        // A person's home folder on a Mac or Linux (the Simulator's paths hold the Mac's user name).
+        // A name may have spaces ("/Users/Taylor Person/…"): everything up to the next slash goes.
+        rule(#"(\\?/(?:Users|home)\\?/)(?!\[redacted)[^/\\\n"',;]+"#, "$1[redacted]"),
         // IPv4 addresses in free text: the pairing state says only what kind of address the phone uses.
         rule(#"\b(?:\d{1,3}\.){3}\d{1,3}\b"#, "[redacted address]"),
     ]
 
+    /// Every form a known secret might be written in: as is, either case, base64 of a hex value's bytes, colon hex, and
+    /// JSON's escaped slashes.
+    static func forms(_ secret: String) -> [String] {
+        var forms = [secret, secret.lowercased(), secret.uppercased(), secret.replacingOccurrences(of: "/", with: #"\/"#)]
+        if secret.count % 2 == 0, secret.allSatisfy(\.isHexDigit) {
+            var bytes = Data(), index = secret.startIndex
+            while index < secret.endIndex {
+                let next = secret.index(index, offsetBy: 2)
+                bytes.append(UInt8(secret[index..<next], radix: 16)!); index = next
+            }
+            let base64 = bytes.base64EncodedString()
+            forms += [base64, base64.replacingOccurrences(of: "/", with: #"\/"#),
+                      base64.replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")]
+            let pairs = stride(from: 0, to: secret.count, by: 2).map { offset -> String in
+                let start = secret.index(secret.startIndex, offsetBy: offset)
+                return String(secret[start..<secret.index(start, offsetBy: 2)])
+            }
+            forms += [pairs.joined(separator: ":").lowercased(), pairs.joined(separator: ":").uppercased()]
+        }
+        return forms
+    }
+
     /// `text` with every secret removed; `secrets` (known values) go first, then the home folder reads `~`.
     public static func redact(_ text: String, secrets: [String] = [], home: String? = NSHomeDirectory()) -> String {
         var out = text
-        for secret in secrets.filter({ $0.count >= 4 }).sorted(by: { $0.count > $1.count }) {
-            out = out.replacingOccurrences(of: secret, with: "[redacted]")
-        }
+        let known = Set(secrets.filter { $0.count >= 4 }.flatMap(forms)).sorted { $0.count > $1.count }
+        for secret in known { out = out.replacingOccurrences(of: secret, with: "[redacted]") }
         if let home, home.count > 1 {
-            out = out.replacingOccurrences(of: "/private" + home, with: "~").replacingOccurrences(of: home, with: "~")
+            for form in ["/private" + home, home] {
+                out = out.replacingOccurrences(of: form, with: "~").replacingOccurrences(of: form.replacingOccurrences(of: "/", with: #"\/"#), with: "~")
+            }
         }
         for (regex, template) in rules {
             out = regex.stringByReplacingMatches(in: out, range: NSRange(out.startIndex..., in: out), withTemplate: template)
@@ -150,10 +196,16 @@ public struct PhoneDiagnostics: Sendable {
     public var drafts: [Draft]
     /// `MediaTrace.shared.url`; its older segment is `<url>.1`.
     public var trace: URL?
+    /// The phone's own secret values (pairing token, pins, device id): removed by value, in every form, from every file.
+    public var secrets: [String]
+    /// What the app couldn't read while gathering (the drafts, the pairing): each becomes a line in `notes.txt`.
+    public var notes: [String]
     public var home: String?
 
-    public init(about: About, pairing: Pairing, errors: [String], drafts: [Draft], trace: URL?, home: String? = NSHomeDirectory()) {
-        self.about = about; self.pairing = pairing; self.errors = errors; self.drafts = drafts; self.trace = trace; self.home = home
+    public init(about: About, pairing: Pairing, errors: [String], drafts: [Draft], trace: URL?, secrets: [String] = [],
+                notes: [String] = [], home: String? = NSHomeDirectory()) {
+        self.about = about; self.pairing = pairing; self.errors = errors; self.drafts = drafts; self.trace = trace
+        self.secrets = secrets; self.notes = notes; self.home = home
     }
 
     /// "Counterpart Phone Diagnostics 2026-11-14.zip", in the phone's own day.
@@ -168,40 +220,53 @@ public struct PhoneDiagnostics: Sendable {
         return "Counterpart Phone Diagnostics \(format.string(from: date))"
     }
 
-    /// The files, by name, every one redacted.
-    func files(date: Date) throws -> [(String, Data)] {
-        func clean(_ text: String) -> Data { Data(DiagnosticsRedaction.redact(text, home: home).utf8) }
+    /// The files, by name, every one redacted. A part that can't be made becomes a line in `notes.txt` and the rest go on.
+    func files(date: Date) -> (files: [(String, Data)], notes: [String]) {
+        func clean(_ text: String) -> Data { Data(DiagnosticsRedaction.redact(text, secrets: secrets, home: home).utf8) }
         var files: [(String, Data)] = []
-        var notes: [String] = []
+        var notes = self.notes
+        func add(_ name: String, _ make: () throws -> String) {
+            do { files.append((name, clean(try make()))) }
+            catch { notes.append("\(name) couldn’t be made (\((error as NSError).domain) \((error as NSError).code)), so it is left out.") }
+        }
 
-        let exported = ISO8601DateFormatter().string(from: date)
-        files.append(("about.txt", clean("Counterpart \(about.version) (build \(about.build))\n\(about.system)\nDevice \(about.model)\nExported \(exported)\n")))
-
+        add("about.txt") {
+            "Counterpart \(about.version) (build \(about.build))\n\(about.system)\nDevice \(about.model)\nExported \(ISO8601DateFormatter().string(from: date))\n"
+        }
         let json = JSONEncoder(); json.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
-        files.append(("pairing.json", clean(String(decoding: try json.encode(pairing), as: UTF8.self) + "\n")))
+        add("pairing.json") { String(decoding: try json.encode(pairing), as: UTF8.self) + "\n" }
         if pairing.state == "disconnected" {
             notes.append(pairing.iCloudConfigured
                 ? "This phone is not paired with a Mac by code; iCloud lists \(pairing.iCloudMacs) Mac\(pairing.iCloudMacs == 1 ? "" : "s")."
                 : "This phone is not paired with a Mac, and this build has no iCloud.")
         }
-
-        let errorText = errors.isEmpty ? "No request errors are held on this phone.\n"
-            : "The app keeps only the latest of each; earlier ones are in the media trace as request.error.\n\n" + errors.map { "- \($0)" }.joined(separator: "\n") + "\n"
-        files.append(("errors.txt", clean(errorText)))
-        files.append(("drafts.json", clean((drafts.isEmpty ? "[]" : String(decoding: try json.encode(drafts), as: UTF8.self)) + "\n")))
+        add("errors.txt") {
+            errors.isEmpty ? "No request errors are held on this phone.\n"
+                : "The app keeps only the latest of each; earlier ones are in the media trace as request.error.\n\n" + errors.map { "- \($0)" }.joined(separator: "\n") + "\n"
+        }
+        add("drafts.json") { (drafts.isEmpty ? "[]" : String(decoding: try json.encode(drafts), as: UTF8.self)) + "\n" }
 
         var traced = false
         if let trace {
-            // Older segment first. A segment missing mid-rotation is not an error.
+            // Older segment first. A segment that isn't there (mid-rotation, or never written) is not an error; one that is
+            // there and can't be read gets a note.
             for (name, url) in [("media-trace.1.ndjson", trace.appendingPathExtension("1")), ("media-trace.ndjson", trace)] {
-                guard let data = try? Data(contentsOf: url), !data.isEmpty else { continue }
-                files.append((name, clean(String(decoding: data, as: UTF8.self)))); traced = true
+                guard FileManager.default.fileExists(atPath: url.path) else { continue }
+                do {
+                    let data = try Data(contentsOf: url)
+                    guard !data.isEmpty else { continue }
+                    files.append((name, clean(String(decoding: data, as: UTF8.self)))); traced = true
+                } catch { notes.append("\(name) is on this phone but couldn’t be read (\((error as NSError).domain) \((error as NSError).code)).") }
             }
         }
         if !traced { notes.append("No media trace on this phone yet: it starts when a project's picture or model is shown.") }
 
-        files.append(("notes.txt", Data((notes.isEmpty ? "Everything this phone keeps is here.\n" : notes.map { "- \($0)" }.joined(separator: "\n") + "\n").utf8)))
-        return files
+        return (files, notes)
+    }
+
+    func notesText(_ notes: [String]) -> Data {
+        Data(DiagnosticsRedaction.redact(notes.isEmpty ? "Everything this phone keeps is here.\n" : notes.map { "- \($0)" }.joined(separator: "\n") + "\n",
+                                         secrets: secrets, home: home).utf8)
     }
 
     /// Writes the files to a folder and zips it with the system's own archiver (`NSFileCoordinator`, `.forUploading`,
@@ -214,7 +279,14 @@ public struct PhoneDiagnostics: Sendable {
         let staged = work.appendingPathComponent(Self.folderName(date: date, timeZone: timeZone), isDirectory: true)
         try fm.createDirectory(at: staged, withIntermediateDirectories: true)
         defer { try? fm.removeItem(at: work) }
-        for (name, data) in try files(date: date) { try data.write(to: staged.appendingPathComponent(name), options: .atomic) }
+        let made = files(date: date)
+        var notes = made.notes
+        for (name, data) in made.files {
+            do { try data.write(to: staged.appendingPathComponent(name), options: .atomic) }
+            catch { notes.append("\(name) couldn’t be written, so it is left out.") }
+        }
+        // If even the notes can't be written, the ZIP goes without them.
+        try? notesText(notes).write(to: staged.appendingPathComponent("notes.txt"), options: .atomic)
 
         let destination = directory.appendingPathComponent(Self.fileName(date: date, timeZone: timeZone))
         var coordinated: NSError?, copied: Error?

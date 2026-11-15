@@ -2085,6 +2085,30 @@ final class LayoutParityUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Setting up… 0 s so far."].waitForExistence(timeout: 10))
     }
 
+    /// #799, PRD §6.1: Settings → Share Diagnostics… is reachable with projects present, on the iPhone and the iPad, and opens
+    /// the system share sheet with the ZIP. `STM_SHOTS` keeps the row and the sheet.
+    func testShareDiagnosticsIsInSettingsAndOpensTheShareSheetWithProjectsPresent() throws {
+        let app = launch(screen: "settings")
+        XCTAssertTrue(app.descendants(matching: .any)["mac-status"].waitForExistence(timeout: 20))
+        let share = app.descendants(matching: .any)["share-diagnostics"]
+        for _ in 0..<12 where !(share.exists && share.isHittable) { app.swipeUp() }
+        XCTAssertTrue(share.isHittable, "Share Diagnostics… is reachable on the \(regular ? "iPad" : "iPhone")")
+        XCTAssertTrue(share.label.contains("Share Diagnostics…"), share.label)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "A ZIP of this \(regular ? "iPad" : "iPhone")")).firstMatch.exists,
+                      "it says what it sends")
+        try shoot(app, "share-diagnostics-row")
+        share.tap()
+        // The share sheet runs out of process; its title row names the file, and it offers Save to Files.
+        let sheet = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let named = NSPredicate(format: "label CONTAINS %@", "Counterpart Phone Diagnostics")
+        let shown = app.descendants(matching: .any).matching(named).firstMatch.waitForExistence(timeout: 15)
+            || app.otherElements["ActivityListView"].waitForExistence(timeout: 5)
+            || sheet.descendants(matching: .any).matching(named).firstMatch.waitForExistence(timeout: 5)
+        XCTAssertTrue(shown, "the share sheet opens with the diagnostics ZIP")
+        sleep(2)
+        try shoot(app, "share-diagnostics-sheet")
+    }
+
     /// On-device library (docs/design/overhaul/on-device-library.md), PRD §6.1: Settings → Keep on this iPhone (iPad) is
     /// reachable with projects present, offers the three choices, and says how much space it uses with Clear beside it.
     func testKeepOnThisDeviceIsInSettingsWithProjectsPresent() {
