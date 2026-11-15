@@ -841,7 +841,9 @@ struct ProjectView: View {
                 Text("Update Counterpart on your Mac to send them here.").font(.footnote).foregroundStyle(.secondary)
             }
             GlassEffectContainer(spacing: 8) {
-                HStack(spacing: 8) {
+                // At accessibility sizes two side by side break their names letter by letter: they stack, full width.
+                let row = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(spacing: 8)) : AnyLayout(HStackLayout(spacing: 8))
+                row {
                     if takes {
                         Button {
                             act {
@@ -863,7 +865,7 @@ struct ProjectView: View {
                             return nil
                         }
                     } label: {
-                        Label("Remove", systemImage: "trash").frame(maxWidth: takes ? nil : .infinity).frame(minHeight: 30)
+                        Label("Remove", systemImage: "trash").frame(maxWidth: takes && !typeSize.isAccessibilitySize ? nil : .infinity).frame(minHeight: 30)
                     }
                     .buttonStyle(.glass)
                     .accessibilityIdentifier("ask-kept-scan.remove")
