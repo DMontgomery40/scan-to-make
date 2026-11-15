@@ -155,6 +155,46 @@ enum UpdateGate {
     }
 }
 
+/// #850: an app replaced by hand (the only way off beta 6) leaves the old app's companion running, and both say
+/// companion 0.1.0. At launch the app asks which build launched the companion (`status.get`'s `appBuild`, missing from
+/// every companion before #850) and restarts the LaunchAgent when it isn't this one, so it runs this app's payload. A
+/// working companion is restarted only once idle (the update gate, with its waiting sentence); one that doesn't come
+/// back as this build is said plainly instead of leaving Settings › Printers spinning.
+@MainActor final class CompanionBuildCheck {
+    enum Outcome: Equatable { case current, restarted, notRunning, didNotComeBack }
+    static let didNotComeBack = "Counterpart couldn’t restart in the background after this update. Restart this Mac, then open Counterpart."
+    /// Asks after a restart (`pause` between each) before it is said not to have come back.
+    static let attempts = 30
+    struct Effects {
+        /// status.get's `appBuild` (nil when it has none), or why it didn't answer.
+        var status: () async -> Result<String?, Error>
+        var ask: () async -> UpdateGate.Decision
+        /// Waits, saying so, until the companion is idle.
+        var waitUntilIdle: () async -> Void
+        /// `launchctl kickstart -k` of the companion's LaunchAgent.
+        var restart: () async -> Void
+        var pause: () async -> Void
+        var say: (String) -> Void
+    }
+    let appBuild: String
+    private let effects: Effects
+    init(appBuild: String, effects: Effects) { self.appBuild = appBuild; self.effects = effects }
+
+    func run() async -> Outcome {
+        // Not answering: the usual start (pairing, readiness) deals with it.
+        guard case .success(let running) = await effects.status() else { return .notRunning }
+        if running == appBuild { return .current }
+        if await effects.ask() == .wait { await effects.waitUntilIdle() }
+        await effects.restart()
+        for _ in 0..<Self.attempts {
+            await effects.pause()
+            if case .success(let build) = await effects.status(), build == appBuild { return .restarted }
+        }
+        effects.say(Self.didNotComeBack)
+        return .didNotComeBack
+    }
+}
+
 /// #829: macOS runs an app opened straight from a quarantined download from a read-only copy
 /// (`/private/var/folders/…/AppTranslocation/…`). From there the companion can't be registered, and Sparkle refuses
 /// to update. Sparkle's own test is the same path check (`SUHost.isRunningTranslocated`).

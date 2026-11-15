@@ -196,6 +196,81 @@ final class UpdateStagingTests: XCTestCase {
     }
 }
 
+/// #850: a companion left running by an app replaced by hand is restarted at launch, unless it is working.
+@MainActor final class CompanionBuildCheckTests: XCTestCase {
+    final class Fake {
+        /// What status.get answers, in order; the last repeats. nil: no `appBuild` (every companion before #850).
+        var answers: [Result<String?, Error>] = [.success(nil)]
+        var decision = UpdateGate.Decision.install
+        var restarts = 0, waits = 0, said: [String] = []
+        func next() -> Result<String?, Error> { answers.count > 1 ? answers.removeFirst() : answers[0] }
+    }
+    private func check(_ fake: Fake) -> CompanionBuildCheck {
+        CompanionBuildCheck(appBuild: "202611151700", effects: .init(
+            status: { fake.next() },
+            ask: { fake.decision },
+            waitUntilIdle: { fake.waits += 1 },
+            restart: { fake.restarts += 1 },
+            pause: {},
+            say: { fake.said.append($0) }))
+    }
+
+    func testACompanionWithoutABuildIsRestartedAndComesBackCurrent() async {
+        let fake = Fake()
+        fake.answers = [.success(nil), .success("202611151700")]
+        let outcome = await check(fake).run()
+        XCTAssertEqual(outcome, .restarted)
+        XCTAssertEqual(fake.restarts, 1)
+        XCTAssertEqual(fake.said, [])
+    }
+
+    func testAStaleBuildIsRestarted() async {
+        let fake = Fake()
+        fake.answers = [.success("202611061933"), .failure(ControlClientError.unavailable), .success("202611151700")]
+        let outcome = await check(fake).run()
+        XCTAssertEqual(outcome, .restarted, "it waits for the restarted companion to answer")
+        XCTAssertEqual(fake.restarts, 1)
+    }
+
+    func testTheCurrentBuildIsLeftAlone() async {
+        let fake = Fake()
+        fake.answers = [.success("202611151700")]
+        let outcome = await check(fake).run()
+        XCTAssertEqual(outcome, .current)
+        XCTAssertEqual(fake.restarts, 0)
+    }
+
+    func testABusyCompanionIsRestartedOnlyOnceIdle() async {
+        let fake = Fake()
+        fake.answers = [.success("202611061933"), .success("202611151700")]
+        fake.decision = .wait
+        let outcome = await check(fake).run()
+        XCTAssertEqual(fake.waits, 1, "waits (saying so) for the pass or print first")
+        XCTAssertEqual(fake.restarts, 1)
+        XCTAssertEqual(outcome, .restarted)
+    }
+
+    func testACompanionThatDoesntComeBackIsSaidPlainly() async {
+        let fake = Fake()
+        fake.answers = [.success("202611061933"), .failure(ControlClientError.unavailable)]
+        let outcome = await check(fake).run()
+        XCTAssertEqual(outcome, .didNotComeBack)
+        XCTAssertEqual(fake.said, [CompanionBuildCheck.didNotComeBack])
+        let stillOld = Fake()
+        stillOld.answers = [.success("202611061933")]
+        let again = await check(stillOld).run()
+        XCTAssertEqual(again, .didNotComeBack, "restarted but still the old build")
+    }
+
+    func testNoAnswerAtLaunchIsLeftToTheUsualStart() async {
+        let fake = Fake()
+        fake.answers = [.failure(ControlClientError.unavailable)]
+        let outcome = await check(fake).run()
+        XCTAssertEqual(outcome, .notRunning)
+        XCTAssertEqual(fake.restarts, 0)
+    }
+}
+
 /// #829: a copy run from App Translocation is recognised, and only that one.
 final class TranslocationTests: XCTestCase {
     func testATranslocatedCopyIsDetected() {
