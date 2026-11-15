@@ -1,4 +1,5 @@
 import SwiftUI
+import os
 import Sparkle
 import ServiceManagement
 import UniformTypeIdentifiers
@@ -248,8 +249,15 @@ struct CounterpartCommands: Commands {
     /// installs then). Logging out, restarting or shutting down is never held up: those end the agent too, and launchd
     /// starts it from the new app at the next login.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        // #850: Quit with no update waiting always quits; the reply is logged, so a quit that seems refused explains itself.
+        Updates.buildCheckLog.notice("quit: update staged \(self.updates.staged, privacy:.public), session ending \(Self.sessionEnding, privacy:.public)")
         guard updates.staged, !Self.sessionEnding else { return .terminateNow }
-        Task { @MainActor in sender.reply(toApplicationShouldTerminate:await updates.quit.shouldTerminate()) }
+        Task { @MainActor in
+            let quit = await updates.quit.shouldTerminate()
+            // Review of #854, F4: the reply itself, also when it waits for the companion.
+            Updates.buildCheckLog.notice("quit reply: \(quit ? "quits" : "refused, the companion is working; it quits by itself once idle", privacy:.public)")
+            sender.reply(toApplicationShouldTerminate:quit)
+        }
         return .terminateLater
     }
 
@@ -480,30 +488,107 @@ struct CounterpartCommands: Commands {
         }
     }
 
+    /// #850: the build check's decisions, readable with `log show --predicate 'subsystem == "com.scantomake.mac"'`.
+    static let buildCheckLog = Logger(subsystem:"com.scantomake.mac", category:"companion-build-check")
+
     /// #850, at every launch: a companion launched by another build (an app replaced by hand, or one before #850, which
-    /// doesn't say) is restarted to run this app's payload, once idle. Only for the installed app with its agent enabled:
-    /// a development build elsewhere never restarts the installed app's companion.
+    /// doesn't say) is restarted to run this app's payload, once idle. Only for the installed app: a development build
+    /// elsewhere never restarts the installed app's companion. Not gated on SMAppService's status, which can read other
+    /// than `.enabled` for an app replaced by hand at the moment it first launches (its background item still names the
+    /// old build); a companion answering on the control socket is what is checked, and the status is only logged.
     func checkCompanionBuild() {
+        let log = Self.buildCheckLog
         let installation = Installation(bundle:.main)
         let path = installation.bundle.bundleURL.resolvingSymlinksInPath().path
         let userApps = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications").path + "/"
-        guard path.hasPrefix("/Applications/") || path.hasPrefix(userApps), installation.service.status == .enabled,
-              let build = installation.bundle.object(forInfoDictionaryKey:"CFBundleVersion") as? String, !build.isEmpty else { return }
+        let build = installation.bundle.object(forInfoDictionaryKey:"CFBundleVersion") as? String ?? ""
+        let installedAt = CompanionBuildCheck.installedAt(bundle:path, executable:installation.bundle.executableURL?.path ?? path)
+        log.notice("launch: \(CompanionBuildCheck.short(path), privacy:.public), build \(build, privacy:.public), agent status \(Self.name(installation.service.status), privacy:.public)")
+        guard path.hasPrefix("/Applications/") || path.hasPrefix(userApps) else {
+            log.notice("not an installed copy; skipped"); return
+        }
+        guard !build.isEmpty else { log.error("no CFBundleVersion; skipped"); return }
         let socket = ModelAccessModel.socketPath(for:installation), target = "gui/\(getuid())/\(installation.label)"
-        let check = CompanionBuildCheck(appBuild:build, appPayload:installation.resources.appendingPathComponent("Payload").path, effects:.init(
+        let check = CompanionBuildCheck(appBuild:build, appPayload:installation.resources.appendingPathComponent("Payload").path,
+                                        appBundle:path, installedAt:installedAt, effects:.init(
             status: {
                 do {
                     let status = try await ControlClient(socketPath:socket, timeout:5).status()
                     return .success(.init(build:status.appBuild, payload:status.appPayload))
                 } catch { return .failure(error) }
             },
+            agent: { await Task.detached { Self.agentProcess(target) }.value },
             ask: { await Self.askOnce() },
             waitUntilIdle: { [weak self] in await self?.waitUntilIdle(announce:true) },
-            restart: { _ = try? await Task.detached { try command(URL(fileURLWithPath:"/bin/launchctl"), ["kickstart", "-k", target]) }.value },
+            restart: { method in
+                let args = method == .kickstart ? ["kickstart", "-k", target] : ["kill", "SIGTERM", target]
+                return await Task.detached { Self.launchctl(args) }.value
+            },
             pause: { try? await Task.sleep(for:.seconds(CompanionBuildCheck.pauseSeconds)) },
-            say: { [weak self] in self?.showNotice($0) }))
+            say: { [weak self] in self?.showNotice($0) },
+            note: { log.notice("\($0, privacy:.public)") }))
         Task { @MainActor in _ = await check.run() }
     }
+
+    nonisolated static func name(_ status: SMAppService.Status) -> String {
+        switch status {
+        case .enabled: return "enabled"
+        case .notRegistered: return "notRegistered"
+        case .requiresApproval: return "requiresApproval"
+        case .notFound: return "notFound"
+        @unknown default: return "unknown(\(status.rawValue))"
+        }
+    }
+
+    /// `launchctl` with its exit status and words kept (nil when it exited 0), for the log; stopped after 20 s, as
+    /// `command()` is (review of #854, F5).
+    nonisolated static func launchctl(_ args: [String]) -> String? {
+        launchctlOutput(args).failure
+    }
+    nonisolated static func launchctlOutput(_ args: [String]) -> (output: String, failure: String?) {
+        let task = Process(), output = Pipe()
+        task.executableURL = URL(fileURLWithPath:"/bin/launchctl")
+        task.arguments = args
+        task.standardOutput = output
+        task.standardError = output
+        do { try task.run() } catch { return ("", "couldn't run launchctl: \(error.localizedDescription)") }
+        let timedOut = ManagedAtomicFlag()
+        let timer = DispatchWorkItem { if task.isRunning { timedOut.set(); task.terminate() } }
+        DispatchQueue.global().asyncAfter(deadline:.now() + 20, execute:timer)
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        task.waitUntilExit()
+        timer.cancel()
+        let words = String(decoding:data.prefix(65536), as:UTF8.self)
+        if timedOut.isSet { return (words, "launchctl \(args.first ?? "") didn't finish within 20 seconds") }
+        guard task.terminationStatus != 0 else { return (words, nil) }
+        let said = String(words.prefix(400)).trimmingCharacters(in:.whitespacesAndNewlines)
+        return (words, "exit \(task.terminationStatus)\(said.isEmpty ? "" : ": " + said)")
+    }
+
+    /// The companion LaunchAgent's process: its pid from `launchctl print`, its start time and executable from the process
+    /// table. Nil when launchd has none running.
+    nonisolated static func agentProcess(_ target: String) -> CompanionBuildCheck.Agent? {
+        let (printed, failure) = launchctlOutput(["print", target])
+        guard failure == nil, let line = printed.split(separator:"\n").first(where:{ $0.trimmingCharacters(in:.whitespaces).hasPrefix("pid = ") }),
+              let pid = Int32(line.split(separator:"=").last!.trimmingCharacters(in:.whitespaces)) else { return nil }
+        var info = proc_bsdinfo()
+        guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, Int32(MemoryLayout<proc_bsdinfo>.size)) > 0 else { return nil }
+        let started = Date(timeIntervalSince1970:TimeInterval(info.pbi_start_tvsec) + TimeInterval(info.pbi_start_tvusec) / 1_000_000)
+        var buffer = [CChar](repeating:0, count:Int(MAXPATHLEN) * 4)
+        let executable = proc_pidpath(pid, &buffer, UInt32(buffer.count)) > 0 ? String(cString:buffer) : nil
+        return .init(pid:pid, started:started, executable:executable,
+                     executableExists:executable.map { FileManager.default.fileExists(atPath:$0) } ?? false)
+    }
+
+
+}
+
+/// A flag set from one thread and read from another (the launchctl timer).
+final class ManagedAtomicFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = false
+    func set() { lock.lock(); value = true; lock.unlock() }
+    var isSet: Bool { lock.lock(); defer { lock.unlock() }; return value }
 }
 
 /// The app menu's Check for Updates…, Sparkle's standard item; absent from builds without Sparkle (development).
