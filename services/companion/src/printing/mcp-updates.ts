@@ -386,7 +386,7 @@ export function npmLookupSentence(pkg: string, code: number | null, output: stri
   const said = (errors.find(line => !/^npm (?:error|ERR!) code\b/.test(line)) ?? errors[0] ?? lines.at(-1) ?? '').slice(0, 240);
   const because = said ? ` (${said})` : '';
   if (/\b(?:ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ECONNRESET|ETIMEDOUT|ESOCKETTIMEDOUT|ENETUNREACH|EHOSTUNREACH|ENETDOWN|ERR_SOCKET_TIMEOUT|socket hang up)\b/.test(output))
-    return `Counterpart couldn't reach the npm registry to look up the latest ${pkg}${because}. Check this Mac's internet connection, then try again.`;
+    return `Counterpart couldn't reach the npm registry to look up the latest ${pkg}${because}. Check this computer's internet connection, then try again.`;
   if (/\bE5\d\d\b/.test(output)) return `The npm registry couldn't answer for ${pkg} just now${because}. Try again in a moment.`;
   if (code === 0) return `npm answered without a version for ${pkg}${because}. Try again in a moment.`;
   return `npm couldn't look up the latest ${pkg}${because}.`;
@@ -1015,8 +1015,8 @@ export class McpUpdater {
           // checked: if one fails, the failure says the previous version couldn't be put back, rather than claiming it.
           for (const [label, command, args, cwd, env] of [
             ['git reset', plan.git, ['-C', plan.dir, 'reset', '--hard', head], undefined, process.env],
-            ['npm ci', plan.npm, ['ci'], plan.dir, plan.env],
-            ['npm run build', plan.npm, ['run', 'build'], plan.dir, plan.env],
+            ['npm ci', plan.npm, [...plan.npmArgs, 'ci'], plan.dir, plan.env],
+            ['npm run build', plan.npm, [...plan.npmArgs, 'run', 'build'], plan.dir, plan.env],
           ] as const) {
             const result = await this.#run(command, [...args], {...(cwd ? {cwd} : {}), env, timeoutMs: MCP_UPDATE_TIMEOUT_MS});
             log += `$ ${[command, ...args].join(' ')}\n${result.output}\n`;
@@ -1025,8 +1025,8 @@ export class McpUpdater {
           }
         };
         await run('git pull', plan.git, ['-C', plan.dir, 'pull', '--ff-only'], undefined, process.env);
-        await run('npm ci', plan.npm, ['ci'], plan.dir, plan.env);
-        await run('npm run build', plan.npm, ['run', 'build'], plan.dir, plan.env);
+        await run('npm ci', plan.npm, [...plan.npmArgs, 'ci'], plan.dir, plan.env);
+        await run('npm run build', plan.npm, [...plan.npmArgs, 'run', 'build'], plan.dir, plan.env);
       } else await this.#note(update, pkg, {phase: 'changing', change: {kind: 'none'}, overrides: saved});
       // npx: each profile runs the new version; fresh: each runs the app's own copy, started the way its own profile
       // started its MCP (its own variables and directory: printers differ by them).
@@ -1203,7 +1203,7 @@ export class McpUpdater {
   #plan(install: McpInstall, _latest: string):
     | {kind: 'none'} | {fail: string}
     | {kind: 'npm'; prefix: string; command: string; args: string[]; env: NodeJS.ProcessEnv}
-    | {kind: 'checkout'; dir: string; git: string; npm: string; env: NodeJS.ProcessEnv} {
+    | {kind: 'checkout'; dir: string; git: string; npm: string; npmArgs: string[]; env: NodeJS.ProcessEnv} {
     const env = this.#deps.env;
     if (install.type === 'unresolved') return {fail: `Counterpart can't tell how this copy is installed: ${install.found}.`};
     if (install.type === 'npx') return {kind: 'none'};
@@ -1220,7 +1220,11 @@ export class McpUpdater {
     }
     const npm = findNpm(install.node, env, this.#deps.path, this.#deps.node);
     if (!npm) return {fail: 'Counterpart needs npm to build this copy, and there is none on this Mac. Install Node.js, then try again.'};
-    return {kind: 'checkout', dir: install.dir, git: env.exists('/usr/bin/git') ? '/usr/bin/git' : 'git', npm, env: this.#env(npm, install.node)};
+    // The app's npm runs under the checkout's own node, so native parts are built for the node that runs the MCP;
+    // the npm beside that node runs as it is.
+    const cli = install.node && dirname(npm) !== dirname(install.node) ? npmCli(npm, env) : undefined;
+    const [command, npmArgs] = cli ? [install.node!, [cli]] : [npm, []];
+    return {kind: 'checkout', dir: install.dir, git: env.exists('/usr/bin/git') ? '/usr/bin/git' : 'git', npm: command, npmArgs, env: this.#env(npm, install.node)};
   }
 
   async #emit(type: McpUpdateEventType, pkg: string, update: McpUpdate, log?: string, reason?: string): Promise<void> {

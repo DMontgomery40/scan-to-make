@@ -2305,3 +2305,18 @@ test('#826: Update of the app\'s copy run by another node still installs with th
   assert.match(f.commands[1], new RegExp(`^/opt/homebrew/bin/node ${PAYLOAD.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/lib/node_modules/npm/bin/npm-cli\\.js install --global `),
     'the MCP\'s own node runs the app\'s npm, so native parts match the node that runs it');
 });
+
+test('#826: a checkout run by another node builds with the app\'s npm under that node, so native parts match it', async t => {
+  const PAYLOAD = '/Applications/Scan to Make.app/Contents/Resources/Payload/node';
+  const dir = `${HOME}/src/bambu-printer-mcp`, cli = `${PAYLOAD}/lib/node_modules/npm/bin/npm-cli.js`;
+  const files = {[`${dir}/package.json`]: pkgJson('1.1.46'), [`${dir}/.git/HEAD`]: '', [`${dir}/dist/index.js`]: '', [`${PAYLOAD}/bin/npm`]: '', [cli]: ''};
+  const checkout = await updater(t, {profile: bambu('/opt/homebrew/bin/node', [`${dir}/dist/index.js`]), files});
+  await checkout.updates.update(checkout.mcpId);
+  await checkout.done();
+  assert.deepEqual(checkout.commands.slice(-2), [`/opt/homebrew/bin/node ${cli} ci (in ${dir})`, `/opt/homebrew/bin/node ${cli} run build (in ${dir})`]);
+  // A build that fails goes back the same way.
+  const broken = await updater(t, {profile: bambu('/opt/homebrew/bin/node', [`${dir}/dist/index.js`]), files, fail: 'run build'});
+  await broken.updates.update(broken.mcpId);
+  await broken.done();
+  assert.deepEqual(broken.commands.slice(-2), [`/opt/homebrew/bin/node ${cli} ci (in ${dir})`, `/opt/homebrew/bin/node ${cli} run build (in ${dir})`]);
+});
