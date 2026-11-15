@@ -1,0 +1,640 @@
+{
+ "source": "#813 review (agents-171 ~/stm-gates/probes, redact-extract.mts and redact2.mts), copied verbatim; redacted with secrets [\"31415926\"] and home /Users/davidm; plus the planted cases of #814 DiagnosticsTests.everyPlantedSecretIsRemoved (Kotlin raw strings kept raw), less its certificate-pin forms",
+ "cases": [
+  {
+   "label": "model key env",
+   "input": "SCAN_TO_MAKE_MODEL_KEY=hf_9f8e7d6c5b4a39281706f5e4d3c2b1a0",
+   "mustNotSurvive": "hf_9f8e7d6c5b4a39281706f5e4d3c2b1a0"
+  },
+  {
+   "label": "tls key env json",
+   "input": "{\"SCAN_TO_MAKE_LAN_TLS_KEY\":\"/k/p.key\",\"SCAN_TO_MAKE_AI_KEY\":\"plainhex0123456789abcdef0123\"}",
+   "mustNotSurvive": "plainhex0123456789abcdef0123"
+  },
+  {
+   "label": "generic session_key json",
+   "input": "{\"session_key\":\"s3ss10nV4lue98765\"}",
+   "mustNotSurvive": "s3ss10nV4lue98765"
+  },
+  {
+   "label": "encryption_key",
+   "input": "encryption_key: deadbeefcafe0123456789",
+   "mustNotSurvive": "deadbeefcafe0123456789"
+  },
+  {
+   "label": "passphrase",
+   "input": "passphrase=hunter2-horse-battery",
+   "mustNotSurvive": "hunter2-horse-battery"
+  },
+  {
+   "label": "pairing pin",
+   "input": "PAIRING_PIN=482910",
+   "mustNotSurvive": "482910"
+  },
+  {
+   "label": "otp",
+   "input": "{\"otp\":\"731204\"}",
+   "mustNotSurvive": "731204"
+  },
+  {
+   "label": "lowercase bearer",
+   "input": "authorization: bearer abcDEF123456ghiJKL789",
+   "mustNotSurvive": "abcDEF123456ghiJKL789"
+  },
+  {
+   "label": "lowercase basic",
+   "input": "Proxy-Authorization: basic dXNlcjpwYXNzd29yZA==",
+   "mustNotSurvive": "dXNlcjpwYXNzd29yZA=="
+  },
+  {
+   "label": "github token bare",
+   "input": "cloned with ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6",
+   "mustNotSurvive": "ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6"
+  },
+  {
+   "label": "aws key bare",
+   "input": "aws id AKIAIOSFODNN7EXAMPLE ok",
+   "mustNotSurvive": "AKIAIOSFODNN7EXAMPLE"
+  },
+  {
+   "label": "google api key bare",
+   "input": "key AIzaSyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r done",
+   "mustNotSurvive": "AIzaSyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r"
+  },
+  {
+   "label": "pem certificate",
+   "input": "-----BEGIN CERTIFICATE-----\nMIIBszCCAVmgAwIBAgIUZZZ\n-----END CERTIFICATE-----",
+   "mustNotSurvive": "MIIBszCCAVmgAwIBAgIUZZZ"
+  },
+  {
+   "label": "pem ec key header variant",
+   "input": "-----BEGIN EC PRIVATE KEY-----\nMHQCAQEEIAbc123\n-----END EC PRIVATE KEY-----",
+   "mustNotSurvive": "MHQCAQEEIAbc123"
+  },
+  {
+   "label": "openssh key",
+   "input": "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXk=\n-----END OPENSSH PRIVATE KEY-----",
+   "mustNotSurvive": "b3BlbnNzaC1rZXk="
+  },
+  {
+   "label": "session cookie bare",
+   "input": "{\"sessionId\":\"7f3a9c1e88b24d6fa015\"}",
+   "mustNotSurvive": "7f3a9c1e88b24d6fa015"
+  },
+  {
+   "label": "cookie json lowercase name ok?",
+   "input": "{\"cookie\":\"sid=zzz999yyy888\"}",
+   "mustNotSurvive": "zzz999yyy888"
+  },
+  {
+   "label": "access code hyphen",
+   "input": "access-code: 31415926",
+   "mustNotSurvive": "31415926"
+  },
+  {
+   "label": "lan code",
+   "input": "lan_code=87654321",
+   "mustNotSurvive": "87654321"
+  },
+  {
+   "label": "pair code json",
+   "input": "{\"code\":\"Ab3dEf6hJk9mNpQrStUvWxYz012345\"}",
+   "mustNotSurvive": "Ab3dEf6hJk9mNpQrStUvWxYz012345"
+  },
+  {
+   "label": "jwt planted",
+   "input": "t eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.signaturepart99",
+   "mustNotSurvive": "eyJzdWIiOiIxIn0"
+  },
+  {
+   "label": "sk planted",
+   "input": "k sk-ant-api03-abcdefghijklmnopqrstuvwx",
+   "mustNotSurvive": "sk-ant-api03"
+  },
+  {
+   "label": "email plus addressing",
+   "input": "a.b+tag@sub.example.co.uk",
+   "mustNotSurvive": "a.b+tag@sub.example.co.uk"
+  },
+  {
+   "label": "home other user",
+   "input": "/Users/someoneelse/Library/x /home/other/y C:\\Users\\DavidM\\z",
+   "mustNotSurvive": "someoneelse"
+  },
+  {
+   "label": "home escaped json",
+   "input": "{\\\"path\\\":\\\"\\/Users\\/davidm\\/Library\\\"}",
+   "mustNotSurvive": "davidm"
+  },
+  {
+   "label": "username in ~user",
+   "input": "log at ~davidm/Library/Logs",
+   "mustNotSurvive": "davidm"
+  },
+  {
+   "label": "url query token",
+   "input": "GET https://api.example.com/x?access_token=tokABC123456&y=1",
+   "mustNotSurvive": "tokABC123456"
+  },
+  {
+   "label": "url fragment token",
+   "input": "https://ex.com/cb#id_token=tokXYZ987654",
+   "mustNotSurvive": "tokXYZ987654"
+  },
+  {
+   "label": "set-cookie lowercase",
+   "input": "set-cookie: sid=lowcookie123; HttpOnly",
+   "mustNotSurvive": "lowcookie123"
+  },
+  {
+   "label": "quoted single key=value with spaces",
+   "input": "password = 'correct horse battery'",
+   "mustNotSurvive": "correct horse"
+  },
+  {
+   "label": "json secret value with spaces",
+   "input": "{\"password\":\"correct horse battery\"}",
+   "mustNotSurvive": "correct horse"
+  },
+  {
+   "label": "bearer token with hyphen underscore",
+   "input": "Bearer abc-def_123456",
+   "mustNotSurvive": "abc-def_123456"
+  },
+  {
+   "label": "x-api-key header",
+   "input": "X-Api-Key: headervalue123456",
+   "mustNotSurvive": "headervalue123456"
+  },
+  {
+   "label": "privateKey camel",
+   "input": "{\"privateKey\":\"MIIEvQIBADANBgkq\"}",
+   "mustNotSurvive": "MIIEvQIBADANBgkq"
+  },
+  {
+   "label": "client_secret",
+   "input": "client_secret=cs_9876543210abcdef",
+   "mustNotSurvive": "cs_9876543210abcdef"
+  },
+  {
+   "label": "refresh token spaced name",
+   "input": "refresh token: rt_abcdef0123456789",
+   "mustNotSurvive": "rt_abcdef0123456789"
+  },
+  {
+   "label": "safe-prefix true-",
+   "input": "password=true-secret-value",
+   "mustNotSurvive": "true-secret-value"
+  },
+  {
+   "label": "safe-prefix null-",
+   "input": "api_key=null-123456789",
+   "mustNotSurvive": "null-123456789"
+  },
+  {
+   "label": "safe-prefix [set]",
+   "input": "token=[set]hunter2value",
+   "mustNotSurvive": "hunter2value"
+  },
+  {
+   "label": "safe-prefix false_",
+   "input": "secret=false_value99",
+   "mustNotSurvive": "false_value99"
+  },
+  {
+   "label": "json true prefix quoted",
+   "input": "{\"password\":\"true-secret\"}",
+   "mustNotSurvive": "true-secret"
+  },
+  {
+   "label": "unicode escaped key",
+   "input": "{\"\\u0070assword\":\"unicodesecret1\"}",
+   "mustNotSurvive": "unicodesecret1"
+  },
+  {
+   "label": "b64 basic lowercase",
+   "input": "authorization: basic dXNlcjpwYXNzOTg3",
+   "mustNotSurvive": "dXNlcjpwYXNzOTg3"
+  },
+  {
+   "label": "digest lowercase",
+   "input": "authorization: digest abcdef0123456789",
+   "mustNotSurvive": "abcdef0123456789"
+  },
+  {
+   "label": "android #814: authorization: bearer abcDEF123456ghiJKL",
+   "input": "authorization: bearer abcDEF123456ghiJKL789",
+   "mustNotSurvive": "abcDEF123456ghiJKL789"
+  },
+  {
+   "label": "android #814: Authorization: Bearer abcDEF123456ghiJKL",
+   "input": "Authorization: Bearer abcDEF123456ghiJKL789",
+   "mustNotSurvive": "abcDEF123456ghiJKL789"
+  },
+  {
+   "label": "android #814: AUTHORIZATION: BASIC dXNlcjpwYXNzd29yZA=",
+   "input": "AUTHORIZATION: BASIC dXNlcjpwYXNzd29yZA==",
+   "mustNotSurvive": "dXNlcjpwYXNzd29yZA=="
+  },
+  {
+   "label": "android #814: Proxy-Authorization: basic dXNlcjpwYXNzd",
+   "input": "Proxy-Authorization: basic dXNlcjpwYXNzd29yZA==",
+   "mustNotSurvive": "dXNlcjpwYXNzd29yZA=="
+  },
+  {
+   "label": "android #814: authorization: digest abcdef0123456789",
+   "input": "authorization: digest abcdef0123456789",
+   "mustNotSurvive": "abcdef0123456789"
+  },
+  {
+   "label": "android #814: authorization=Basic dXNlcjpwYXNz",
+   "input": "authorization=Basic dXNlcjpwYXNz",
+   "mustNotSurvive": "dXNlcjpwYXNz"
+  },
+  {
+   "label": "android #814: sent with bearer abc-def_123456 to it",
+   "input": "sent with bearer abc-def_123456 to it",
+   "mustNotSurvive": "abc-def_123456"
+  },
+  {
+   "label": "android #814: set-cookie: sid=lowcookie123; HttpOnly",
+   "input": "set-cookie: sid=lowcookie123; HttpOnly",
+   "mustNotSurvive": "lowcookie123"
+  },
+  {
+   "label": "android #814: {\"headers\":{\"authorization\":\"Bearer abcd",
+   "input": "{\"headers\":{\"authorization\":\"Bearer abcdefghijkl\"}}",
+   "mustNotSurvive": "abcdefghijkl"
+  },
+  {
+   "label": "android #814: SCAN_TO_MAKE_MODEL_KEY=hf_9f8e7d6c5b4a39",
+   "input": "SCAN_TO_MAKE_MODEL_KEY=hf_9f8e7d6c5b4a39281706f5e4d3c2b1a0",
+   "mustNotSurvive": "9f8e7d6c5b4a39281706f5e4d3c2b1a0"
+  },
+  {
+   "label": "android #814: {\"SCAN_TO_MAKE_LAN_TLS_KEY\":\"/k/p.key\",\"",
+   "input": "{\"SCAN_TO_MAKE_LAN_TLS_KEY\":\"/k/p.key\",\"SCAN_TO_MAKE_AI_KEY\":\"plainhex0123456789abcdef0123\"}",
+   "mustNotSurvive": "plainhex0123456789abcdef0123"
+  },
+  {
+   "label": "android #814: {\"session_key\":\"s3ss10nV4lue98765\"}",
+   "input": "{\"session_key\":\"s3ss10nV4lue98765\"}",
+   "mustNotSurvive": "s3ss10nV4lue98765"
+  },
+  {
+   "label": "android #814: session_key=s3ss10nV4lue98765",
+   "input": "session_key=s3ss10nV4lue98765",
+   "mustNotSurvive": "s3ss10nV4lue98765"
+  },
+  {
+   "label": "android #814: encryption_key: deadbeefcafe0123456789",
+   "input": "encryption_key: deadbeefcafe0123456789",
+   "mustNotSurvive": "deadbeefcafe0123456789"
+  },
+  {
+   "label": "android #814: passphrase=hunter2-horse-battery",
+   "input": "passphrase=hunter2-horse-battery",
+   "mustNotSurvive": "hunter2-horse-battery"
+  },
+  {
+   "label": "android #814: PAIRING_PIN=482910",
+   "input": "PAIRING_PIN=482910",
+   "mustNotSurvive": "482910"
+  },
+  {
+   "label": "android #814: {\"pin\":\"482913\"}",
+   "input": "{\"pin\":\"482913\"}",
+   "mustNotSurvive": "482913"
+  },
+  {
+   "label": "android #814: {\"pairingCode\":482913}",
+   "input": "{\"pairingCode\":482913}",
+   "mustNotSurvive": "482913"
+  },
+  {
+   "label": "android #814: pin: 482913",
+   "input": "pin: 482913",
+   "mustNotSurvive": "482913"
+  },
+  {
+   "label": "android #814: The pairing code is 482913",
+   "input": "The pairing code is 482913",
+   "mustNotSurvive": "482913"
+  },
+  {
+   "label": "android #814: Enter PIN 482913 on the Mac",
+   "input": "Enter PIN 482913 on the Mac",
+   "mustNotSurvive": "482913"
+  },
+  {
+   "label": "android #814: {\"otp\":\"731204\"}",
+   "input": "{\"otp\":\"731204\"}",
+   "mustNotSurvive": "731204"
+  },
+  {
+   "label": "android #814: {\"sessionId\":\"7f3a9c1e88b24d6fa015\"}",
+   "input": "{\"sessionId\":\"7f3a9c1e88b24d6fa015\"}",
+   "mustNotSurvive": "7f3a9c1e88b24d6fa015"
+  },
+  {
+   "label": "android #814: {\"cookie\":\"sid=zzz999yyy888\"}",
+   "input": "{\"cookie\":\"sid=zzz999yyy888\"}",
+   "mustNotSurvive": "zzz999yyy888"
+  },
+  {
+   "label": "android #814: access-code: 31415926",
+   "input": "access-code: 31415926",
+   "mustNotSurvive": "31415926"
+  },
+  {
+   "label": "android #814: lan_code=87654321",
+   "input": "lan_code=87654321",
+   "mustNotSurvive": "87654321"
+  },
+  {
+   "label": "android #814: client_secret=cs_9876543210abcdef",
+   "input": "client_secret=cs_9876543210abcdef",
+   "mustNotSurvive": "cs_9876543210abcdef"
+  },
+  {
+   "label": "android #814: refresh token: rt_abcdef0123456789",
+   "input": "refresh token: rt_abcdef0123456789",
+   "mustNotSurvive": "rt_abcdef0123456789"
+  },
+  {
+   "label": "android #814: X-Api-Key: headervalue123456",
+   "input": "X-Api-Key: headervalue123456",
+   "mustNotSurvive": "headervalue123456"
+  },
+  {
+   "label": "android #814: {\"privateKey\":\"MIIEvQIBADANBgkq\"}",
+   "input": "{\"privateKey\":\"MIIEvQIBADANBgkq\"}",
+   "mustNotSurvive": "MIIEvQIBADANBgkq"
+  },
+  {
+   "label": "android #814: {\"credentials\":{\"user\":\"x\"},\"bambuCreden",
+   "input": "{\"credentials\":{\"user\":\"x\"},\"bambuCredential\":\"cred-value-77\"}",
+   "mustNotSurvive": "cred-value-77"
+  },
+  {
+   "label": "android #814: MY_SECRET=topsecret77 DB_PASSWORD='corre",
+   "input": "MY_SECRET=topsecret77 DB_PASSWORD='correct horse battery'",
+   "mustNotSurvive": "correct horse"
+  },
+  {
+   "label": "android #814: {\"password\":\"correct horse battery\"}",
+   "input": "{\"password\":\"correct horse battery\"}",
+   "mustNotSurvive": "correct horse"
+  },
+  {
+   "label": "android #814: {\"\\u0070assword\":\"unicodesecret1\"}",
+   "input": "{\"\\u0070assword\":\"unicodesecret1\"}",
+   "mustNotSurvive": "unicodesecret1"
+  },
+  {
+   "label": "android #814: say \\\"refresh_token\\\":\\\"abc.def.ghi\\\"",
+   "input": "say \\\"refresh_token\\\":\\\"abc.def.ghi\\\"",
+   "mustNotSurvive": "abc.def.ghi"
+  },
+  {
+   "label": "android #814: --api-key sk_live_0123456789abcdefgh",
+   "input": "--api-key sk_live_0123456789abcdefgh",
+   "mustNotSurvive": "sk_live_0123456789abcdefgh"
+  },
+  {
+   "label": "android #814: --token=tok0123456789",
+   "input": "--token=tok0123456789",
+   "mustNotSurvive": "tok0123456789"
+  },
+  {
+   "label": "android #814: GET https://api.example.com/x?access_tok",
+   "input": "GET https://api.example.com/x?access_token=tokABC123456&y=1",
+   "mustNotSurvive": "tokABC123456"
+  },
+  {
+   "label": "android #814: https://ex.com/cb#id_token=tokXYZ987654",
+   "input": "https://ex.com/cb#id_token=tokXYZ987654",
+   "mustNotSurvive": "tokXYZ987654"
+  },
+  {
+   "label": "android #814: https://me:pw0rd99@printer.local/",
+   "input": "https://me:pw0rd99@printer.local/",
+   "mustNotSurvive": "pw0rd99"
+  },
+  {
+   "label": "android #814: token=[set]hunter2value",
+   "input": "token=[set]hunter2value",
+   "mustNotSurvive": "hunter2value"
+  },
+  {
+   "label": "android #814: password=true-secret-value",
+   "input": "password=true-secret-value",
+   "mustNotSurvive": "true-secret-value"
+  },
+  {
+   "label": "android #814: api_key=null-123456789",
+   "input": "api_key=null-123456789",
+   "mustNotSurvive": "null-123456789"
+  },
+  {
+   "label": "android #814: secret=false_value99",
+   "input": "secret=false_value99",
+   "mustNotSurvive": "false_value99"
+  },
+  {
+   "label": "android #814: {\"password\":\"true-secret\"}",
+   "input": "{\"password\":\"true-secret\"}",
+   "mustNotSurvive": "true-secret"
+  },
+  {
+   "label": "android #814: {\"token\":\"[set]hunter2\"}",
+   "input": "{\"token\":\"[set]hunter2\"}",
+   "mustNotSurvive": "hunter2"
+  },
+  {
+   "label": "android #814: cloned with ghp_A1b2C3d4E5f6G7h8I9j0K1l2",
+   "input": "cloned with ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6",
+   "mustNotSurvive": "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6"
+  },
+  {
+   "label": "android #814: github_pat_11ABCDEFG0123456789_abcdefghi",
+   "input": "github_pat_11ABCDEFG0123456789_abcdefghijklmnopqrstuvwxyz",
+   "mustNotSurvive": "11ABCDEFG0123456789_abcdefghij"
+  },
+  {
+   "label": "android #814: aws id AKIAIOSFODNN7EXAMPLE ok",
+   "input": "aws id AKIAIOSFODNN7EXAMPLE ok",
+   "mustNotSurvive": "IOSFODNN7EXAMPLE"
+  },
+  {
+   "label": "android #814: key AIzaSyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5",
+   "input": "key AIzaSyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r done",
+   "mustNotSurvive": "SyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r"
+  },
+  {
+   "label": "android #814: k sk-ant-api03-abcdefghijklmnopqrstuvwx",
+   "input": "k sk-ant-api03-abcdefghijklmnopqrstuvwx",
+   "mustNotSurvive": "abcdefghijklmnopqrstuvwx"
+  },
+  {
+   "label": "android #814: t eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.s",
+   "input": "t eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.signaturepart99",
+   "mustNotSurvive": "eyJzdWIiOiIxIn0"
+  },
+  {
+   "label": "android #814: -----BEGIN CERTIFICATE-----\nMIIBszCCAVmg",
+   "input": "-----BEGIN CERTIFICATE-----\nMIIBszCCAVmgAwIBAgIUZZZ\n-----END CERTIFICATE-----",
+   "mustNotSurvive": "MIIBszCCAVmgAwIBAgIUZZZ"
+  },
+  {
+   "label": "android #814: -----BEGIN EC PRIVATE KEY-----\nMHQCAQEEI",
+   "input": "-----BEGIN EC PRIVATE KEY-----\nMHQCAQEEIAbc123\n-----END EC PRIVATE KEY-----",
+   "mustNotSurvive": "MHQCAQEEIAbc123"
+  },
+  {
+   "label": "android #814: -----BEGIN OPENSSH PRIVATE KEY-----\nb3Bl",
+   "input": "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXk=\n-----END OPENSSH PRIVATE KEY-----",
+   "mustNotSurvive": "b3BlbnNzaC1rZXk="
+  },
+  {
+   "label": "android #814: {\"pem\":\"-----BEGIN CERTIFICATE-----\\nMII",
+   "input": "{\"pem\":\"-----BEGIN CERTIFICATE-----\\nMIIBszCCAVmgAwIBAgIUYYY\\n-----END CERTIFICATE-----\"}",
+   "mustNotSurvive": "MIIBszCCAVmgAwIBAgIUYYY"
+  },
+  {
+   "label": "android #814: der MIIBszCCAVmgAwIBAgIUZZZZZZZZZZZZZZZZ",
+   "input": "der MIIBszCCAVmgAwIBAgIUZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ== end",
+   "mustNotSurvive": "MIIBszCCAVmgAwIBAgIUZZZZ"
+  },
+  {
+   "label": "android #814: a.b+tag@sub.example.co.uk",
+   "input": "a.b+tag@sub.example.co.uk",
+   "mustNotSurvive": "a.b+tag@sub.example.co.uk"
+  },
+  {
+   "label": "android #814: mail someone@example.com now",
+   "input": "mail someone@example.com now",
+   "mustNotSurvive": "someone@example.com"
+  },
+  {
+   "label": "android #814: /Users/someoneelse/Library/x",
+   "input": "/Users/someoneelse/Library/x",
+   "mustNotSurvive": "someoneelse"
+  },
+  {
+   "label": "android #814: /home/otherperson/y",
+   "input": "/home/otherperson/y",
+   "mustNotSurvive": "otherperson"
+  },
+  {
+   "label": "android #814: C:\\Users\\DavidM\\z",
+   "input": "C:\\Users\\DavidM\\z",
+   "mustNotSurvive": "DavidM"
+  },
+  {
+   "label": "android #814: {\\\"path\\\":\\\"\\/Users\\/davidm\\/Library\\\"}",
+   "input": "{\\\"path\\\":\\\"\\/Users\\/davidm\\/Library\\\"}",
+   "mustNotSurvive": "davidm"
+  },
+  {
+   "label": "android #814: log at ~davidm/Library/Logs",
+   "input": "log at ~davidm/Library/Logs",
+   "mustNotSurvive": "davidm"
+  },
+  {
+   "label": "android #814: scantomake://pair?v=2&code=482913&pk=abc",
+   "input": "scantomake://pair?v=2&code=482913&pk=abc",
+   "mustNotSurvive": "482913"
+  },
+  {
+   "label": "android #814: {\"publicKeySha256\":\"q83vASNFZ4mrze8BI0Vn",
+   "input": "{\"publicKeySha256\":\"q83vASNFZ4mrze8BI0VniavN7wEjRWeJq83vASNFZ4k\"}",
+   "mustNotSurvive": "q83vASNFZ4mrze8BI0VniavN7wEjRWeJq83vASNFZ4k"
+  },
+  {
+   "label": "android #814: {\"certificateSha256\":\"short-but-secret\"}",
+   "input": "{\"certificateSha256\":\"short-but-secret\"}",
+   "mustNotSurvive": "short-but-secret"
+  },
+  {
+   "label": "lead: Authorization: Bearer (scheme before key=value)",
+   "input": "Authorization: Bearer leadPlanted0123456789",
+   "mustNotSurvive": "leadPlanted0123456789"
+  },
+  {
+   "label": "lead: plural stripping (access-code:)",
+   "input": "access-code: 99887766",
+   "mustNotSurvive": "99887766"
+  },
+  {
+   "label": "#813 re-review N1 nested object",
+   "input": "{\"password\":{\"value\":\"nestedsecret99\"}}",
+   "mustNotSurvive": "nestedsecret99"
+  },
+  {
+   "label": "#813 re-review N1 array",
+   "input": "{\"tokens\":[\"arraysecret99value\"]}",
+   "mustNotSurvive": "arraysecret99value"
+  },
+  {
+   "label": "#813 re-review N1 array of objects",
+   "input": "{\"apiKeys\":[{\"value\":\"apikeysecret99\"}]}",
+   "mustNotSurvive": "apikeysecret99"
+  },
+  {
+   "label": "#813 re-review N1 name/value pair",
+   "input": "{\"name\":\"BAMBU_ACCESS_CODE\",\"value\":\"pairsecret99\"}",
+   "mustNotSurvive": "pairsecret99"
+  },
+  {
+   "label": "#813 re-review N1 key/value pair, value first",
+   "input": "{\"value\":\"pairsecret77\",\"key\":\"API_KEY\"}",
+   "mustNotSurvive": "pairsecret77"
+  },
+  {
+   "label": "#813 re-review N2 pin in prose, 64 hex",
+   "input": "pin is ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34 ok",
+   "mustNotSurvive": "ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34"
+  },
+  {
+   "label": "#813 re-review N2 sha256 named",
+   "input": "{\"sha256\":\"ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34\"}",
+   "mustNotSurvive": "ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34"
+  },
+  {
+   "label": "#813 re-review N2 cert named",
+   "input": "{\"cert\":\"certsecret99value\"}",
+   "mustNotSurvive": "certsecret99value"
+  },
+  {
+   "label": "#813 re-review N2 fingerprint colon-hex",
+   "input": "fingerprint: ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab",
+   "mustNotSurvive": "ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab"
+  },
+  {
+   "label": "#813 re-review N3 digest header username",
+   "input": "Authorization: Digest username=\"taylorperson\", response=\"6629fae49393a05397450978507c4ef1\"",
+   "mustNotSurvive": "taylorperson"
+  },
+  {
+   "label": "#813 re-review N3 digest header response",
+   "input": "Authorization: Digest username=\"taylorperson\", response=\"6629fae49393a05397450978507c4ef1\"",
+   "mustNotSurvive": "6629fae49393a05397450978507c4ef1"
+  },
+  {
+   "label": "#813 re-review N3 proxy header",
+   "input": "Proxy-Authorization: Digest username=\"p\", realm=\"r\", nonce=\"noncevalue99\"",
+   "mustNotSurvive": "noncevalue99"
+  },
+  {
+   "label": "#813 re-review N6 negotiate",
+   "input": "negotiate TlRMTVNTUAABAAA12345",
+   "mustNotSurvive": "TlRMTVNTUAABAAA12345"
+  },
+  {
+   "label": "#813 re-review N11 percent-encoded email",
+   "input": "to=someone%40example.com&x=1",
+   "mustNotSurvive": "someone%40example.com"
+  }
+ ]
+}

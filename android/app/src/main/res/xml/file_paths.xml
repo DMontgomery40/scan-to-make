@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths>
     <cache-path name="chosen" path="ObjectsChosen/" />
+    <!-- Settings → Share Diagnostics… (#799): the ZIP, shared through the share sheet. -->
+    <cache-path name="diagnostics" path="Diagnostics/" />
 </paths>

@@ -857,7 +857,7 @@ struct AdvancedSettings: View {
                     }
                 } label: {
                     Text("Diagnostics")
-                    Text(exportProblem ?? "A zip of logs and settings with tokens and keys removed. Nothing is sent anywhere.")
+                    Text(exportProblem ?? "A zip of logs, settings and your printer software’s own diagnostics. It removes the tokens, keys and email addresses it recognises; look before you send. Nothing is sent anywhere.")
                 }
             }
         }
@@ -906,7 +906,10 @@ struct AdvancedSettings: View {
         exportProblem = nil
         let state = state
         Task {
-            let ok = await Diagnostics.export(state:state, to:destination)
+            let socket = ModelAccessModel.socketPath(for:Installation(bundle:.main))
+            let ok = await Diagnostics.export(state:state, to:destination) {
+                try await ControlClient(socketPath:socket, timeout:ControlClient.timeout(for:"diagnostics.bundle")).diagnosticsBundle()
+            }
             exporting = false
             if ok { NSWorkspace.shared.activateFileViewerSelecting([destination]) }
             else { exportProblem = "The diagnostics couldn’t be saved there." }

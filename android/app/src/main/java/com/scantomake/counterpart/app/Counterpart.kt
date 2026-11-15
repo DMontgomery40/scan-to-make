@@ -20,6 +20,8 @@ class Counterpart : Application() {
     lateinit var nearby: NearbyPairing
     lateinit var uploader: ProjectUploader
     lateinit var state: AppState
+    /** The last failed requests, for Settings → Share Diagnostics… (#799). */
+    val failures = com.scantomake.counterpart.api.RecentFailures()
 
     val prefs by lazy { getSharedPreferences("counterpart", MODE_PRIVATE) }
 
@@ -32,7 +34,7 @@ class Counterpart : Application() {
         companion = CompanionClient(pairing, transport, deviceModel = deviceModel(), deviceName = userAssignedName(), cache = File(cacheDir, "Objects"),
             library = OnDeviceLibrary(File(noBackupFilesDir, "Library")).also { library ->
                 library.keep = prefs.getString(OnDeviceLibrary.Keep.PREFS_KEY, null)?.let { runCatching { OnDeviceLibrary.Keep.valueOf(it) }.getOrNull() } ?: OnDeviceLibrary.Keep.Models
-            })
+            }, failures = failures)
         nearby = NearbyPairing(this, pairing, transport)
         uploader = ProjectUploader(companion)
         state = AppState(this)

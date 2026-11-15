@@ -112,6 +112,81 @@ final class BackdropKeyTests: XCTestCase {
         XCTAssertFalse(kept(frame, 100, 40))
     }
 
+    /// Review of #801 (F2): a deep lime crate, no backdrop. Its far face is 0.3 m behind its front edge, which used to be
+    /// enough to call it a backdrop and key the crate's own back away. Its border meets its own walls and the table at
+    /// about its own depth, with nothing in front: never a backdrop.
+    func testADeepObjectOfTheColourWithNoBackdropIsNeverKeyed() throws {
+        let w = 120, h = 80, dw = 60, dh = 40
+        let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
+                            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)!
+        ctx.setFillColor(CGColor(red: 166/255, green: 139/255, blue: 116/255, alpha: 1)); ctx.fill(CGRect(x: 0, y: 0, width: w, height: h))
+        ctx.setFillColor(CGColor(red: 160/255, green: 170/255, blue: 40/255, alpha: 1)); ctx.fill(CGRect(x: 40, y: 20, width: 60, height: 50))
+        // Depth rows top to bottom (cell row 0 is the image's top): the crate (cell rows 5…29, x 20…49) from 0.5 m at its
+        // far top edge to 0.2 m at its near bottom edge; the table below it carries on from 0.2 m to 0.15 m; the room
+        // either side and above, 1.5 m away.
+        var metres = [Float](repeating: 1.5, count: dw * dh)
+        for y in 5..<30 { for x in 20..<50 { metres[y * dw + x] = 0.5 - 0.3 * Float(y - 5) / 24 } }
+        for y in 30..<dh { for x in 0..<dw { metres[y * dw + x] = 0.2 - 0.05 * Float(y - 30) / 9 } }
+        let frame = try BackdropKey.key(image: try pixelBuffer(from: ctx.makeImage()!), depth: DepthImage(width: dw, height: dh, metres: metres))
+        XCTAssertGreaterThan(frame.panelShare, 0.2, "one big, flat region of the colour")
+        XCTAssertGreaterThanOrEqual((frame.backdropDepth ?? 0) - (frame.nearestDepth ?? 1), BackdropKey.minimumGap, "deep enough to pass the old test")
+        // Review of #811 (R1): pin the measured step, not only the decision. Its near edge is 2 cells inside the crate
+        // (0.225 m) against 3 cells out on the table (0.189 m): 0.036 m, just under the threshold.
+        let step = try XCTUnwrap(frame.frontStep, "the table is nearer than the crate's near edge")
+        XCTAssertEqual(step, 0.036, accuracy: 0.002)
+        XCTAssertLessThan(step, BackdropKey.minimumFrontStep)
+        XCTAssertFalse(frame.isBackdrop, "front step \(step)")
+        XCTAssertEqual(frame.keep.onCount, frame.keep.width * frame.keep.height, "the crate keeps its back")
+    }
+
+    /// Review of #811 (R1): the other side of the threshold. On Nov 8's dim rig photos the surfaces next to the panel
+    /// sit only about 0.05 m nearer than it: the plate runs back towards the panel, and the depth map blurs the step. A
+    /// panel at 0.41 m, the plate rising away from the camera to meet it (0.017 m per depth cell, so 0.051 m across
+    /// the sampled five cells), and the letter at 0.17 m: it must still key. A change to how `frontStep` samples that
+    /// shrinks this step fails here, before it lets the green back into dim rig scans.
+    func testADimRigPhotoWithAShallowFrontStepIsStillKeyed() throws {
+        let w = 120, h = 80, dw = 60, dh = 40
+        let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
+                            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)!
+        ctx.setFillColor(CGColor(red: 166/255, green: 139/255, blue: 116/255, alpha: 1)); ctx.fill(CGRect(x: 0, y: 0, width: w, height: h))  // plate
+        ctx.setFillColor(CGColor(red: 160/255, green: 147/255, blue: 31/255, alpha: 1)); ctx.fill(CGRect(x: 60, y: 0, width: 60, height: h))  // panel
+        ctx.setFillColor(CGColor(red: 35/255, green: 27/255, blue: 18/255, alpha: 1)); ctx.fill(CGRect(x: 10, y: 20, width: 20, height: 40)) // letter
+        // Depth: the panel (cell columns 30…59) at 0.41 m; the plate left of it rising from 0.17 m to meet it; the
+        // letter (cell columns 5…14) at 0.17 m.
+        var metres = [Float](repeating: 0.41, count: dw * dh)
+        for y in 0..<dh { for x in 0..<30 { metres[y * dw + x] = max(0.17, 0.41 - 0.017 * Float(30 - x)) } }
+        for y in 10..<30 { for x in 5..<15 { metres[y * dw + x] = 0.17 } }
+        let frame = try BackdropKey.key(image: try pixelBuffer(from: ctx.makeImage()!), depth: DepthImage(width: dw, height: dh, metres: metres))
+        let step = try XCTUnwrap(frame.frontStep)
+        XCTAssertEqual(step, 0.051, accuracy: 0.002, "as Nov 8's dim photos measure")
+        XCTAssertGreaterThanOrEqual(step, BackdropKey.minimumFrontStep)
+        XCTAssertTrue(frame.isBackdrop, "front step \(step)")
+        XCTAssertFalse(kept(frame, 100, 40), "the panel")
+        XCTAssertTrue(kept(frame, 20, 40), "the letter")
+        XCTAssertTrue(kept(frame, 40, 10), "the plate")
+    }
+
+    /// Review of #801 (F5): the object mask on a synthetic keyed photo. The panel's area and the room outside Vision's
+    /// foreground go; the object's body stays; a 3-pixel wire on it, thinner than the opening, goes with the panel's
+    /// rim (the trade-off the opening makes); no foreground at all gives no mask.
+    func testTheObjectMaskKeepsTheObjectAndDropsThinLeftovers() {
+        let w = 120, h = 80
+        var keep = GrayImage(width: w, height: h, fill: 255)
+        for y in 0..<h { for x in 70..<w { keep[x, y] = 0 } }             // the keyed panel, right side
+        for y in 0..<h { keep[96, y] = 255; keep[97, y] = 255 }           // its far rim, unkeyed, inside the foreground
+        var foreground = GrayImage(width: w, height: h)
+        for y in 20..<60 { for x in 20..<100 { foreground[x, y] = 255 } } // the object and the panel behind it
+        for y in 5..<20 { for x in 40..<43 { foreground[x, y] = 255 } }   // a wire 3 pixels thick standing on it
+        let mask = BackdropKey.objectMask(keep: keep, foreground: foreground)!
+        XCTAssertEqual(mask[40, 40], 255, "the object's body")
+        XCTAssertEqual(mask[90, 40], 0, "the panel")
+        XCTAssertEqual(mask[97, 40], 0, "the panel's rim")
+        XCTAssertEqual(mask[69, 40], 255, "the object's edge against the panel")
+        XCTAssertEqual(mask[10, 40], 0, "the room outside the foreground")
+        XCTAssertEqual(mask[41, 10], 0, "a feature thinner than 2 × cleanup + 1 pixels goes too")
+        XCTAssertNil(BackdropKey.objectMask(keep: keep, foreground: GrayImage(width: w, height: h)), "no foreground, no mask")
+    }
+
     func testAYellowOrGreenObjectWithNothingBehindItIsNeverKeyed() throws {
         let (image, depth) = try scene(panel: (160, 147, 31), panelDepth: 0.19)   // the colour is part of the object
         let frame = try BackdropKey.key(image: image, depth: depth)

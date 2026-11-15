@@ -121,18 +121,30 @@ jobs:
           # files: on Nov 10 a test failed twice in the gate and passed alone, and the gate had kept nothing to look at.
           RESULTS="${{ runner.temp }}/results"; rm -rf "$RESULTS"; mkdir -p "$RESULTS"
           # A test that hangs fails in minutes instead of holding the lane: on Nov 10 one waited 41 minutes on its first case.
+          # Each test run keeps its own result: one failed iPhone test must not skip the iPad layout tests or the Release
+          # check after them (#805). Both run, each prints its exit line, and the step fails at the end if either failed.
+          iphone=0
           xcodebuild test-without-building -xctestrun "${manifests[0]}" \
             -destination "platform=iOS Simulator,id=$SIM" -parallel-testing-enabled NO -collect-test-diagnostics never \
             -test-timeouts-enabled YES -default-test-execution-time-allowance 120 -maximum-test-execution-time-allowance 300 \
-            -resultBundlePath "$RESULTS/iphone.xcresult"
+            -resultBundlePath "$RESULTS/iphone.xcresult" || iphone=$?
+          echo "iPhone unit and UI tests: exit $iphone"
           # Regular width: the starters, the New button and search on the iPad layout (PRD §6.1).
+          ipad=0
           xcodebuild test-without-building -xctestrun "${manifests[0]}" \
             -destination "platform=iOS Simulator,id=$IPAD" -parallel-testing-enabled NO -collect-test-diagnostics never -test-timeouts-enabled YES -default-test-execution-time-allowance 120 -maximum-test-execution-time-allowance 300 \
             -resultBundlePath "$RESULTS/ipad.xcresult" \
             -only-testing:ScanToMakeUITests/LayoutParityUITests \
-            -only-testing:ScanToMakeUITests/ProjectScreensUITests/testSearchExplainsHiddenProjectsAndShowAllRestoresThem
+            -only-testing:ScanToMakeUITests/ProjectScreensUITests/testSearchExplainsHiddenProjectsAndShowAllRestoresThem || ipad=$?
+          echo "iPad layout tests: exit $ipad"
+          if [ "$iphone" -ne 0 ] || [ "$ipad" -ne 0 ]; then
+            echo "::error::iPhone tests exit $iphone, iPad layout tests exit $ipad; result bundles kept in $RESULTS"
+            exit 1
+          fi
           rm -rf "$RESULTS"
       - name: Unsigned iPhoneOS Release build has no React Native in it
+        # Runs after failed tests too, so their result can't hide this one's (#805); the job still fails on theirs.
+        if: ${{ !cancelled() }}
         run: |
           set -euo pipefail
           trap 'rm -rf "${{ runner.temp }}/app-release"' EXIT

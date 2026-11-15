@@ -324,7 +324,24 @@ def screens(ids: dict, record: str, offline_record: str, fixtures: Path, offline
 
 
 # The iPhone Duo's two panels in points (agent-device help foldable): which one a capture draws says the pose.
-PANEL_POINTS = {'closed': (466, 678), 'open': (669, 951)}
+# The lit panel's size in points for each Duo pose. Open was recorded as 669 x 951 (Nov 11) and as 951 x 669 (train
+# 2026-11-14); either way round it is the open panel, never the closed one.
+PANEL_POINTS = {'closed': {(466, 678)}, 'open': {(669, 951), (951, 669)}}
+# agent-device sends a fold, then reads the hinge back. With Xcode 27.2's devicectl the read fails in one of two ways,
+# although the fold lands: no sample at all, or a sample it could not confirm.
+FOLD_UNREAD = ('fold-pose-dispatched-unverified', 'fold-hinge-angle-no-sample')
+
+
+def fold_failure(why: str, pose: str, panel_points) -> str:
+    """What is left of a fold's error once the capture is checked: '' when the hinge just could not be read and the
+    captured panel is the pose's size (`panel_points()` is called only then), else the error with what was seen."""
+    if not any(code in why for code in FOLD_UNREAD) or pose not in PANEL_POINTS:
+        return why
+    size = panel_points()
+    if size is not None and tuple(size) in PANEL_POINTS[pose]:
+        return ''
+    expected = ' or '.join(f'{w} x {h}' for w, h in sorted(PANEL_POINTS[pose]))
+    return f'fold {pose} sent, but the capture is {size} points, not {expected}: {why}'
 
 
 def slug(text: str) -> str:
@@ -640,14 +657,9 @@ def run_devices(keys: list[str], items: list[dict], app: Path, out: Path, record
             if pose:  # a Duo's fold, or an iPad's orientation, set once with the app open
                 try: device.ad('open', BUNDLE, '--relaunch', timeout=120); device.ad('orientation' if pose.startswith('landscape') else 'fold', pose, timeout=120)
                 except Exception as failure:
-                    # agent-device sends the fold, then reads the hinge back; when that read returns no sample (Nov 11, on
-                    # this Mac) it fails with fold-pose-dispatched-unverified although the pose was sent. Its help says to
-                    # check from a capture: the lit panel's points, 466 x 678 closed and 669 x 951 open.
-                    why = str(failure)
-                    if 'fold-pose-dispatched-unverified' in why and pose in PANEL_POINTS:
-                        size = device.panel_points()
-                        if size == PANEL_POINTS[pose]: why = ''
-                        else: why = f'fold {pose} sent, but the capture is {size} points, not {PANEL_POINTS[pose]}: {why}'
+                    # agent-device sends the fold, then reads the hinge back; when that read fails (Nov 11 and Nov 14, on
+                    # this Mac) the pose was still sent. Its help says to check from a capture: the lit panel's points.
+                    why = fold_failure(str(failure), pose, device.panel_points)
                     if why: record('failures', {'device': key, 'name': f'fold {pose}', 'why': why})
             for item in todo:
                 if time.time() > deadline: break
@@ -785,6 +797,9 @@ def main() -> int:
         info['source'] = source
         handoff.write_text(json.dumps({'info': info, 'manifest': manifest, 'processes': processes, 'served': sorted(served)}))
         items, done = select(args, out, keys, handoff_context(json.loads(handoff.read_text()), work))
+        # What this run was asked for, so the bad-day gate (ux_gate.py) can tell a hold that captured nothing from a pass.
+        (out / 'asked.json').write_text(json.dumps({'condition': args.condition,
+                                                    'screens': [{'device': k, 'name': i['name']} for k in keys for i in items]}))
         if all((k, i['name']) in done for k in keys for i in items):
             log('every screen is captured; --redo captures them again')
             write_index(out, info, manifest, 0, processes)
@@ -834,7 +849,9 @@ def select(args, out: Path, keys: list[str], ctx: dict) -> tuple[list[dict], set
             items = [i for i in items if any(i['name'].endswith('-' + w.lstrip('=')) for w in args.screens.split(','))]
     if getattr(args, 'pages', None):  # --pages N: at most N scrolled pages per screen (the stage is on the first)
         items = [{**i, 'pages': min(i['pages'], args.pages)} for i in items]
-    done = {(d['device'], d['name']) for d in read_jsonl(out / 'done.jsonl')}
+    # A screen is done only for the build that captured it: after a new commit the same folder captures it again.
+    source = ctx['info'].get('source')
+    done = {(d['device'], d['name']) for d in read_jsonl(out / 'done.jsonl') if not source or d.get('source') == source}
     if args.redo: done -= {(k, i['name']) for k in keys for i in items}
     return items, done
 

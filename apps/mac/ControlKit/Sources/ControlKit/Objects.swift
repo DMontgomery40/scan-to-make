@@ -513,6 +513,7 @@ public extension ControlClient {
         case "objects.pausePrint", "objects.resumePrint", "objects.cancelPrint": return 740 // 730 s on the companion: the printer's question may stay open 10 min
         case "printers.route": return 35 // 25 s on the companion: it may start the MCP's session first
         case "printers.mcps": return 15 // it looks for copies in the home folder
+        case "diagnostics.bundle": return 55 // 45 s on the companion: it may start each printer's MCP to ask for its own bundle
         case "printers.installMcp", "printers.discover": return 25 // 15 s on the companion (npm lookup 7 s; discovery about 4 s)
         case "printers.check": return 70 // 60 s on the companion: it starts the MCP, then reads status and the camera
         case "printers.obtain": return 70 // 60 s on the companion: it starts the MCP, or waits about 20 s for the person's answer
@@ -801,6 +802,25 @@ public struct PrinterMcpPackage: Decodable, Sendable, Equatable, Identifiable {
         self.latestVersion = latestVersion; self.appMcpId = appMcpId; self.installs = installs; self.uses = uses; self.appCopy = appCopy
         self.listedMoves = moves; self.usedBy = usedBy; self.available = available; self.upToDate = upToDate
     }
+}
+
+/// Export Diagnostics' companion part (#799): its own redacted state and each printer MCP's own bundle, in the shape the
+/// MCPs' `counterpart_diagnostics` uses. Names are relative paths; an MCP too old for it, or one that didn't answer, is a note.
+public struct CompanionDiagnostics: Decodable, Sendable, Equatable {
+    public struct File: Decodable, Sendable, Equatable {
+        public let name: String
+        public let content: String
+        public let truncated: Bool
+        public init(name: String, content: String, truncated: Bool) { self.name = name; self.content = content; self.truncated = truncated }
+    }
+    public let files: [File]
+    public let notes: [String]
+    public init(files: [File], notes: [String]) { self.files = files; self.notes = notes }
+}
+
+public extension ControlClient {
+    /// `diagnostics.bundle`: what Export Diagnostics adds as its `companion/` folder.
+    func diagnosticsBundle() async throws -> CompanionDiagnostics { try await call("diagnostics.bundle") }
 }
 
 /// Download's answer: already on this Mac, or the install it started (its progress comes as `mcp.update.*` events).
