@@ -155,8 +155,9 @@ function Diagnostics() {
       <h3>Diagnostics</h3>
       <p>
         A ZIP of the companion’s event log, your printers, their printer
-        software and its own diagnostics, with tokens, keys and email
-        addresses removed. Nothing is sent anywhere.
+        software and its own diagnostics. It removes the tokens, keys and
+        email addresses it recognises; look before you send. Nothing is sent
+        anywhere.
       </p>
       <Action
         run={async () => {

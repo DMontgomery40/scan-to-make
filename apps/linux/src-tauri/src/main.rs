@@ -178,7 +178,8 @@ async fn export_diagnostics(app: tauri::AppHandle, state: State<'_, Bridge>) -> 
         })
         .unwrap_or_else(|| "Linux".into());
     let about = format!("Counterpart for Linux {}\n{os}\n", app.package_info().version);
-    let bytes = diagnostics::zip(&diagnostics::entries(answer.as_ref().map_err(String::as_str), &about))?;
+    let home = std::env::var("HOME").ok();
+    let bytes = diagnostics::zip(&diagnostics::entries(answer.as_ref().map_err(String::as_str), &about, home.as_deref()))?;
     let path = file.path().to_owned();
     tauri::async_runtime::spawn_blocking(move || std::fs::write(&path, bytes))
         .await

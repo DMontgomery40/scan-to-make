@@ -1482,7 +1482,7 @@ test("Export Diagnostics is reachable in Settings → About and runs the native 
   assert.match(settings, /Export Diagnostics…/);
   assert.match(settings, /await exportDiagnostics\(\)/);
   const bridge = readFileSync(new URL("../src/bridge.ts", import.meta.url), "utf8");
-  assert.match(bridge, /invoke<[^>]*>\("export_diagnostics"\)/);
+  assert.match(bridge, /invoke<[^>]*>\(\s*"export_diagnostics",?\s*\)/);
   const main = readFileSync(new URL("../src-tauri/src/main.rs", import.meta.url), "utf8");
   const handlers = main.slice(main.indexOf("generate_handler!["));
   assert.ok(handlers.slice(0, handlers.indexOf("]")).includes("export_diagnostics"), "registered with Tauri");
