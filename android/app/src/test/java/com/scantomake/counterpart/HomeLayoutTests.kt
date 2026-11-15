@@ -1247,6 +1247,24 @@ class HomeLayoutTests {
         compose.runOnIdle { org.junit.Assert.assertEquals(1, printers) }
     }
 
+    /** #799, PRD §6.1: Settings → Share Diagnostics… is there with projects present, and opens the share sheet with the ZIP. */
+    @Test fun settingsSharesDiagnosticsWithProjectsPresent() {
+        state.projects.value = listOf(project("a", "Existing project", "ready"))
+        state.loaded.value = true
+        compose.setContent { WithApp { SettingsScreen(back = {}, pairAgain = {}, openPrinters = {}) } }
+        compose.onNodeWithTag("share-diagnostics").performScrollTo().assertIsDisplayed().performClick()
+        compose.waitUntil(5_000) { org.robolectric.Shadows.shadowOf(RuntimeEnvironment.getApplication()).peekNextStartedActivity() != null }
+        val chooser = org.robolectric.Shadows.shadowOf(RuntimeEnvironment.getApplication()).nextStartedActivity
+        assertEquals(android.content.Intent.ACTION_CHOOSER, chooser.action)
+        @Suppress("DEPRECATION") val send = chooser.getParcelableExtra<android.content.Intent>(android.content.Intent.EXTRA_INTENT)!!
+        assertEquals(android.content.Intent.ACTION_SEND, send.action)
+        assertEquals("application/zip", send.type)
+        @Suppress("DEPRECATION") val uri = send.getParcelableExtra<android.net.Uri>(android.content.Intent.EXTRA_STREAM)!!
+        assertEquals("content", uri.scheme)
+        assertTrue(uri.toString(), uri.lastPathSegment!!.matches(Regex("Counterpart Android Diagnostics \\d{4}-\\d{2}-\\d{2}\\.zip")))
+        assertTrue(send.flags and android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION != 0)
+    }
+
     /** On-device library, PRD §6.1: Settings → Keep on this phone offers the three choices, the space it uses and Clear,
      *  with projects present, as on the iPhone and iPad. */
     @Test fun settingsOffersKeepOnThisPhoneWithProjectsPresent() {
