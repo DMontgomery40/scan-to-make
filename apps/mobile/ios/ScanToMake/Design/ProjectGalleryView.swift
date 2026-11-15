@@ -297,10 +297,12 @@ struct ProjectGalleryView: View {
             // While the model a design draws from is coming, the chip says so (#606); an earlier design's is its own file (#616).
             return store.away ? .needsMac : waiting(for: ownMesh ?? path)
         case .scan:
-            if let scanURL, scanURL.pathExtension.lowercased() == "usdz" { return arFailed ? .failedScan(scanURL) : .show(scanURL) }
-            if case .file = scanModel, store.away { return .needsMac }
-            if case .file(let file) = scanModel, (file as NSString).pathExtension.lowercased() == "usdz" { return waiting(for: file) }
-            return nil
+            // `path` is the file the rule chose: the scan's USDZ, or the phone's preview beside a large rebuild (review R2
+            // on #843). Here, only whether it is on this phone yet; a scan still only on this phone is its own file.
+            if let url = store.models.file(project, path) ?? localScan, url.pathExtension.lowercased() == "usdz" {
+                return arFailed ? .failedScan(url) : .show(url)
+            }
+            return store.away ? .needsMac : waiting(for: path)
         case .together, .plate:
             return nil
         }

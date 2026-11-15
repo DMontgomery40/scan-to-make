@@ -71,10 +71,20 @@ final class ProjectGalleryTests: XCTestCase {
             ("a scan alone, Object Capture's USDZ", ["state": "ready", "kind": "fit", "scan": "scan.usdz"], "scan/scan.usdz"),
             ("a scan alone, a handheld STL", ["state": "ready", "kind": "fit", "scan": "scan.stl"], nil),
             ("no result and no scan", ["state": "new"], nil),
+            // Review R2 on #843: the scan's AR is the file this phone may fetch, chosen here, never again by the chip.
+            ("a 192 MB Mac rebuild with the phone's 9 MB preview beside it: the preview",
+             ["state": "ready", "kind": "fit", "scan": "scan.usdz", "scanFiles": [["name": "scan.usdz", "bytes": 191_981_699], ["name": "phone-preview.usdz", "bytes": 9_201_716]]],
+             "scan/phone-preview.usdz"),
+            ("a 192 MB Mac rebuild alone: none (too large for a phone; its picture says so)",
+             ["state": "ready", "kind": "fit", "scan": "scan.usdz", "scanFiles": [["name": "scan.usdz", "bytes": 191_981_699]]], nil),
+            ("a 15 MB scan the Mac lists: the scan", ["state": "ready", "kind": "fit", "scan": "scan.usdz", "scanFiles": [["name": "scan.usdz", "bytes": 15_961_620]]], "scan/scan.usdz"),
+            ("a listed handheld STL scan: none", ["state": "ready", "kind": "fit", "scan": "scan.stl", "scanFiles": [["name": "scan.stl", "bytes": 1_000]]], nil),
         ]
         for (name, json, want) in rows {
             XCTAssertEqual(ProjectGallery(project: project(json)).first?.ar, want, name)
         }
+        let onlyHere = project(["state": "new"])
+        XCTAssertEqual(ProjectGallery(project: onlyHere, scanOnThisDevice: true).first?.ar, "scan/scan.usdz", "a scan still only on this phone opens its own file")
     }
 
     /// #840, the sweep: every combination of missing, extra and odd model, merged mesh, scan, print and plates. The gallery
@@ -89,8 +99,14 @@ final class ProjectGalleryTests: XCTestCase {
         let prints: [[String: Any]?] = [nil, ["bundleId": "b"], ["bundleId": "b", "spools": [["colour": "#F5547C", "material": "PLA", "name": "Pink"]]],
                                        ["bundleId": "b", "spools": [["colour": "#F5547C"], ["colour": "#000000"]]]]
         let plates: [[[String: Any]]?] = [nil, [], [["id": "p:0", "name": "", "thumbnail": "renders/p0.png"], ["id": "p:1", "name": "Lid"]]]
+        // Review R2 on #843: what the Mac lists of the scan, by size: nothing, a small scan, a 192 MB rebuild with and
+        // without the phone's preview, the preview alone.
+        let listings: [((String) -> [[String: Any]])?] = [nil, { _ in [] }, { [["name": $0, "bytes": 15_961_620]] },
+                                                         { [["name": $0, "bytes": 191_981_699]] },
+                                                         { [["name": $0, "bytes": 191_981_699], ["name": "phone-preview.usdz", "bytes": 9_201_716]] },
+                                                         { _ in [["name": "phone-preview.usdz", "bytes": 9_201_716]] }]
         var checked = 0
-        for model in models { for mesh in merged { for scan in scans { for kind in kinds { for print in prints { for plate in plates {
+        for model in models { for mesh in merged { for scan in scans { for kind in kinds { for print in prints { for plate in plates { for listing in listings {
             var json: [String: Any] = ["state": model == nil ? "new" : "confirmed"]
             if let model {
                 var current: [String: Any] = ["model": model, "renders": [], "seats": [["name": "s", "rotationDeg": [0, 0, 0], "translationMm": [0, 0, 0]]]]
@@ -101,12 +117,20 @@ final class ProjectGalleryTests: XCTestCase {
             if let kind { json["kind"] = kind }
             if let print { json["print"] = print }
             if let plate { json["plates"] = plate }
+            if let listing, let scan { json["scanFiles"] = listing(scan) }
             let p = project(json)
             for onDevice in [false, true] {
                 for entry in ProjectGallery(project: p, scanOnThisDevice: onDevice).entries {
                     switch entry.kind {
                     case .part: if let ar = entry.ar { XCTAssertTrue(ar.lowercased().hasSuffix(".stl"), "\(json): \(ar)"); XCTAssertEqual(entry.drawing, .model(ar)) }
-                    case .scan: if let ar = entry.ar { XCTAssertTrue(ar.lowercased().hasSuffix(".usdz"), "\(json): \(ar)") }
+                    case .scan:
+                        if let ar = entry.ar {
+                            XCTAssertTrue(ar.lowercased().hasSuffix(".usdz"), "\(json): \(ar)")
+                            // The file opened is one this phone may fetch, never one over its limit.
+                            let listed = p.scanFiles?.first { "scan/\($0.name)" == ar }
+                            XCTAssertLessThanOrEqual(listed?.bytes ?? 0, Double(CompanionClient.scanLimit), "\(json): \(ar)")
+                        }
+                        if p.scanModel(limit: Double(CompanionClient.scanLimit)) == .tooLarge { XCTAssertNil(entry.ar, "\(json): too large, no AR") }
                     case .together, .plate: XCTAssertNil(entry.ar, "\(json)")
                     }
                     XCTAssertEqual(entry.arMesh, entry.kind == .part ? entry.ar : nil)
@@ -114,8 +138,8 @@ final class ProjectGalleryTests: XCTestCase {
             }
             _ = p.arTint; _ = p.partMesh; _ = p.mediaVersion
             checked += 1
-        } } } } } }
-        XCTAssertEqual(checked, models.count * merged.count * scans.count * kinds.count * prints.count * plates.count)
+        } } } } } } }
+        XCTAssertEqual(checked, models.count * merged.count * scans.count * kinds.count * prints.count * plates.count * listings.count)
     }
 
     func testOneEntryShowsAloneAndTheResultShowsFirst() {
