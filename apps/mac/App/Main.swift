@@ -1,4 +1,5 @@
 import SwiftUI
+import os
 import Sparkle
 import ServiceManagement
 import UniformTypeIdentifiers
@@ -248,6 +249,8 @@ struct CounterpartCommands: Commands {
     /// installs then). Logging out, restarting or shutting down is never held up: those end the agent too, and launchd
     /// starts it from the new app at the next login.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        // #850: Quit with no update waiting always quits; the reply is logged, so a quit that seems refused explains itself.
+        Updates.buildCheckLog.notice("quit: update staged \(self.updates.staged, privacy:.public), session ending \(Self.sessionEnding, privacy:.public)")
         guard updates.staged, !Self.sessionEnding else { return .terminateNow }
         Task { @MainActor in sender.reply(toApplicationShouldTerminate:await updates.quit.shouldTerminate()) }
         return .terminateLater
@@ -480,15 +483,25 @@ struct CounterpartCommands: Commands {
         }
     }
 
+    /// #850: the build check's decisions, readable with `log show --predicate 'subsystem == "com.scantomake.mac"'`.
+    static let buildCheckLog = Logger(subsystem:"com.scantomake.mac", category:"companion-build-check")
+
     /// #850, at every launch: a companion launched by another build (an app replaced by hand, or one before #850, which
-    /// doesn't say) is restarted to run this app's payload, once idle. Only for the installed app with its agent enabled:
-    /// a development build elsewhere never restarts the installed app's companion.
+    /// doesn't say) is restarted to run this app's payload, once idle. Only for the installed app: a development build
+    /// elsewhere never restarts the installed app's companion. Not gated on SMAppService's status, which can read other
+    /// than `.enabled` for an app replaced by hand at the moment it first launches (its background item still names the
+    /// old build); a companion answering on the control socket is what is checked, and the status is only logged.
     func checkCompanionBuild() {
+        let log = Self.buildCheckLog
         let installation = Installation(bundle:.main)
         let path = installation.bundle.bundleURL.resolvingSymlinksInPath().path
         let userApps = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications").path + "/"
-        guard path.hasPrefix("/Applications/") || path.hasPrefix(userApps), installation.service.status == .enabled,
-              let build = installation.bundle.object(forInfoDictionaryKey:"CFBundleVersion") as? String, !build.isEmpty else { return }
+        let build = installation.bundle.object(forInfoDictionaryKey:"CFBundleVersion") as? String ?? ""
+        log.notice("launch: \(path, privacy:.public), build \(build, privacy:.public), agent status \(Self.name(installation.service.status), privacy:.public)")
+        guard path.hasPrefix("/Applications/") || path.hasPrefix(userApps) else {
+            log.notice("not an installed copy; skipped"); return
+        }
+        guard !build.isEmpty else { log.error("no CFBundleVersion; skipped"); return }
         let socket = ModelAccessModel.socketPath(for:installation), target = "gui/\(getuid())/\(installation.label)"
         let check = CompanionBuildCheck(appBuild:build, appPayload:installation.resources.appendingPathComponent("Payload").path, effects:.init(
             status: {
@@ -499,10 +512,39 @@ struct CounterpartCommands: Commands {
             },
             ask: { await Self.askOnce() },
             waitUntilIdle: { [weak self] in await self?.waitUntilIdle(announce:true) },
-            restart: { _ = try? await Task.detached { try command(URL(fileURLWithPath:"/bin/launchctl"), ["kickstart", "-k", target]) }.value },
+            restart: { method in
+                let args = method == .kickstart ? ["kickstart", "-k", target] : ["kill", "SIGTERM", target]
+                return await Task.detached { Self.launchctl(args) }.value
+            },
             pause: { try? await Task.sleep(for:.seconds(CompanionBuildCheck.pauseSeconds)) },
-            say: { [weak self] in self?.showNotice($0) }))
+            say: { [weak self] in self?.showNotice($0) },
+            note: { log.notice("\($0, privacy:.public)") }))
         Task { @MainActor in _ = await check.run() }
+    }
+
+    nonisolated static func name(_ status: SMAppService.Status) -> String {
+        switch status {
+        case .enabled: return "enabled"
+        case .notRegistered: return "notRegistered"
+        case .requiresApproval: return "requiresApproval"
+        case .notFound: return "notFound"
+        @unknown default: return "unknown(\(status.rawValue))"
+        }
+    }
+
+    /// `launchctl` with its exit status and words kept (nil when it exited 0), for the log.
+    nonisolated static func launchctl(_ args: [String]) -> String? {
+        let task = Process(), output = Pipe()
+        task.executableURL = URL(fileURLWithPath:"/bin/launchctl")
+        task.arguments = args
+        task.standardOutput = output
+        task.standardError = output
+        do { try task.run() } catch { return "couldn't run launchctl: \(error.localizedDescription)" }
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        task.waitUntilExit()
+        guard task.terminationStatus != 0 else { return nil }
+        let words = String(decoding:data.prefix(400), as:UTF8.self).trimmingCharacters(in:.whitespacesAndNewlines)
+        return "exit \(task.terminationStatus)\(words.isEmpty ? "" : ": " + words)"
     }
 }
 
