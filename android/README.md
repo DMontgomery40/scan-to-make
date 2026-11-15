@@ -125,6 +125,15 @@ All of this needs the phone to reach the Mac (same Wi-Fi or Tailscale). Away fro
 it can reach the Mac again. A push relay (Firebase Cloud Messaging from the Mac or `services/relay`) would fix that,
 but needs a Mac-side change and an FCM project; not done.
 
+## Share Diagnostics (#799)
+
+Settings → Help → **Share Diagnostics…** makes `Counterpart Android Diagnostics <yyyy-mm-dd>.zip` in the cache and opens the share sheet
+(FileProvider, `cache/Diagnostics/`). It holds `about.txt`, `connection.json` (the pairing's shape: no token, pin, device id or address,
+only each address's kind), `request-errors.json` (the last 50 failed requests, kept in memory by `api/RecentFailures`; Android keeps
+no log file), `captures.json` (the scans on the phone, without their pictures) and `notes.txt`. Everything goes through
+`Diagnostics.redact`, the companion's rules (`services/companion/src/diagnostics.ts`) plus a pin, a pairing code and a token anywhere.
+The companion's own log and the printer software come from the computer's Export Diagnostics.
+
 ## What's verified, and what isn't
 
 Verified here (a Linux machine, no phone, no Mac):

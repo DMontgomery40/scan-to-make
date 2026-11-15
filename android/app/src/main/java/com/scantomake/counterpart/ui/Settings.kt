@@ -47,6 +47,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.scantomake.counterpart.app.AppState
 import com.scantomake.counterpart.app.Counterpart
+import com.scantomake.counterpart.app.Diagnostics
 import com.scantomake.counterpart.app.Notifications
 import com.scantomake.counterpart.core.isPlainText
 import com.scantomake.counterpart.core.jsonOf
@@ -121,6 +122,7 @@ fun SettingsScreen(back: () -> Unit, pairAgain: () -> Unit, openPrinters: () -> 
     var codeEngine by remember { mutableStateOf<JsonObject?>(null) }
     var codeEngineProblem by remember { mutableStateOf<String?>(null) }
     var forget by remember { mutableStateOf(false) }
+    var diagnosticsProblem by remember { mutableStateOf<String?>(null) }
     var notifications by remember { mutableStateOf(Notifications.allowed(context)) }
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { notifications = it }
     LaunchedEffect(Unit) {
@@ -219,6 +221,16 @@ fun SettingsScreen(back: () -> Unit, pairAgain: () -> Unit, openPrinters: () -> 
             SectionTitle("Help")
             SecondaryButton("Open the Guide", Modifier.fillMaxWidth()) { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(HELP_PAGE))) }
             SecondaryButton("Print the Scan Rig by Kass 3D", Modifier.fillMaxWidth()) { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(SCAN_RIG_PAGE))) }
+            // #799: the beta exists so testers send logs (David, Nov 7). The phone's half; the computer exports its own.
+            SecondaryButton("Share Diagnostics…", Modifier.fillMaxWidth().testTag("share-diagnostics")) {
+                scope.launch {
+                    diagnosticsProblem = null
+                    try { Diagnostics.share(context, app) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) { diagnosticsProblem = "The diagnostics couldn't be made. Try again." }
+                }
+            }
+            diagnosticsProblem?.let { Text(it, color = Palette.failed, fontSize = 13.sp) }
+            Text("A ZIP of this app's version, the connection to your computer, recent errors and the scans on this phone, without their pictures. Tokens, codes, addresses and e-mail addresses are removed. Send it with your report; the computer's own Export Diagnostics has the rest.",
+                color = Palette.secondary, fontSize = 12.sp)
             SectionTitle("About")
             Text("Counterpart for Android 0.1.0 · open source · github.com/DMontgomery40/scan-to-make", color = Palette.secondary, fontSize = 13.sp)
         }
