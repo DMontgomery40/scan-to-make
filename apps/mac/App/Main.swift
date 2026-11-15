@@ -320,8 +320,9 @@ struct CounterpartCommands: Commands {
     func updater(_ updater: SPUUpdater, didExtractUpdate item: SUAppcastItem) { staged = true }
     func updater(_ updater: SPUUpdater, willInstallUpdate item: SUAppcastItem) { staged = true }
     func updater(_ updater: SPUUpdater, userDidMake choice: SPUUserUpdateChoice, forUpdate updateItem: SUAppcastItem, state: SPUUserUpdateState) {
-        // Skip cancels an update that began installing; any other answer to a downloaded update leaves it to install on quit.
-        if choice == .skip { staged = false } else if state.stage != .notDownloaded { staged = true }
+        // Skip cancels an update that began installing. Any other answer once Sparkle's installer has started leaves it
+        // to install on quit; a downloaded update whose installer hasn't started doesn't install on quit.
+        if choice == .skip { staged = false } else if state.stage == .installing { staged = true }
     }
 
     /// Install and Relaunch: wait until no work would be cut short, then let Sparkle quit and replace the app.
@@ -343,8 +344,11 @@ struct CounterpartCommands: Commands {
     }
 
     private func waitUntilIdle(announce: Bool) async {
-        var told = false
-        while UpdateGate.decide(await Self.projects()) == .wait {
+        var told = false, timeouts = 0
+        while true {
+            let projects = await Self.projects()
+            if UpdateGate.decide(projects, timeoutsBefore:timeouts) == .install { break }
+            timeouts = UpdateGate.timedOut(projects) ? timeouts + 1 : 0
             if announce && !told { told = true; showWaiting() }
             try? await Task.sleep(for:.seconds(15))
         }

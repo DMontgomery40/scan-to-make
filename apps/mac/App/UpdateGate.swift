@@ -30,13 +30,26 @@ enum UpdateGate {
         return words.busy && !words.printRunning
     }
 
-    /// What to do, from the companion's project list. A companion that doesn't answer has nothing running to protect;
-    /// one that says it is busy answering is treated as working.
-    static func decide(_ projects: Result<[Project], Error>) -> Decision {
+    /// Consecutive timed-out asks (about 10 minutes at one every 15 s) after which a companion that never answers is
+    /// taken as stuck, so an update can't be held off for good (#828).
+    static let timeoutLimit = 40
+
+    /// What to do, from the companion's project list. A companion that isn't there (no socket, refused) has nothing
+    /// running to protect. One that says it is busy answering is working. One that is too slow to answer may be working,
+    /// so it waits, but only for `timeoutLimit` asks in a row (`timeoutsBefore` counts the earlier ones).
+    static func decide(_ projects: Result<[Project], Error>, timeoutsBefore: Int = 0) -> Decision {
         switch projects {
         case .success(let projects): return projects.contains(where: interrupts) ? .wait : .install
-        case .failure(let error): return (error as? ControlRemoteError)?.code == "busy" ? .wait : .install
+        case .failure(let error):
+            if (error as? ControlRemoteError)?.code == "busy" { return .wait }
+            if (error as? ControlClientError) == .timedOut { return timeoutsBefore + 1 >= timeoutLimit ? .install : .wait }
+            return .install
         }
+    }
+
+    static func timedOut(_ projects: Result<[Project], Error>) -> Bool {
+        if case .failure(let error) = projects { return (error as? ControlClientError) == .timedOut }
+        return false
     }
 }
 

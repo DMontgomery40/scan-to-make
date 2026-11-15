@@ -53,7 +53,16 @@ final class UpdateGateTests: XCTestCase {
 
     func testACompanionThatDoesntAnswerHasNothingToProtect() {
         XCTAssertEqual(UpdateGate.decide(.failure(ControlClientError.unavailable)), .install)
-        XCTAssertEqual(UpdateGate.decide(.failure(ControlClientError.timedOut)), .install)
+        XCTAssertEqual(UpdateGate.decide(.failure(ControlClientError.invalidResponse)), .install)
+    }
+
+    func testASlowCompanionHoldsTheInstallOnlyForAWhile() {
+        let slow: Result<[Project], Error> = .failure(ControlClientError.timedOut)
+        XCTAssertTrue(UpdateGate.timedOut(slow))
+        XCTAssertEqual(UpdateGate.decide(slow), .wait, "too slow to answer may be working")
+        XCTAssertEqual(UpdateGate.decide(slow, timeoutsBefore: UpdateGate.timeoutLimit - 2), .wait)
+        XCTAssertEqual(UpdateGate.decide(slow, timeoutsBefore: UpdateGate.timeoutLimit - 1), .install, "never held off for good")
+        XCTAssertFalse(UpdateGate.timedOut(.success([])))
         XCTAssertEqual(UpdateGate.decide(.failure(ControlRemoteError(code: "busy", message: "Your Mac is answering too many requests at once."))), .wait,
                        "busy answering is a working companion")
     }

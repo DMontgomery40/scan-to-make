@@ -271,7 +271,8 @@ runs from, so (`Updates` in `App/Main.swift`, the rule in `App/UpdateGate.swift`
    prepared or sent (not yet on the printer), the printer's question waiting, or a phone sending a project's files. It
    says "Counterpart will update as soon as the print or cleanup it’s working on is finished." and asks again every
    15 s. A print the printer already has doesn't hold it: the printer prints on, and the companion's print monitor
-   resumes after a restart. A companion that doesn't answer has nothing to protect.
+   resumes after a restart. A companion that isn't there has nothing to protect; one too slow to answer holds it for
+   at most 40 asks in a row (about 10 minutes).
 2. Sparkle quits the app. With an update waiting (`staged`), `applicationShouldTerminate` **unregisters the agent**
    (which stops it), waits until launchd no longer has the job, and records `agentAfterUpdate = stopped`.
 3. Sparkle replaces the app and relaunches it; the relaunched app **registers the agent again** before anything else
@@ -298,8 +299,10 @@ but Finder keeps its quarantine flag and is translocated again.
    RELEASE_DIR=<scratch>/release-A apps/mac/scripts/release.sh` (same Developer ID, notary profile and
    `SPARKLE_PUBLIC_KEY`, so A trusts B's EdDSA signature and Team ID).
 3. Make the staging appcast: a folder holding only B's ZIP, then
-   `"$SPARKLE_BIN/generate_appcast" --download-url-prefix <HTTPS folder where B's ZIP is uploaded>/ <folder>`, and
-   upload its `appcast.xml` as `appcast-staging.xml` with B's ZIP. `appcast.xml` stays untouched.
+   `"$SPARKLE_BIN/generate_appcast" --download-url-prefix <HTTPS folder where B's ZIP is uploaded>/ <folder>` and
+   `"$SPARKLE_BIN/sign_update" <folder>/appcast.xml` (as `release.sh` does), and upload that `appcast.xml` as
+   `appcast-staging.xml` with B's ZIP. `appcast.xml` stays untouched. `release.sh` runs `trunk_guard.sh`, so A can
+   only be built once #828 is on `main`.
 4. On a clean VM clone: download A's ZIP like a tester, drag A to Applications in Finder, open it, let the companion
    start (and pair, to have something running), then **Counterpart → Check for Updates… → Install Update → Install
    and Relaunch**. Check: `/Applications/Counterpart.app`'s `CFBundleVersion` is B; `launchctl print
