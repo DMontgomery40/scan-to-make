@@ -1718,7 +1718,7 @@ final class LayoutParityUITests: XCTestCase {
 
     // MARK: #844: nothing on a project page is wider than the screen
 
-    /// The elements of `app`'s first window that reach past its left or right edge, as one line each. A row that scrolls
+    /// The named elements of `app`'s first window that reach past its left or right edge, as one line each. A row that scrolls
     /// sideways (the gallery's labels) may hold more than it shows; what it holds is skipped, the row itself is not.
     private func overflowing(_ app: XCUIApplication) throws -> [String] {
         let window = app.windows.firstMatch.frame
@@ -1726,7 +1726,10 @@ final class LayoutParityUITests: XCTestCase {
         func walk(_ element: XCUIElementSnapshot) {
             let frame = element.frame
             let visible = frame.width > 0 && frame.height > 0 && frame.maxY > window.minY && frame.minY < window.maxY
-            if visible && (frame.minX < window.minX - 1 || frame.maxX > window.maxX + 1) {
+            // What a person reads or presses: it has words or a name. An unnamed container may extend past the edge by
+            // design (the iPad's floating sidebar glass sits 16 pt past it); the bug's title, Print Another and chips were named.
+            let named = !element.label.isEmpty || !element.identifier.isEmpty
+            if visible && named && (frame.minX < window.minX - 1 || frame.maxX > window.maxX + 1) {
                 found.append("\(element.elementType.rawValue) \(element.identifier.isEmpty ? "-" : element.identifier) “\(element.label.prefix(40))” x \(Int(frame.minX))…\(Int(frame.maxX)) of \(Int(window.width))")
             }
             let sideways = element.elementType == .scrollView && frame.height < window.height / 3
