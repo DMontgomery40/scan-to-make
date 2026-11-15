@@ -2,11 +2,17 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {chmod, mkdir, readdir, readFile, rm, stat, symlink, writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
+import {createHash} from 'node:crypto';
 import {ObjectStore} from '../dist/objects/store.js';
 import {ObjectService, InvalidStateError, InvalidCaptureManifestError, scanSummary, tooFewPhotos, SCANS_NEED_A_MAC, KEEP_SCAN_UNAVAILABLE, PREVIEW_ONLY} from '../dist/objects/service.js';
 import {macReconstructArgs, macReconstructRunner, macScanToStl, linuxReconstructRunner, progressWords, NEEDS_MACOS_27, OBJECT_CAPTURE_NEEDS_MAC, RECONSTRUCTION_FAILED} from '../dist/objects/reconstruct.js';
 import {tempDir} from './support/temp.mjs';
 
+function jpeg(width, height, filler) {
+  const sof = Buffer.alloc(2 + 1 + 2 + 2 + 1 + 9);
+  sof.writeUInt16BE(17, 0); sof[2] = 8; sof.writeUInt16BE(height, 3); sof.writeUInt16BE(width, 5); sof[7] = 3;
+  return Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xc0]), sof, Buffer.from([0xff, 0xd9]), Buffer.alloc(8, filler)]);
+}
 const STL = 'solid m\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid m\n';
 const manifest = images => ({version: 1, images, depthRequired: true});
 /** What the phone sends with every image of an Object Capture session (MacConnection.sendCapture). */
@@ -316,8 +322,11 @@ test('a scan declared on an asking project holds its question only while it is a
   const {service} = await setup({outcomes: [ASKS_FOR_PHOTOS, ASKS_FOR_PHOTOS, ASKS_FOR_PHOTOS], deps: {now: () => now}});
   const asking = await stranded(service);
   await service.declareCapture(asking.id, {...objectCaptureManifest(SIXTY_EIGHT), run: RUN_A});
+  // Review R3: within ten minutes of the declare the answer is refused, frames or not (the first may be on its way).
+  await assert.rejects(service.answerCloseup(asking.id, {bestGuess: true}), /Resume sending it from the phone that recorded it/);
+  now += 10 * 60_000 + 1;
   const accepted = await service.answerCloseup(asking.id, {bestGuess: true});
-  assert.equal(accepted.captureDeclared, undefined, 'no frames came: the declaration goes and the answer runs');
+  assert.equal(accepted.captureDeclared, undefined, 'ten minutes and no frame came: the declaration goes and the answer runs');
   assert.equal(accepted.state, 'touching-up');
   const again = await service.settled(asking.id);
   assert.equal(again.state, 'needs-closeup');
@@ -334,6 +343,49 @@ test('a scan declared on an asking project holds its question only while it is a
   assert.deepEqual(late.capture ?? [], []);
   assert.equal(late.state, 'touching-up');
   await service.settled(asking.id);
+});
+
+test('an answer is checked before a stopped scan is dropped, and a declaration from before the lease keeps its frames (review R3, R5)', async () => {
+  let now = 1_000_000;
+  const {service, store} = await setup({outcomes: [ASKS_FOR_PHOTOS, ASKS_FOR_PHOTOS, ASKS_FOR_PHOTOS], deps: {now: () => now}});
+  const asking = await stranded(service);
+  await service.declareCapture(asking.id, {...objectCaptureManifest(SIXTY_EIGHT), run: RUN_A});
+  await service.addCapturePhoto(asking.id, '0001.heic', Buffer.from('0001.heic'));
+  now += 10 * 60_000 + 1;
+  // R3: a rejected answer leaves the scan alone.
+  await assert.rejects(service.answerCloseup(asking.id, {}), /Choose photos for this answer/);
+  await assert.rejects(service.answerCloseup(asking.id, {photoNames: ['nope.heic']}), /That photo is not in this project/);
+  const kept = await service.get(asking.id);
+  assert.deepEqual([kept.captureDeclared?.run, kept.capture], [RUN_A, ['0001.heic']], 'the declaration and its frame stay');
+  assert.equal(kept.ask.status, 'open');
+
+  // R5: a declaration written before the lease existed has no atMs. With frames it counts from now; without, it goes.
+  await store.update(asking.id, o => ({...o, captureDeclared: {source: o.captureDeclared.source, images: o.captureDeclared.images, run: RUN_A}}));
+  await assert.rejects(service.answerCloseup(asking.id, {bestGuess: true}), /Resume sending it from the phone that recorded it/);
+  now += 10 * 60_000 + 1;
+  const late = await service.answerCloseup(asking.id, {bestGuess: true});
+  assert.equal(late.captureDeclared, undefined, 'ten minutes from when it was first seen');
+  await service.settled(asking.id);
+
+  const legacy = await stranded(service, 'Another desk thing');
+  await service.declareCapture(legacy.id, {...objectCaptureManifest(SIXTY_EIGHT), run: RUN_B});
+  await store.update(legacy.id, o => ({...o, captureDeclared: {source: o.captureDeclared.source, images: o.captureDeclared.images, run: RUN_B}}));
+  const cleared = await service.answerCloseup(legacy.id, {bestGuess: true});
+  assert.equal(cleared.captureDeclared, undefined, 'old and frameless: cleared at once, as before');
+  await service.settled(legacy.id);
+});
+
+test('camera information arriving renews the scan\'s lease (review R5)', async () => {
+  let now = 1_000_000;
+  const {service, object} = await setup({deps: {now: () => now}});
+  const one = jpeg(640, 480, 3);
+  await service.declareCapture(object.id, objectCaptureManifest(['0001.jpg']));
+  await service.addCapturePhoto(object.id, '0001.jpg', one);
+  now += 9 * 60_000;
+  const camera = {version: 1, kind: 'capture-camera', objectAnchor: null, frames: [{image: '0001.jpg', sha256: createHash('sha256').update(one).digest('hex'),
+    width: 640, height: 480, fx: 500, fy: 500, cx: 320, cy: 240, timestampMs: 1730000000000, tracking: 'tracking', center: [0, 1.2, 0]}]};
+  const withCamera = await service.addCaptureCamera(object.id, camera);
+  assert.equal(withCamera.captureDeclared.atMs, now, 'the camera file counts as the scan still arriving');
 });
 
 test('a new project takes a scan exactly as before (#825)', async () => {

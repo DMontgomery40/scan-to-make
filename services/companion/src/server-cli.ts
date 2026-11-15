@@ -126,7 +126,10 @@ const printGate=new PrintGate();
 if(printHandoff)printHandoff.admit=()=>printGate.hold('current');
 // #827: with no printer listed, the phone's handoff route and `/v1/mcp` say so instead of reaching the placeholder MCP
 // (the same live check ObjectService's print and estimate use).
-const noPrinterListed=()=>objects&&!objects.printerListed()?NO_PRINTER:undefined;
+// Review R4: read from the printer catalog (reloaded in place), not from ObjectService, which a companion without
+// capture doesn't have.
+const printerListed=()=>printerCatalog?printerCatalog.destinations.length>0:objects?.printerListed()??true;
+const noPrinterListed=()=>printerListed()?undefined:NO_PRINTER;
 if(printHandoff)printHandoff.refuse=noPrinterListed;
 // docs/design/remote-mcp.md: `/v1/mcp` reaches every configured destination through its own shared session and relay.
 // It reads the live destination map below (Add, Remove and Complete Settings change it in place).
@@ -397,7 +400,7 @@ try {
   if (remoteAuth) control = await startLocalControl({
     // The auth directory is private even when its state/volume parent is not.
     path:process.env.SCAN_TO_MAKE_CONTROL_SOCKET ?? join(remoteAuth.directory,'control.sock'),
-    dispatch:createControlDispatcher({auth:remoteAuth,modelAccess,runtimeSettings,printerCheck,companionVersion:await companionVersion(),...(displayName?{name:displayName}:{}),capture,
+    dispatch:createControlDispatcher({auth:remoteAuth,modelAccess,runtimeSettings,printerCheck,printerListed,companionVersion:await companionVersion(),...(displayName?{name:displayName}:{}),capture,
       captureDirectory:captureDirectory ? join(captureDirectory,'captures') : undefined,printHandoff,
       ...(objects ? {objects} : {}),
       ...(eventLog ? {events: eventLog} : {}),

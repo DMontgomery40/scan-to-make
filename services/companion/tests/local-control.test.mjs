@@ -323,6 +323,20 @@ test('server CLI with no printer set up answers projects, settings and the desig
   await stop();
 });
 
+// Review R4: whether a printer is listed comes from the printer catalog, so a companion without objects (no capture
+// folder) also refuses printer.check instead of asking the placeholder MCP.
+test('review R4: printer.check says to add a printer on a companion without objects too', async t => {
+  const f=await fixture(t);
+  let asked=0;
+  const printerCheck={get:async()=>{asked++;return {state:'idle'};},close:async()=>{}};
+  const none=createControlDispatcher({auth:f.services.auth,companionVersion:'0.1.0',printerCheck,printerListed:()=>false});
+  await assert.rejects(none('printer.check',{start:true}),error=>error.code==='conflict'&&error.message==='Add a printer in Settings › Printers first.');
+  assert.equal(asked,0,'the placeholder MCP is never asked');
+  const listed=createControlDispatcher({auth:f.services.auth,companionVersion:'0.1.0',printerCheck,printerListed:()=>true});
+  await listed('printer.check',{start:true});
+  assert.equal(asked,1);
+});
+
 // #834: a fresh Mac goes from Add printer to an estimate in the same companion, with no restart.
 test('a fresh companion prints to the first printer added, with no restart', async t => {
   const {f,call,address,projectId,stop,stderr}=await freshCompanion(t,{project:true});

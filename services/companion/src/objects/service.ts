@@ -1622,9 +1622,11 @@ export class ObjectService {
       // Store exactly what was validated; the digest binds those bytes to the completion.
       const stored = Buffer.from(JSON.stringify(camera, null, 2) + '\n', 'utf8');
       await writeCaptureCamera(this.dir(id), camera);
+      // Review R5: the camera file is the scan still arriving, so it renews the lease as a frame does.
       return this.#changed(await this.#deps.store.update(id, o => ({...o,
         captureCamera: {sha256: captureCameraDigest(stored), frameCount: camera.frames.length},
-        captureCompletion: undefined})));
+        captureCompletion: undefined,
+        ...(o.captureDeclared ? {captureDeclared: {...o.captureDeclared, atMs: this.#now()}} : {})})));
     });
   }
 
@@ -1907,12 +1909,19 @@ export class ObjectService {
     if (object.state !== 'needs-closeup') throw new InvalidStateError('No close-up was asked for.');
     // A reconstruction review is not a close-up: Best Guess, words or photos must not approve it.
     if (object.reconstructionReview) throw new InvalidStateError(RECONSTRUCTION_REVIEW_UPDATE);
-    // A scan the question asked for is declared (#825). A lease, not a lock (review of #831, F2): while its frames are
-    // arriving (one in the last ten minutes) the answer waits for it; one that never sent a frame, or stopped sending,
-    // is dropped and the answer goes ahead, so no project waits for a scan nobody will send.
+    // A scan the question asked for is declared (#825). A lease, not a lock (review of #831, F2; review R3, R5): for ten
+    // minutes from the declare or its newest frame or camera file the answer waits for it; after that it is dropped
+    // (once the answer itself is known to be good) and the answer goes ahead, so no project waits for a scan nobody
+    // will send. A declaration from before the lease has no time: with frames its ten minutes start now; without, it
+    // goes at once, as before.
     if (object.captureDeclared) {
-      if ((object.capture ?? []).length > 0 && this.#now() - (object.captureDeclared.atMs ?? 0) < CAPTURE_LEASE_MS) throw new InvalidStateError(CAPTURE_PENDING);
-      object = await this.#dropCapture(id);
+      const frames = (object.capture ?? []).length > 0;
+      if (object.captureDeclared.atMs === undefined && frames) {
+        const now = this.#now();
+        await this.#deps.store.update(id, o => o.captureDeclared ? {...o, captureDeclared: {...o.captureDeclared, atMs: o.captureDeclared.atMs ?? now}} : o);
+        throw new InvalidStateError(CAPTURE_PENDING);
+      }
+      if (object.captureDeclared.atMs !== undefined && this.#now() - object.captureDeclared.atMs < CAPTURE_LEASE_MS) throw new InvalidStateError(CAPTURE_PENDING);
     }
     // Carry on with what the asking pass was doing: a correction keeps its note and its model.
     // Only this answer's explicit attachments belong to it. Other pending photos may already
@@ -1926,6 +1935,8 @@ export class ObjectService {
     }
     if (!photos.length && !answer.bestGuess && !answer.text?.trim() && !sizes) throw new InvalidStateError('Choose photos for this answer, answer in words, or use Best Guess. If you already chose photos, update Counterpart and try again.');
     if (photos.some(name => !object.photos.includes(name))) throw new InvalidStateError('That photo is not in this project.');
+    // Review R3: only a good answer drops the stopped scan; a refused one leaves it as it was.
+    if (object.captureDeclared) object = await this.#dropCapture(id);
     const asked = lastDesignPass(object.passes)?.note;
     const said = answer.text?.trim() ? `Answer to "${object.ask?.question ?? object.question?.closeup ?? 'your question'}": ${answer.text.trim()}` : undefined;
     const parts = [asked, sizes ? sizesNote(sizes) : undefined, said, answer.bestGuess && !asked?.includes(BEST_GUESS_NOTE) ? BEST_GUESS_NOTE : undefined].filter(Boolean);
