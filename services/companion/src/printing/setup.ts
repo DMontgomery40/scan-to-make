@@ -402,7 +402,9 @@ export class PrinterSetup {
       const appCopy: PackageInstall | undefined = env.exists(own.entry!) ? {kind: 'app', path: own.prefix, ...(appVersion ? {version: appVersion} : {})} : undefined;
       const catalog = this.deps.catalog?.();
       const reasons = new Map<string, string>();
-      const uses = this.deps.configs().filter(entry => entry.config.backend === item.package).map(({id, config}): McpUse => {
+      // The host's built-in placeholder (`current` on a Mac or Linux with no printer added, #834) is no printer: as the
+      // printer list never lists it, Printer software never says it uses a copy ("Used by current", clean-Mac run Nov 15).
+      const uses = this.deps.configs().filter(entry => entry.config.backend === item.package && !(catalog?.placeholder && entry.id === 'current')).map(({id, config}): McpUse => {
         const effective = this.deps.effective?.(id, config) ?? config;
         const install = resolveMcpInstall(effective, env);
         const path = install.type === 'checkout' ? install.dir : install.type === 'app' || install.type === 'global' ? install.prefix

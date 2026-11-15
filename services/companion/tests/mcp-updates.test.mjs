@@ -1253,6 +1253,26 @@ test('#775 + #766: "Used by" and the own-copy line name a printer as the printer
   assert.deepEqual(plain.usedBy, ['Your printer']);
 });
 
+test('#834 placeholder: a Mac with no printer added never says Counterpart\'s copy is "Used by current"; a real printer on `current` still is', async () => {
+  // Clean-Mac run, Nov 15: Printer software read "Used by current" on a fresh Mac. `current` there is only the host's
+  // built-in placeholder (the catalog's `placeholder`), which the printer list never lists, so it uses nothing.
+  const {PrinterSetup} = await import('../dist/printing/setup.js');
+  const own = `${APP}/printers/bambu`;
+  const env = mac({[`${own}/lib/node_modules/bambu-printer-mcp/package.json`]: pkgJson('1.1.95'), [`${own}/lib/node_modules/bambu-printer-mcp/dist/index.js`]: ''});
+  const configs = [{id: 'current', config: {backend: 'bambu-printer-mcp', process: {command: '/node', args: [`${own}/lib/node_modules/bambu-printer-mcp/dist/index.js`]}}}];
+  const software = async catalog => (await new PrinterSetup({env, configs: () => configs, list: () => ['bambu'], latestVersion: () => '1.1.95', catalog: () => catalog}).mcps()).packages;
+  const [fresh] = await software({canonical: id => id, destinations: [], placeholder: true});
+  assert.deepEqual(fresh.usedBy, [], 'no printer uses it yet');
+  assert.deepEqual(fresh.uses, [], 'no "current uses Counterpart’s copy" line');
+  assert.deepEqual(fresh.moves, []);
+  assert.equal(fresh.installed, true, 'the copy itself is still listed as installed');
+  assert.ok(!JSON.stringify(fresh).includes('current'), 'the placeholder\'s id appears nowhere');
+  // David's Mac: `current` is his real P1S (migrated, not the placeholder): it is listed by its name, as before.
+  const [real] = await software({canonical: id => id, destinations: [{id: 'current', name: 'Bambu Lab P1S'}], placeholder: false});
+  assert.deepEqual(real.usedBy, ['Bambu Lab P1S']);
+  assert.ok(real.uses[0].words.startsWith('Bambu Lab P1S uses '));
+});
+
 test('#775: two profiles of one printer give one "Used by" name; nothing newer is up to date with no update; no other copy', async () => {
   const [bambu, generic] = await printerSoftware();
   assert.deepEqual(bambu.usedBy, ['P1S'], 'one P1S, not one per profile');
