@@ -14,6 +14,7 @@ uuid = { version = "1", features = ["v4"] }
 rfd = { version = "0.15", default-features = false, features = ["gtk3"] }
 libc = "0.2"
 url = "2"
+regex = "1"
 [profile.release]
 strip = true
 lto = "thin"

@@ -1,3 +1,4 @@
+mod diagnostics;
 mod protocol;
 use serde_json::{json, Value};
 use std::{
@@ -150,6 +151,41 @@ async fn control(
         .try_acquire()
         .map_err(|_| "Several requests are already in progress. Wait a moment.")?;
     request(&app, &method, params).await
+}
+/// Settings → About → Export Diagnostics… (#799): the companion's `diagnostics.bundle`, saved as a ZIP where the
+/// person chooses. The export still saves, with a note, when the companion doesn't answer.
+#[tauri::command]
+async fn export_diagnostics(app: tauri::AppHandle, state: State<'_, Bridge>) -> Result<Value> {
+    let Some(file) = rfd::AsyncFileDialog::new()
+        .set_title("Export Diagnostics")
+        .set_file_name("Counterpart Diagnostics.zip")
+        .add_filter("ZIP archive", &["zip"])
+        .save_file()
+        .await
+    else {
+        return Ok(json!({"saved": false}));
+    };
+    let _permit = state
+        .regular
+        .try_acquire()
+        .map_err(|_| "Several requests are already in progress. Wait a moment.")?;
+    let answer = request(&app, "diagnostics.bundle", json!({})).await;
+    let os = std::fs::read_to_string("/etc/os-release")
+        .ok()
+        .and_then(|text| {
+            text.lines()
+                .find_map(|line| line.strip_prefix("PRETTY_NAME=").map(|v| v.trim_matches('"').to_string()))
+        })
+        .unwrap_or_else(|| "Linux".into());
+    let about = format!("Counterpart for Linux {}\n{os}\n", app.package_info().version);
+    let home = std::env::var("HOME").ok();
+    let bytes = diagnostics::zip(&diagnostics::entries(answer.as_ref().map_err(String::as_str), &about, home.as_deref()))?;
+    let path = file.path().to_owned();
+    tauri::async_runtime::spawn_blocking(move || std::fs::write(&path, bytes))
+        .await
+        .map_err(|_| "Export stopped.")?
+        .map_err(|_| "The diagnostics couldn’t be saved there.")?;
+    Ok(json!({"saved": true, "name": file.file_name(), "companion": answer.is_ok()}))
 }
 #[tauri::command]
 async fn store_credential(
@@ -746,6 +782,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             host_action,
             control,
+            export_diagnostics,
             load_change_queue,
             save_change_queue,
             add_discovered_printer,

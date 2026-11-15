@@ -60,6 +60,8 @@ class CompanionClient(
     val cache: File,
     /** What this phone keeps of the computer's projects (`OnDeviceLibrary`): read first, written once a file has fully arrived. */
     val library: OnDeviceLibrary? = null,
+    /** The last failed requests, for Settings → Share Diagnostics… (#799); in memory only. */
+    val failures: RecentFailures? = null,
 ) {
     /** `X-Scan-Device-Model`: the hardware model ("Pixel 8"), shown in the Mac's device list. */
     val deviceModel: String? = deviceModel?.takeIf { Pattern("[A-Za-z0-9,._ -]{1,64}").matches(it) }
@@ -177,7 +179,8 @@ class CompanionClient(
                 val resource = if ((body?.size ?: 0) > PHOTO_LIMIT) 600_000 else maxOf(180_000, timeoutMs + 10_000)
                 val reply = transport.send(request, TrustPolicy.Record(attempt), limit, resource)
                 val latest = try { pairing.store.read() } catch (_: Exception) { null }
-                if (!attempt.isSamePairing(latest)) throw CompanionException.transport("pairing-changed")
+                if (!attempt.isSamePairing(latest)) { failures?.record(method, path, code = "pairing-changed"); throw CompanionException.transport("pairing-changed") }
+                if (reply.status !in 200..299 && reply.status != 304) failures?.record(method, path, status = reply.status)
                 return reply
             } catch (e: TransportException) {
                 // A GET that can't reach the Mac checks its other addresses once, moving to whichever answers.
@@ -186,6 +189,7 @@ class CompanionClient(
                     val moved = try { record(scope) } catch (_: Exception) { null }
                     if (checked != null && checked.activeUrl != attempt.activeUrl && moved != null) { attempt = moved; continue }
                 }
+                failures?.record(method, path, code = e.code)
                 throw CompanionException.transport(e.code)
             }
         }

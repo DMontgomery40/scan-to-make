@@ -39,7 +39,11 @@ func emit(_ value: [String: Any]) {
     }
 }
 
-func fail(_ message: String) -> Never { emit(["error": message]); exit(1) }
+/// Folders this run made for itself, removed on every way out (`exit` skips `defer`).
+nonisolated(unsafe) var temporaryFolders: [URL] = []
+func removeTemporaryFolders() { for folder in temporaryFolders { try? FileManager.default.removeItem(at: folder) } }
+
+func fail(_ message: String) -> Never { emit(["error": message]); removeTemporaryFolders(); exit(1) }
 
 let usage = """
 usage: mac-reconstruct <images-folder> <output.usdz> [reduced|medium|full|raw] [--feature normal|high] [--honor-box] [--backdrop auto|off|samples]
@@ -124,8 +128,11 @@ if args.first == "backdrop" {
             line["fill"] = (frame.fill * 1000).rounded() / 1000
             if frame.hueSpread.isFinite { line["hueSpread"] = (Double(frame.hueSpread) * 10).rounded() / 10 }
             if let d = frame.backdropDepth { line["backdropM"] = (Double(d) * 1000).rounded() / 1000 }
+            if let d = frame.frontStep { line["frontStepM"] = (Double(d) * 1000).rounded() / 1000 }
             if let d = frame.nearestDepth { line["nearestM"] = (Double(d) * 1000).rounded() / 1000 }
-            if let save, frame.isBackdrop, let mask = try BackdropKey.objectMask(image: sample.image, frame: frame) {
+            let mask = frame.isBackdrop ? try BackdropKey.objectMask(image: sample.image, frame: frame) : nil
+            if frame.isBackdrop && mask == nil { line["noObjectMask"] = true }
+            if let save, let mask {
                 try mask.writePNG(to: save.appendingPathComponent(file.deletingPathExtension().lastPathComponent + ".png"))
             }
             emit(line)
@@ -263,14 +270,35 @@ do {
         // A rig's backdrop: which photos show it. Keyed photos go in as samples with the key as their object mask;
         // the rest keep Apple's own masking. Decided over the whole scan so one stray frame never switches the path.
         var keyedPhotos = Set<String>()
+        // Each keyed photo's object mask is made once, here, and kept as a PNG for the build pass (a few hundred KB each;
+        // 12-megapixel masks for every photo wouldn't fit in memory together). One photo that can't be read is skipped
+        // here and again in the build, never the whole rebuild (review of #801, F7).
+        let maskFolder = FileManager.default.temporaryDirectory.appendingPathComponent("mac-reconstruct-backdrop-\(UUID().uuidString)")
+        temporaryFolders.append(maskFolder)
+        var backdropMasks: [String: URL] = [:]
         if backdropOption == "auto" {
+            try FileManager.default.createDirectory(at: maskFolder, withIntermediateDirectories: true)
             for (index, file) in files.enumerated() {
-                let sample = try loadCaptureSample(file)
-                let frame = try BackdropKey.key(image: sample.image, depth: sample.depthDataMap.flatMap { DepthImage(buffer: $0) })
-                if frame.isBackdrop { keyedPhotos.insert(file.lastPathComponent) }
+                do {
+                    let sample = try loadCaptureSample(file)
+                    let frame = try BackdropKey.key(image: sample.image, depth: sample.depthDataMap.flatMap { DepthImage(buffer: $0) })
+                    if frame.isBackdrop {
+                        keyedPhotos.insert(file.lastPathComponent)
+                        if let mask = try BackdropKey.objectMask(image: sample.image, frame: frame) {
+                            let url = maskFolder.appendingPathComponent(file.deletingPathExtension().lastPathComponent + ".png")
+                            try mask.writePNG(to: url)
+                            backdropMasks[file.lastPathComponent] = url
+                        } else {
+                            // Vision found no foreground: this photo keeps Apple's own masking (and its backdrop).
+                            emit(["warning": "no-object-mask", "photo": file.lastPathComponent])
+                        }
+                    }
+                } catch {
+                    emit(["skipped": file.lastPathComponent, "reason": String(describing: error), "stage": "backdrop"])
+                }
                 emit(["stage": "backdrop", "done": index + 1, "total": files.count])
             }
-            if keyedPhotos.count * 4 < files.count { keyedPhotos.removeAll() }   // under a quarter: no backdrop
+            if keyedPhotos.count * 4 < files.count { keyedPhotos.removeAll(); backdropMasks.removeAll() }   // under a quarter: no backdrop
             emit(["backdrop": keyedPhotos.count])
         }
         emit(["images": files.count, "depth": files.filter { embeddedDepth(in: $0) != nil }.count, "stage": "reconstructing",
@@ -286,9 +314,8 @@ do {
                         do {
                             var sample = try loadCaptureSample(file)
                             if noDepth { sample.depthDataMap = nil }
-                            if keyedPhotos.contains(file.lastPathComponent) {
-                                let frame = try BackdropKey.key(image: sample.image, depth: sample.depthDataMap.flatMap { DepthImage(buffer: $0) })
-                                if let mask = try BackdropKey.objectMask(image: sample.image, frame: frame) { sample.objectMask = mask.pixelBuffer() }
+                            if let url = backdropMasks[file.lastPathComponent] {
+                                sample.objectMask = try GrayImage(contentsOf: url).pixelBuffer()
                             }
                             return sample
                         } catch {
@@ -311,6 +338,7 @@ do {
         case .requestError(_, let error):
             fail(String(describing: error))
         case .processingComplete:
+            removeTemporaryFolders()
             exit(0)
         case .invalidSample(let id, let reason):
             emit(["skipped": id, "reason": reason])

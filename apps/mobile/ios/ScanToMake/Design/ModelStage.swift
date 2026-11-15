@@ -156,9 +156,12 @@ struct ModelStage: View {
         let job = Task { @MainActor in
             await MediaTrace.$context.withValue(MediaTrace.Context(file: url, scene: "active")) {
                 MediaTrace.record("stage.begin", ["scene": "active", "stage": instance, "identity": tag(wanted)])
-                defer { MediaTrace.record(stillWanted() ? "stage.end" : "stage.superseded", ["scene": "active"]) }
+                defer { MediaTrace.record(stillWanted() && !Task.isCancelled ? "stage.end" : "stage.superseded", ["scene": "active"]) }
                 let loaded = await Self.load(url, tint: tint, twoTone: twoTone, object: object, seats: seats)
-                guard stillWanted() else { return }
+                // Only a newer start (or the scene leaving) cancels this job, and its load then returns nil: superseded, not
+                // failed (#805). At launch `body` claims the inactive and the active scene's keys, both deferred starts run
+                // once the scene is active, and the first one's nil used to leave the stage "failed" after the second loaded.
+                guard stillWanted(), !Task.isCancelled else { return }
                 guard let entity = loaded else { failed = true; starts.failed(key); undrawable?(); return }
                 meshReady = true
                 let e = entity.visualBounds(relativeTo: nil).extents
@@ -168,7 +171,7 @@ struct ModelStage: View {
                 // `-CounterpartFailPoster YES` (UI tests, #606): the off-screen still fails, as it can on a phone.
                 if UserDefaults.standard.bool(forKey: "CounterpartFailPoster") { image = nil }
                 #endif
-                guard stillWanted() else { return }
+                guard stillWanted(), !Task.isCancelled else { return }
                 if let image { poster = image; posterIdentity = wanted; drawn?() }
                 // The model loaded, so it turns live; the Mac's picture stays until then (#606). Only a stage with no other
                 // picture that never turns (the starters') says it couldn't be shown.
