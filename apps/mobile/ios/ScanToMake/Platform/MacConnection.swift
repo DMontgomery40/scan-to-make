@@ -275,6 +275,8 @@ typealias MacError = CompanionError
         #if DEBUG
         // UI tests: "<project id>:<photos>".
         if Fixtures.folder != nil {
+            // `-CounterpartFixtureSet ask-stranded` (scripts/ux_screens.py): the DAD scan, kept on this phone (#825).
+            if Fixtures.set == "ask-stranded" { return [Fixtures.ids.plush: StoppedScan(run: "fixture", photos: 68)] }
             guard let value = ProcessInfo.processInfo.environment["COUNTERPART_STOPPED_SCAN"],
                   let colon = value.lastIndex(of: ":"), let photos = Int(value[value.index(after: colon)...]) else { return [:] }
             return [String(value[..<colon]): StoppedScan(run: "fixture", photos: photos)]
@@ -608,12 +610,16 @@ typealias MacError = CompanionError
     /// has moved on), or when the project's kept scan is no longer that run with enough photos (sent, superseded,
     /// removed); one the Mac didn't answer stays for the next try. `declare` says whether the Mac was told: a Mac that
     /// can't rebuild from photos isn't, and the run is then not recorded as the scan it waits for (review of #819, F5).
-    static func retryDeclares(_ defaults: UserDefaults = .standard, kept: (String) -> KeptScan?,
+    /// `listed`: each project's state in the list the Mac just gave. A declare goes only onto a project that is still a
+    /// draft: one another device started meanwhile is dropped, never declared onto (review of #831, F2). The list may be
+    /// a moment old; the Mac's lease on a declaration makes a late one harmless.
+    static func retryDeclares(_ defaults: UserDefaults = .standard, listed: [String: Project.State]? = nil, kept: (String) -> KeptScan?,
                               declare: (String, String) async throws -> Bool) async {
         for project in pendingDeclares(defaults).keys.sorted() {
             await serially(project) {
                 // Read again inside the turn: a Remove that went first has already cleared it.
                 guard let run = pendingDeclares(defaults)[project] else { return }
+                if let state = listed?[project], state != .new { setPendingDeclare(project: project, run: nil, defaults); return }
                 guard case .stopped(run, let photos)? = kept(project), isEnough(stoppedPhotos: photos) else {
                     setPendingDeclare(project: project, run: nil, defaults); return
                 }
@@ -690,10 +696,13 @@ typealias MacError = CompanionError
     }
 
     /// Whatever the Mac hasn't heard yet: Removes first, then stopped scans to declare.
-    func retryPendingDeclares() async {
+    /// `listed`: the projects the Mac just listed, so a declare goes only onto a draft; `kept`: the phone's kept scans.
+    func retryPendingDeclares(listed: [Project]? = nil, kept: ((String) -> KeptScan?)? = nil) async {
         if !Self.pendingForgets().isEmpty { await Self.retryForgets(forget: { [self] in try await forgetOnMac($0, run: $1) }) }
         guard !Self.pendingDeclares().isEmpty else { return }
-        await Self.retryDeclares(kept: { [self] in keptScan($0) }, declare: { [self] in try await declareKeptScan($0, run: $1) })
+        let states = listed.map { Dictionary($0.map { ($0.id, $0.state) }, uniquingKeysWith: { first, _ in first }) }
+        await Self.retryDeclares(listed: states, kept: { [self] in kept?($0) ?? keptScan($0) },
+                                 declare: { [self] in try await declareKeptScan($0, run: $1) })
     }
 
     // MARK: A stop stranded by the build before #795 (#825)
@@ -711,7 +720,10 @@ typealias MacError = CompanionError
     /// The question a stranded scan answers: no model yet, and an open close-up question (answered with a photo or the
     /// camera). The Mac checks the same before it takes one.
     static func asksForScan(_ project: Project) -> Bool {
-        guard project.state == .needsCloseup, project.current == nil, let ask = project.openAsk else { return false }
+        // With a scan already (a pass ran from it and asked for a close-up), or a rebuilt scan in review, it isn't waiting
+        // for a walk-around (review of #831, F1, F5): the same rule as the Mac's `takesScan`.
+        guard project.state == .needsCloseup, project.current == nil, project.scan == nil, project.reconstructionReview == nil,
+              let ask = project.openAsk else { return false }
         return (ask.kind ?? ask.type ?? "closeup") == "closeup" && !Set(ask.answers).isDisjoint(with: ["photos", "camera"])
     }
 
@@ -744,21 +756,24 @@ typealias MacError = CompanionError
     /// The stranded runs to handle now, from the projects the Mac just listed. Only runs from before the fix: no pending,
     /// declared or acknowledged record, not removed, Send never pressed. A send cut short carries on while its project still
     /// asks for it, and is closed once the project has moved on (its start may have gone through with the reply lost).
-    static func strandedScans(_ listed: [Project], _ defaults: UserDefaults = .standard, kept: (String) -> KeptScan?,
-                              requested: (String) -> Bool) -> [StrandedScan] {
+    /// `.send` only to a Mac that says `captureOnAsk` (review of #831, F3): an older one would refuse, so nothing is sent
+    /// or recorded, and the scan goes after its update.
+    static func strandedScans(_ listed: [Project], _ defaults: UserDefaults = .standard, capabilities: Set<String>,
+                              kept: (String) -> KeptScan?, requested: (String) -> Bool) -> [StrandedScan] {
+        let takes = capabilities.contains("captureOnAsk")
         var due: [StrandedScan] = []
         for project in listed {
             guard case .stopped(let run, let photos)? = kept(project.id), isEnough(stoppedPhotos: photos),
                   !isRemoved(project.id, run, defaults) else { continue }
             let handled = strandedHandled(defaults)[run]
             if handled == "sending" {
-                if asksForScan(project) { due.append(StrandedScan(project: project.id, run: run, photos: photos, action: .send)) }
-                else { setStrandedHandled(run: run, "sent", defaults) }
+                if !asksForScan(project) { setStrandedHandled(run: run, "sent", defaults) }
+                else if takes { due.append(StrandedScan(project: project.id, run: run, photos: photos, action: .send)) }
                 continue
             }
             guard handled == nil, pendingDeclares(defaults)[project.id] == nil, declaredRuns(defaults)[project.id] == nil,
                   acknowledgedRuns(defaults)[project.id] == nil, !requested(project.id) else { continue }
-            if asksForScan(project) { due.append(StrandedScan(project: project.id, run: run, photos: photos, action: .send)) }
+            if asksForScan(project) { if takes { due.append(StrandedScan(project: project.id, run: run, photos: photos, action: .send)) } }
             else if project.state == .new { due.append(StrandedScan(project: project.id, run: run, photos: photos, action: .declare)) }
         }
         return due
@@ -787,6 +802,8 @@ typealias MacError = CompanionError
         } catch let failure as CompanionError where failure.code == removedWhileSending.code {
             setStrandedHandled(run: scan.run, "sent", defaults)
             throw failure
+        } catch let failure as CompanionError where failure.code == "needs-update" {
+            throw failure   // a Mac that can't take it yet: still under way, it goes after the update (review of #831, F3)
         } catch let failure as CompanionError where macAnswered(failure) {
             setStrandedHandled(run: scan.run, "sent", defaults)
             setRecoveryRefusal(project: scan.project, message: failure.message, defaults)

@@ -51,7 +51,11 @@ import CounterpartKit
     var stoppedScans: [String: MacConnection.StoppedScan] = [:]
     /// Finished scans still only on this phone: their projects offer Send even though the Mac has no scan yet.
     var readyScans: Set<String> = []
-    func refreshStoppedScans() { stoppedScans = mac.stoppedScans(); readyScans = mac.readyScanProjects() }
+    func refreshStoppedScans() { stoppedScans = stoppedSource?() ?? mac.stoppedScans(); readyScans = mac.readyScanProjects() }
+    /// Tests: the stopped scans this phone keeps, in place of the capture store.
+    @ObservationIgnored var stoppedSource: (() -> [String: MacConnection.StoppedScan])?
+    /// What the last list started with the Mac (declares, forgets, a stranded scan's turn), so a test can wait for it.
+    @ObservationIgnored private(set) var macWork: Task<Void, Never>?
     /// Projects this phone is sending a stranded stopped scan to by itself (#825), with its photo count, for the card.
     var recoveringScans: [String: Int] = [:]
     /// The photos of a stranded scan this phone is sending to the project now (#825), for its card.
@@ -285,13 +289,17 @@ import CounterpartKit
             remember(listed: latest)
             refreshStoppedScans()
             for project in projects where corrections.pending(project.id) != nil { sendQueuedNote(project) }
+            // A stranded scan goes only to a Mac that says it takes one (review of #831, F3): learn that first.
+            if !stoppedScans.isEmpty, macCapabilities.isEmpty { await loadCapabilities() }
             let stranded = strandedScans(latest)
             // The Mac answered: any Remove it hasn't heard, then any stopped scan it hasn't acknowledged, goes now (#801, #819),
-            // then a scan stranded before the fix to the project asking for it (#825).
+            // only onto a project still a draft (review of #831, F2), then a scan stranded before the fix to the project
+            // asking for it (#825).
             if MacConnection.hasPendingWithMac || !stranded.isEmpty {
-                let mac = mac
-                Task {
-                    if MacConnection.hasPendingWithMac { await mac.retryPendingDeclares() }
+                let mac = mac, stopped = stoppedScans
+                let kept: (String) -> MacConnection.KeptScan? = { id in stopped[id].map { .stopped(run: $0.run, photos: $0.photos) } }
+                macWork = Task {
+                    if MacConnection.hasPendingWithMac { await mac.retryPendingDeclares(listed: latest, kept: kept) }
                     for scan in stranded { await sendStranded(scan) }
                 }
             }
@@ -561,7 +569,7 @@ import CounterpartKit
             }
             if sendFailures[id] == nil { sendFailures[id] = message }
         }
-        let stranded = MacConnection.strandedScans(listed, kept: { [stoppedScans] id in
+        let stranded = MacConnection.strandedScans(listed, capabilities: macCapabilities, kept: { [stoppedScans] id in
             stoppedScans[id].map { MacConnection.KeptScan.stopped(run: $0.run, photos: $0.photos) }
         }, requested: MacConnection.sendRequested)
         for scan in stranded where scan.action == .declare { MacConnection.declareStranded(scan) }
