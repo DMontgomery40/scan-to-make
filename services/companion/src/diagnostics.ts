@@ -374,7 +374,9 @@ function freeText(text: string, secrets: readonly string[], home?: string): stri
 }
 
 /** Fields that hold a setting's name, in the order one is chosen as an object's name: `{"name":"PRINTER_TOKEN"}`. */
-const NAME_FIELDS = ['name', 'key', 'env', 'envname', 'env_name', 'variable', 'var', 'field', 'setting', 'setting_name', 'settingname', 'property', 'label', 'id'];
+const NAME_FIELDS = ['name', 'key', 'env', 'envname', 'variable', 'var', 'field', 'setting', 'settingname', 'property', 'label', 'id'];
+/** A key as NAME_FIELDS spells it: lowercase, letters only (`envName`, `env_name` and `ENV-NAME` all read `envname`). */
+const fieldName = (key: string) => key.toLowerCase().replace(/[^a-z]/g, '');
 /** A name as people write one: an identifier, or a few words ("Access Code"). */
 const LABEL = /^[A-Za-z_][\w.\-]*(?: [\w.\-]+){0,3}$/;
 const IDENTIFIER = /^[A-Za-z_][\w.\-:]{0,95}$/;
@@ -404,8 +406,8 @@ export function redactValue(value: unknown, secrets: readonly string[] = [], hom
   if (!value || typeof value !== 'object') return value;
   const entries = Object.entries(value as Record<string, unknown>);
   // The one field naming this object: the first name field, in NAME_FIELDS' order, whose whole string names a secret.
-  const chosen = entries.filter(([k, v]) => NAME_FIELDS.includes(k.toLowerCase()) && typeof v === 'string' && v.length <= 96 && isSecretName(v))
-    .sort(([a], [b]) => NAME_FIELDS.indexOf(a.toLowerCase()) - NAME_FIELDS.indexOf(b.toLowerCase()))[0]?.[0];
+  const chosen = entries.filter(([k, v]) => NAME_FIELDS.includes(fieldName(k)) && typeof v === 'string' && v.length <= 96 && isSecretName(v))
+    .sort(([a], [b]) => NAME_FIELDS.indexOf(fieldName(a)) - NAME_FIELDS.indexOf(fieldName(b)))[0]?.[0];
   return Object.fromEntries(entries.map(([k, v]) => {
     if (k === chosen) return [k, LABEL.test(v as string) ? v : redactValue(v, secrets, home, depth + 1)];
     if (isSecretName(k)) return [k, safeScalar(v) || (typeof v === 'number' && MEASURE_NAME.test(k)) ? v : MARK];
