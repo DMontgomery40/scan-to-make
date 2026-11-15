@@ -328,11 +328,14 @@ struct NewObjectView: View {
             #if DEBUG
             // `-CounterpartNewScan walk-around` (scripts/ux_screens.py): New as it looks after a scan, which a simulator can't take.
             // `stopped-<photos>` (#795): as `savedCapture` attaches a scan stopped at that many photos, without declaring it.
+            // `stopped-<photos>-removing` (#819): with its Remove still waiting for the Mac.
             if attached == nil, let fake = UserDefaults.standard.string(forKey: "CounterpartNewScan") {
+                let parts = fake.split(separator: "-")
                 if fake == "walk-around" { attached = .walkAround }
-                else if fake.hasPrefix("stopped-"), let photos = Int(fake.dropFirst("stopped-".count)) {
+                else if parts.first == "stopped", parts.count >= 2, let photos = Int(parts[1]) {
                     attached = .walkAround
                     stop.stopped(run: "debug-stopped-\(photos)", photos: photos)
+                    if parts.count == 3, parts[2] == "removing" { working = "remove" }
                 }
             }
             #endif
@@ -403,6 +406,11 @@ struct NewObjectView: View {
                 // Which scan, by its project's name: the one already on the Mac, nothing to scan again.
                 Text("\(ProjectWords.title(seed)) · \(ScanLineage.scannedLine(seed))").font(.caption).foregroundStyle(.secondary)
                     .lineLimit(2).accessibilityIdentifier("scan-use-source")
+            } else if working == "remove", stop.photos != nil {
+                // Remove waits its turn behind anything already telling the Mac about this scan, and for the Mac's answer:
+                // it says so rather than looking dead (lead on #819; David's link can be slow).
+                Text(MacConnection.removingWords).font(.subheadline).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("scan-use-removing")
             } else if let stoppedPhotos = stop.photos {
                 // Why this scan may be thin, under its question and beside Remove (#795): a few photos warn in
                 // orange and explain the Remove next to them; enough are good news in the secondary style.
@@ -425,6 +433,8 @@ struct NewObjectView: View {
                 if picked != nil {
                     Button("Remove") { picked = nil; scanUse = nil }.font(.subheadline)
                         .disabled(working != nil).accessibilityIdentifier("scan-use-remove")
+                } else if working == "remove", stop.removableRun != nil {
+                    ProgressView().controlSize(.small).accessibilityLabel("Removing").accessibilityIdentifier("scan-use-remove")
                 } else if let run = stop.removableRun {
                     // A stopped scan: take it off (the Mac forgets it if it was told) and the project designs from the words.
                     Button("Remove") { Task { await removeStopped(run) } }

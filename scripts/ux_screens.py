@@ -278,6 +278,9 @@ def screens(ids: dict, record: str, offline_record: str, fixtures: Path, offline
     for photos in (68, 12):
         add(f'new-scan-stopped-{photos}', 'New, after a stopped scan', f'stopped at {photos} photos', 'real (scan faked)',
             real + ['-CounterpartScreen', 'new', '-CounterpartNewScan', f'stopped-{photos}'], pages=2)
+    # Its Remove waiting for the Mac (#819): the row says so, and Remove is a spinner, not a dead button.
+    add('new-scan-stopped-68-removing', 'New, removing a stopped scan', 'Remove waiting for the Mac', 'real (scan faked)',
+        real + ['-CounterpartScreen', 'new', '-CounterpartNewScan', 'stopped-68-removing'], pages=1)
     rows = {'copy': 'Copy this object', 'fit': 'Make something that fits this', 'later': 'Just save this scan'}
     for use, row in rows.items():
         add(f'new-scan-{use}', f'New, after a scan: {use}', f'"{use}" chosen', 'real (scan faked)',

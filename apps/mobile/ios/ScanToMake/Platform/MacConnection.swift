@@ -389,6 +389,9 @@ typealias MacError = CompanionError
     /// capture, or a kept walk-around scan, finished or stopped after it kept photos (#791, review of #795).
     static func resumesSend(handheldFinished: Bool, kept: KeptScan?) -> Bool { handheldFinished || kept != nil }
 
+    /// Under a stopped scan while its Remove waits for the Mac (#819).
+    static let removingWords = "Removing… If your Mac doesn't answer, it forgets this scan when it's back."
+
     /// A stopped scan with this many photos is sent as it is, like a finished one; fewer are still offered, with a
     /// warning, and the Mac says plainly if it can't build from them.
     static func isEnough(stoppedPhotos photos: Int) -> Bool { photos >= 20 }
@@ -436,10 +439,11 @@ typealias MacError = CompanionError
     /// Asks the Mac to forget one run of a project, by its run and photo list: never another phone's scan, or capture
     /// data nobody declared (review of #819, F3/F4).
     private func forgetOnMac(_ id: String, run: String) async throws {
-        guard try await client.capabilities().contains("captureForget") else {
+        // A short wait: Remove goes through without the Mac, and the forget waits on the phone for it (`pendingForgets`).
+        guard try await client.capabilities(timeout: 15).contains("captureForget") else {
             throw CompanionError(code: "needs-update", message: "Update Counterpart on your Mac to remove a scan it already knows about.")
         }
-        _ = try await client.forgetCapture(id, run: run, images: try Self.frameNames(run))
+        _ = try await client.forgetCapture(id, run: run, images: try Self.frameNames(run), timeout: 15)
     }
 
     /// Declares one run, in the project's turn (the caller holds `serially`). What the Mac still holds goes first: a

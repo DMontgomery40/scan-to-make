@@ -319,8 +319,8 @@ public final class CompanionClient: @unchecked Sendable {
     /// Takes a walk-around off before its touch-up starts: the Mac drops the declared list and every frame of it that
     /// came. Sent by Remove on a stopped scan, and before a different run is declared (runs share frame names).
     /// Names the run and its list, so it never takes off another phone's scan (409) or capture data nobody declared.
-    public func forgetCapture(_ id: String, run: String, images: [String]) async throws -> Project {
-        try await request("DELETE", "/v1/objects/\(id)/capture-manifest", json: ["run": run, "images": images], as: One.self).object
+    public func forgetCapture(_ id: String, run: String, images: [String], timeout: TimeInterval = 90) async throws -> Project {
+        try await request("DELETE", "/v1/objects/\(id)/capture-manifest", json: ["run": run, "images": images], as: One.self, timeout: timeout).object
     }
     /// Ask for changes: a new pass with your text. Upload new photos first.
     /// `messageId` is this note's own id (`NoteAttempts`, `CorrectionQueue.Message.id`): the Mac records it once.
@@ -424,12 +424,12 @@ public final class CompanionClient: @unchecked Sendable {
         (try? await send("GET", "/healthz", timeout: 6).checked(path: "/healthz")) != nil
     }
 
-    public func capabilities() async throws -> Set<String> { try await health().capabilities }
+    public func capabilities(timeout: TimeInterval = 90) async throws -> Set<String> { try await health(timeout: timeout).capabilities }
 
     /// `/healthz`: the capability flags that are on, and the Mac's own name when it gives one.
-    public func health() async throws -> (capabilities: Set<String>, name: String?) {
+    public func health(timeout: TimeInterval = 90) async throws -> (capabilities: Set<String>, name: String?) {
         struct Health: Decodable { var capabilities: [String: JSONValue]?; var name: String?; var macName: String? }
-        let health = try await request("GET", "/healthz", as: Health.self)
+        let health = try await request("GET", "/healthz", as: Health.self, timeout: timeout)
         let name = (health.name ?? health.macName)?.trimmingCharacters(in: .whitespacesAndNewlines)
         return (Set((health.capabilities ?? [:]).compactMap { $0.value == .bool(true) ? $0.key : nil }), name?.isEmpty == false ? name : nil)
     }
