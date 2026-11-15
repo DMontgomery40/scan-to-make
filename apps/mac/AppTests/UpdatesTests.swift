@@ -205,9 +205,11 @@ final class UpdateStagingTests: XCTestCase {
         /// What status.get answers, in order; the last repeats. A nil build: no `appBuild` (every companion before #850).
         var answers: [Result<CompanionBuildCheck.Reported, Error>] = [.success(.init(build: nil, payload: nil))]
         var decision = UpdateGate.Decision.install
-        var events: [String] = [], said: [String] = []
+        var events: [String] = [], said: [String] = [], notes: [String] = []
         var pauses = 0
-        var restarts: Int { events.filter { $0 == "restart" }.count }
+        /// What launchctl says for each restart; nil: it worked.
+        var kickstart: String? = nil, terminate: String? = nil
+        var restarts: Int { events.filter { $0.hasPrefix("restart") }.count }
         func next() -> Result<CompanionBuildCheck.Reported, Error> { answers.count > 1 ? answers.removeFirst() : answers[0] }
     }
     private static func running(_ build: String?, _ payload: String? = ours) -> Result<CompanionBuildCheck.Reported, Error> {
@@ -218,9 +220,13 @@ final class UpdateStagingTests: XCTestCase {
             status: { fake.events.append("status"); return fake.next() },
             ask: { fake.decision },
             waitUntilIdle: { fake.events.append("wait") },
-            restart: { fake.events.append("restart") },
+            restart: { method in
+                fake.events.append("restart \(method)")
+                return method == .kickstart ? fake.kickstart : fake.terminate
+            },
             pause: { fake.pauses += 1 },
-            say: { fake.said.append($0) }))
+            say: { fake.said.append($0) },
+            note: { fake.notes.append($0) }))
     }
 
     func testACompanionWithoutABuildIsRestartedAndComesBackCurrent() async {
@@ -254,7 +260,7 @@ final class UpdateStagingTests: XCTestCase {
         fake.answers = [Self.running("202611061933"), Self.running("202611151700")]
         fake.decision = .wait
         let outcome = await check(fake).run()
-        XCTAssertEqual(fake.events.filter { $0 != "status" }, ["wait", "restart"], "waits (saying so) for the pass or print first")
+        XCTAssertEqual(fake.events.filter { $0 != "status" }, ["wait", "restart kickstart"], "waits (saying so) for the pass or print first")
         XCTAssertEqual(outcome, .restarted)
     }
 
@@ -284,6 +290,60 @@ final class UpdateStagingTests: XCTestCase {
         XCTAssertEqual(left, .notRunning)
         XCTAssertEqual(silent.events, ["status", "status"], "two tries, then the usual start deals with it")
         XCTAssertEqual(silent.restarts, 0)
+    }
+
+    /// #850, the cause on the clones: beta 6's companion answers the first status.get calls after the new app opens with a
+    /// refusal (`unavailable`, from its auth store, while the app mints a pairing code). That is a companion answering, not
+    /// none: it is asked for longer, and one that keeps refusing is taken as a build from before #850 and restarted.
+    func testACompanionRefusingStatusIsStillRestarted() async {
+        let refused = ControlRemoteError(code: "unavailable", message: "That isn’t available on your Mac right now.")
+        let fake = Fake()
+        fake.answers = [.failure(refused), .failure(refused), .failure(refused), Self.running(nil, nil), Self.running("202611151700")]
+        let outcome = await check(fake).run()
+        XCTAssertEqual(outcome, .restarted, "refused three times, then answered: restarted")
+        let stubborn = Fake()
+        stubborn.answers = Array(repeating: .failure(refused), count: CompanionBuildCheck.refusedAttempts) + [Self.running("202611151700")]
+        let restarted = await check(stubborn).run()
+        XCTAssertEqual(restarted, .restarted, "never answers status.get: a build from before #850, restarted")
+        XCTAssertEqual(stubborn.restarts, 1)
+        XCTAssertTrue(stubborn.notes.contains { $0.contains("refuses status.get") }, stubborn.notes.joined(separator: "\n"))
+    }
+
+    /// #850, clean-Mac re-verify of B: launchctl refusing kickstart ends the agent instead; launchd's KeepAlive starts it
+    /// again from the bundle on disk (what ending it by hand did on the clones).
+    func testAKickstartThatFailsEndsTheAgentInstead() async {
+        let fake = Fake()
+        fake.kickstart = "exit 1: Operation not permitted"
+        fake.answers = [Self.running(nil, nil), Self.running("202611151700")]
+        let outcome = await check(fake).run()
+        XCTAssertEqual(outcome, .restarted)
+        XCTAssertEqual(fake.events.filter { $0 != "status" }, ["restart kickstart", "restart terminate"])
+        XCTAssertTrue(fake.notes.contains("restart kickstart: failed: exit 1: Operation not permitted"), fake.notes.joined(separator: "\n"))
+    }
+
+    /// A kickstart that "works" but leaves the old build answering: after a while the agent is ended instead.
+    func testAKickstartThatChangesNothingEndsTheAgentInstead() async {
+        let fake = Fake()
+        var answers = [Self.running(nil, nil)]
+        answers += Array(repeating: Self.running(nil, nil), count: CompanionBuildCheck.kickstartAttempts)
+        answers.append(Self.running("202611151700"))
+        fake.answers = answers
+        let outcome = await check(fake).run()
+        XCTAssertEqual(outcome, .restarted)
+        XCTAssertEqual(fake.events.filter { $0 != "status" }, ["restart kickstart", "restart terminate"])
+    }
+
+    /// #850: every decision is in the log, so the next failure explains itself.
+    func testEveryDecisionIsLogged() async {
+        let fake = Fake()
+        fake.answers = [Self.running(nil, nil), Self.running("202611151700")]
+        fake.decision = .wait
+        _ = await check(fake).run()
+        let joined = fake.notes.joined(separator: "\n")
+        for expected in ["started: app build 202611151700", "status.get: appBuild=none appPayload=none", "build differs (none ≠ 202611151700)",
+                         "update gate: wait", "busy: waiting", "idle", "restart kickstart: ok", "result: restarted"] {
+            XCTAssertTrue(joined.contains(expected), "missing \(expected) in:\n\(joined)")
+        }
     }
 
     /// Review F1 (P2): the agent belongs to another installed copy; restarting it would relaunch that copy, not this one.

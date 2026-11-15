@@ -177,17 +177,30 @@ enum UpdateGate {
     /// About two minutes, under load, for a restarted companion to answer as this build (review F3).
     static let pauseSeconds = 2.0
     static let attempts = 60
+    /// Asks (`pause` apart, about 30 s) of a companion that answers status.get with a refusal before it is taken as a
+    /// build from before #850.
+    static let refusedAttempts = 15
+    /// Asks after `kickstart -k` before it is taken not to have restarted it and the agent is sent SIGTERM instead.
+    static let kickstartAttempts = 10
+    enum Restart: Equatable {
+        /// `launchctl kickstart -k`: launchd stops the job and starts it again from the bundle on disk.
+        case kickstart
+        /// `launchctl kill SIGTERM`: the agent ends, and launchd (KeepAlive) starts it again from the bundle on disk.
+        case terminate
+    }
     struct Effects {
         /// status.get's `appBuild` and `appPayload`, or why it didn't answer.
         var status: () async -> Result<Reported, Error>
         var ask: () async -> UpdateGate.Decision
         /// Waits, saying so, until the companion is idle.
         var waitUntilIdle: () async -> Void
-        /// `launchctl kickstart -k` of the companion's LaunchAgent.
-        var restart: () async -> Void
+        /// Restarts the companion's LaunchAgent; nil when it worked, else what launchctl said.
+        var restart: (Restart) async -> String?
         /// `pauseSeconds`.
         var pause: () async -> Void
         var say: (String) -> Void
+        /// #850: every decision, for the unified log (`com.scantomake.mac`, `companion-build-check`).
+        var note: (String) -> Void = { _ in }
     }
     let appBuild: String, appPayload: String
     private let effects: Effects
@@ -197,24 +210,79 @@ enum UpdateGate {
         let path = { (p: String) in URL(fileURLWithPath: p).standardizedFileURL.resolvingSymlinksInPath().path }
         return path(a) == path(b)
     }
+    private static func describe(_ answer: Result<Reported, Error>) -> String {
+        switch answer {
+        case .success(let r): return "appBuild=\(r.build ?? "none") appPayload=\(r.payload ?? "none")"
+        case .failure(let error): return "no answer (\(String(describing: error)))"
+        }
+    }
 
     func run() async -> Outcome {
-        // Two tries (review F2); still no answer: the usual start (pairing, readiness) deals with it.
+        let note = effects.note
+        note("started: app build \(appBuild), payload \(appPayload)")
+        // No answer at all (no socket, a timeout): two tries (review F2), then the usual start (pairing, readiness) deals
+        // with it. A refusal is an answer from a running companion (#850: beta 6's refused status.get while the new app
+        // minted its pairing code), so it is asked for longer, and one that keeps refusing is taken as a build from before
+        // #850: a current companion never refuses status.get.
         var first = await effects.status()
-        if case .failure = first { await effects.pause(); first = await effects.status() }
-        guard case .success(let running) = first else { return .notRunning }
+        note("status.get: \(Self.describe(first))")
+        var asks = 1
+        while case .failure(let error) = first, asks < (error is ControlRemoteError ? Self.refusedAttempts : 2) {
+            await effects.pause()
+            first = await effects.status()
+            asks += 1
+            note("status.get again (\(asks)): \(Self.describe(first))")
+        }
+        let running: Reported
+        switch first {
+        case .success(let reported): running = reported
+        case .failure(let error) where error is ControlRemoteError:
+            note("it answers but refuses status.get after \(asks) asks; taken as a build from before #850")
+            running = Reported(build: nil, payload: nil)
+        case .failure:
+            note("result: notRunning")
+            return .notRunning
+        }
         if let payload = running.payload, !Self.same(payload, appPayload) {
+            note("another installed copy runs the companion (\(payload)); not restarted")
             effects.say(Self.otherCopy(payload))
+            note("result: otherCopy")
             return .otherCopy
         }
-        if running.build == appBuild { return .current }
-        if await effects.ask() == .wait { await effects.waitUntilIdle() }
-        await effects.restart()
-        for _ in 0..<Self.attempts {
+        if running.build == appBuild { note("build matches; result: current"); return .current }
+        note("build differs (\(running.build ?? "none") ≠ \(appBuild)); asking whether it is working")
+        let decision = await effects.ask()
+        note("update gate: \(decision)")
+        if decision == .wait {
+            note("busy: waiting, with the waiting sentence, until it is idle")
+            await effects.waitUntilIdle()
+            note("idle")
+        }
+        var method = Restart.kickstart
+        var failure = await effects.restart(method)
+        note("restart \(method): \(failure.map { "failed: \($0)" } ?? "ok")")
+        if failure != nil {
+            method = .terminate
+            failure = await effects.restart(method)
+            note("restart \(method): \(failure.map { "failed: \($0)" } ?? "ok")")
+        }
+        for attempt in 1...Self.attempts {
             await effects.pause()
-            if case .success(let now) = await effects.status(), now.build == appBuild { return .restarted }
+            let now = await effects.status()
+            if case .success(let reported) = now, reported.build == appBuild {
+                note("result: restarted, status.get \(Self.describe(now)) after \(attempt) asks")
+                return .restarted
+            }
+            // kickstart said it worked but the old build still answers: end the agent instead (KeepAlive starts it again).
+            if method == .kickstart, attempt == Self.kickstartAttempts {
+                note("still \(Self.describe(now)) after kickstart; sending SIGTERM")
+                method = .terminate
+                let failed = await effects.restart(method)
+                note("restart \(method): \(failed.map { "failed: \($0)" } ?? "ok")")
+            }
         }
         effects.say(Self.didNotComeBack)
+        note("result: didNotComeBack")
         return .didNotComeBack
     }
 }
