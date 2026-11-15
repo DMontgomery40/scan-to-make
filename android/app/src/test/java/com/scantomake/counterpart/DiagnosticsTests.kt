@@ -236,6 +236,19 @@ class DiagnosticsTests {
             """{"publicKeySha256":"q83vASNFZ4mrze8BI0VniavN7wEjRWeJq83vASNFZ4k"}""" to "q83vASNFZ4mrze8BI0VniavN7wEjRWeJq83vASNFZ4k",
             """{"certificateSha256":"short-but-secret"}""" to "short-but-secret",
             "token $plantedToken" to plantedToken,
+            // Re-review N1 (#813 comment 6886880432): a secret one level down, or in a name/value pair.
+            """{"password":{"value":"nestedsecret99"}}""" to "nestedsecret99",
+            """{"tokens":["arraysecret99value"]}""" to "arraysecret99value",
+            """{"apiKeys":[{"value":"apikeysecret99"}]}""" to "apikeysecret99",
+            """{"name":"BAMBU_ACCESS_CODE","value":"pairsecret99"}""" to "pairsecret99",
+            """{"env":[{"value":"valuefirst99","name":"PRINTER_PASSWORD"}]}""" to "valuefirst99",
+            """{"settings":[{"key":"api_key","value":"keyrowsecret99"}]}""" to "keyrowsecret99",
+            """{"secret":{"nested":{"deeper":["a","b"],"text":"with } brace"},"tail":"deepsecret99"}}""" to "deepsecret99",
+            // N5: a pairing code under a bare "code", 30 and 32 characters.
+            """{"code":"Ab3dEf6hJk9mNpQrStUvWxYz012345"}""" to "Ab3dEf6hJk9mNpQrStUvWxYz012345",
+            """{"code":"Zx9Yw8Vu7Ts6Rq5Po4Nm3Lk2Ji1Hg0Fe"}""" to "Zx9Yw8Vu7Ts6Rq5Po4Nm3Lk2Ji1Hg0Fe",
+            // N11: a percent-encoded e-mail.
+            "to=someone%40example.com&x=1" to "someone%40example.com",
         )
         val leaks = cases.filter { (input, secret) -> Diagnostics.redact(input).contains(secret) }
             .map { (input, _) -> "$input -> ${Diagnostics.redact(input)}" }
@@ -259,7 +272,17 @@ class DiagnosticsTests {
         assertEquals("TOKEN=[set] password=false KEY=", r("TOKEN=[set] password=false KEY="))
         for (kept in listOf("Failed to authenticate: retry", "pinned: yes, colour-mapping: auto", "keyboard: us", "code: unreachable",
             """{"code":"timeout","route":"/v1/objects/x/passes/2/activity","status":409}""", "Device: Google Pixel 8",
-            "/data/user/0/com.scantomake/files/Captures", "Tailscale address (IPv4)")) assertEquals(kept, r(kept))
+            "/data/user/0/com.scantomake/files/Captures", "Tailscale address (IPv4)",
+            // N1: an ordinary object or array, and a name/value pair whose name isn't secret.
+            """{"settings":{"milestones":"50","general":{"autoUpdateMcps":true}}}""", """{"name":"milestones","value":"50"}""",
+            // N5: error codes and serials stay.
+            """{"code":"timeout"}""", """{"code":-1001}""", """{"code":"-1001"}""", """{"serial":"01P00A123456789ABCDEFG"}""",
+            "/v1/objects/11111111-2222-4333-8444-555555555555",
+            // N9: passIndex, and plain keys (settings.updated's list of changed setting names), as a string or a list.
+            """{"passIndex":2}""", """{"keys":"general"}""", """{"keys":["general","milestones"]}""")) assertEquals(kept, r(kept))
+        // N9: apiKeys is still a secret name, and the 64-hex rule stays.
+        assertEquals("""{"apiKeys":"[redacted]"}""", r("""{"apiKeys":"k1secret"}"""))
+        assertEquals("""{"hash":"[redacted hash]"}""", r("""{"hash":"$KEY_PIN"}"""))
     }
 
     @Test fun aBadFileNameOrAFailingFileNeverFailsTheExport() {

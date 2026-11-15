@@ -9,12 +9,15 @@ import java.util.Base64
  *  1. the known values (the pairing token, the device id, the pin, the computer's hosts), and a hash in any form
  *     (hex either case, colon-separated, base64, base64url);
  *  2. PEM blocks of any kind, Authorization and Cookie lines, and auth schemes in any case;
- *  3. the value after a secret-looking name (JSON, escaped JSON, `key=value`, `key: value`, `--flag value`), judged
+ *  3. a secret-named key's whole object or array (`{"password":{…}}`, `{"tokens":[…]}`), and the `"value"` of an
+ *     object whose `"name"` or `"key"` is a secret name (`{"name":"BAMBU_ACCESS_CODE","value":…}`);
+ *  4. the value after a secret-looking name (JSON, escaped JSON, `key=value`, `key: value`, `--flag value`), judged
  *     word by word, so `PAIRING_PIN`, `session_key` and `X-Api-Key` count and `pinned` and `keyboard` don't. A value is
  *     kept only when the whole of it is a marker ("", `[set]`, `[redacted…]`, true, false, null);
- *  4. tokens by their shape (JWT, `ghp_`, `github_pat_`, `AKIA`, `AIza`, `sk-`, `hf_`, `xox?-`), DER base64, e-mail
- *     addresses, pairing links, a PIN after "pin", the user's name in a home path, and any 64-hex, base64 SHA-256
- *     or 43-character token run.
+ *  5. tokens by their shape (JWT, `ghp_`, `github_pat_`, `AKIA`, `AIza`, `sk-`, `hf_`, `xox?-`), any run of 24 or more
+ *     with upper case, lower case and digits (a pairing code; the companion's rule), DER base64, e-mail addresses
+ *     (`@` or `%40`), pairing links, a PIN after "pin", the user's name in a home path, and any 64-hex, base64
+ *     SHA-256 or 43-character token run.
  */
 object Redaction {
     /** Words that make a name secret wherever they appear inside it (`refreshTokens`, `BAMBU_PASSWORD`). */
@@ -22,7 +25,7 @@ object Redaction {
         "cookie", "privatekey", "accesskey", "accesscode", "sessionkey", "sessionid", "authorization", "authkey")
     /** Words that make a name secret only as a word of their own (`pin`, not `pinned`; `key`, not `keyboard`). */
     private val WORDS = setOf("key", "pin", "pwd", "otp", "sid", "session", "auth", "cert", "certificate", "sha256", "fingerprint",
-        "signature", "ticket", "login", "email", "mail", "user", "username", "account", "jwt", "bearer", "cookie", "pass")
+        "signature", "ticket", "login", "email", "mail", "user", "username", "account", "jwt", "bearer", "cookie")
     /** `code` is secret after these (`access_code`, `PAIRING_CODE`, `lanCode`), not on its own (an error's code). */
     private val CODE_AFTER = setOf("access", "lan", "pair", "pairing", "auth", "otp", "verification", "nearby", "one", "confirm", "confirmation", "pin")
 
@@ -33,8 +36,9 @@ object Redaction {
             .lowercase().split(Regex("""[^a-z0-9]+""")).filter { it.isNotEmpty() }
         val joined = words.joinToString("")
         if (STRONG.any { joined.contains(it) }) return true
-        // Plurals count too (`keys`, `pins`); "access" stays "access".
-        fun word(w: String, set: Set<String>) = w in set || (w.endsWith("s") && w.dropLast(1) in set)
+        // Plurals count too (`pins`, `sessions`); "access" stays "access". Plain `keys` doesn't: it is a list of setting
+        // names (`settings.updated`), as on the companion; `apiKeys` is still caught by `apikey` inside it.
+        fun word(w: String, set: Set<String>) = w in set || (w.endsWith("s") && w != "keys" && w.dropLast(1) in set)
         if (words.any { word(it, WORDS) }) return true
         return words.withIndex().any { (i, w) -> word(w, setOf("code")) && i > 0 && word(words[i - 1], CODE_AFTER) }
     }
@@ -86,10 +90,13 @@ object Redaction {
         Regex("""\b(?:sk|pk|rk)[-_][A-Za-z0-9_-]{16,}""") to { _ -> "[redacted key]" },
         Regex("""\bhf_[A-Za-z0-9]{20,}""") to { _ -> "[redacted token]" },
         Regex("""\bxox[abposr]-[A-Za-z0-9-]{10,}""") to { _ -> "[redacted token]" },
+        // Any run of 24 or more with upper case, lower case and digits (a 30- or 32-character pairing code, an unlabelled
+        // key), as the companion's rule. Serials (no lower case), hashes (no upper case), "timeout" and -1001 stay.
+        Regex("""\b(?=[A-Za-z0-9_]*[A-Z])(?=[A-Za-z0-9_]*[a-z])(?=[A-Za-z0-9_]*[0-9])[A-Za-z0-9_]{24,}\b""") to { _ -> "[redacted token]" },
         // A certificate or key as bare DER base64.
         Regex("""\bMI[A-Za-z0-9+/]{60,}={0,2}""") to { _ -> "[redacted certificate or key]" },
-        // E-mail addresses (an account).
-        Regex("""[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}""") to { _ -> "[redacted email]" },
+        // E-mail addresses (an account), `@` or percent-encoded `%40`.
+        Regex("""[A-Za-z0-9._%+-]+(?:@|%40)[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}""") to { _ -> "[redacted email]" },
         // A pairing link carries its code.
         Regex("""scantomake://pair\?[^\s"']+""", RegexOption.IGNORE_CASE) to { _ -> "scantomake://pair?[redacted]" },
         // A PIN in words: "PIN 482913", "pairing code is 482913".
@@ -126,11 +133,59 @@ object Redaction {
         return out.append(text, at, text.length).toString()
     }
 
+    private val CONTAINER_KEY = Regex(""""((?:[^"\\\n]|\\.){1,200})"\s*:\s*(?=[\[{])""")
+
+    /** Where the JSON object or array starting at [open] ends (the index after its closing bracket), strings respected. */
+    private fun closing(text: String, open: Int): Int {
+        var depth = 0
+        var i = open
+        var inString = false
+        while (i < text.length) {
+            val c = text[i]
+            if (inString) { if (c == '\\') i++ else if (c == '"') inString = false }
+            else when (c) {
+                '"' -> inString = true
+                '{', '[' -> depth++
+                '}', ']' -> if (--depth == 0) return i + 1
+            }
+            i++
+        }
+        return text.length
+    }
+
+    /**
+     * A secret-named key whose value is an object or an array (`{"password":{"value":…}}`, `{"tokens":[…]}`,
+     * `{"apiKeys":[{"value":…}]}`): the whole value goes, to its matching bracket.
+     */
+    private fun containers(text: String): String {
+        val out = StringBuilder()
+        var at = 0
+        while (true) {
+            val key = CONTAINER_KEY.find(text, at) ?: break
+            val open = key.range.last + 1
+            out.append(text, at, open)
+            if (secretName(key.groupValues[1])) { out.append("\"[redacted]\""); at = closing(text, open) } else at = open
+        }
+        return out.append(text, at, text.length).toString()
+    }
+
+    private val FLAT_OBJECT = Regex("""\{[^{}]*}""")
+    private val LABEL = Regex(""""(?:name|key)"\s*:\s*"((?:[^"\\\n]|\\.){1,200})"""")
+    private val PAIRED_VALUE = Regex("""("value"\s*:\s*)("(?:[^"\\\n]|\\.)*"|[^\s,}\]{\["][^\s,}\]]*)""")
+
+    /** `{"name":"BAMBU_ACCESS_CODE","value":…}` (an env list, a settings row): the value goes when the name is secret. */
+    private fun namedValues(text: String): String = FLAT_OBJECT.replace(text) { obj ->
+        val label = LABEL.find(obj.value)?.groupValues?.get(1)
+        if (label == null || !secretName(label)) obj.value
+        else PAIRED_VALUE.replace(obj.value) { v -> if (safe(v.groupValues[2])) v.value else "${v.groupValues[1]}\"[redacted]\"" }
+    }
+
     /** Text with every secret removed: the known values first (every form, longest first), then the rules. */
     fun redact(text: String, secrets: List<String> = emptyList()): String {
         var out = text
         val known = secrets.filter { it.length >= 4 }.flatMap(::forms).filter { it.length >= 4 }.distinct().sortedByDescending { it.length }
         for (secret in known) out = out.replace(secret, "[redacted]", ignoreCase = true)
+        out = namedValues(containers(out))
         for ((pattern, replace) in NAMED) out = pattern.replace(out, replace)
         out = keyValues(out)
         for ((pattern, replace) in SHAPES) out = pattern.replace(out, replace)
