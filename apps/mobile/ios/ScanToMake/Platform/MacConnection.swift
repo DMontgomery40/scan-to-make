@@ -415,7 +415,7 @@ typealias MacError = CompanionError
     func declareKeptScan(_ id: String, run: String) async throws -> Bool {
         guard UUID(uuidString: run) != nil, run == run.lowercased() else { return false }
         let frames = try Self.frameNames(run)
-        guard !frames.isEmpty, try await client.capabilities().contains("objectCaptureImages") else { return false }
+        guard !frames.isEmpty, try await client.capabilities(timeout: 15).contains("objectCaptureImages") else { return false }
         return try await declare(id, run: run, manifest: Self.captureManifest(frames))
     }
 
@@ -426,14 +426,12 @@ typealias MacError = CompanionError
     }
 
     /// Names a run's photos to the Mac, with the run, so a forget can name exactly this scan (review of #819, F4).
-    /// A Mac older than `captureForget` (Mac beta 6) can't forget: the newer run is declared as before.
+    /// A Mac older than `captureForget` (Mac beta 6) can't forget (`needs-update`): the newer run is declared as before.
     private func declare(_ id: String, run: String, manifest: [String: Any]) async throws -> Bool {
-        let forgets = try await client.capabilities().contains("captureForget")
         var named = manifest
         named["run"] = run
-        return try await Self.declare(project: id, run: run, forget: { [self] project, earlier in
-            if forgets { try await forgetOnMac(project, run: earlier) }
-        }, declare: { [client] in _ = try await client.declareCapture($0, manifest: named) })
+        return try await Self.declare(project: id, run: run, forget: { [self] in try await forgetOnMac($0, run: $1) },
+                                      declare: { [client] in _ = try await client.declareCapture($0, manifest: named) })
     }
 
     /// Asks the Mac to forget one run of a project, by its run and photo list: never another phone's scan, or capture
@@ -454,9 +452,16 @@ typealias MacError = CompanionError
     static func declare(project: String, run: String, _ defaults: UserDefaults = .standard,
                         forget: (String, String) async throws -> Void, declare: (String) async throws -> Void) async throws -> Bool {
         guard !isRemoved(project, run, defaults) else { return false }
-        if let left = pendingForgets(defaults)[project] {
-            try await forgetUnlessAnswered(project, left, forget)
-            setPendingForget(project: project, run: nil, defaults)
+        for left in pendingForgets(defaults)[project] ?? [] {
+            do {
+                try await forget(project, left)
+                removePendingForget(project: project, run: left, defaults)
+            } catch let failure as CompanionError where keepsForgetPending(failure) {
+                // Too old to forget: kept for after its update, and this run is declared as before. Not answering: stop.
+                guard failure.code == "needs-update" else { throw failure }
+            } catch is CompanionError {
+                removePendingForget(project: project, run: left, defaults)   // refused: no longer what the Mac holds
+            }
         }
         if let earlier = macRun(project, defaults), earlier != run {
             try await forgetUnlessAnswered(project, earlier, forget)
@@ -477,6 +482,9 @@ typealias MacError = CompanionError
     private static func macAnswered(_ failure: CompanionError) -> Bool {
         !failure.isUnreachable && !failure.needsPairing && failure.code != "cancelled"
     }
+    /// A pending forget stays until the Mac forgets that scan or refuses it as no longer matching: not while the Mac
+    /// doesn't answer, nor while it is too old to forget (review of #819, N1).
+    private static func keepsForgetPending(_ failure: CompanionError) -> Bool { !macAnswered(failure) || failure.code == "needs-update" }
 
     /// The run whose photo list the Mac has, as far as this phone knows: the one it acknowledged, or, from a build before
     /// `acknowledgedRuns` (202611142311), the declared run once no declare of it is pending (only an answered declare,
@@ -500,7 +508,7 @@ typealias MacError = CompanionError
 
     /// A run taken off its project: removed with Remove, or with its forget still to reach the Mac. Never sent.
     static func isRemoved(_ project: String, _ run: String, _ defaults: UserDefaults = .standard) -> Bool {
-        removedStoppedScans(defaults).contains(run) || pendingForgets(defaults)[project] == run
+        removedStoppedScans(defaults).contains(run) || (pendingForgets(defaults)[project] ?? []).contains(run)
     }
 
     /// Remove on a stopped scan (David, Nov 15: a 20-photo-or-more stop could never be taken off): this phone stops
@@ -521,8 +529,9 @@ typealias MacError = CompanionError
                 do { try await forget(project, run) }
                 catch let failure as CompanionError where failure.code == "needs-update" {
                     if told { throw failure }
+                    addPendingForget(project: project, run: run, defaults)   // in case it landed: forgotten after the update
                 } catch let failure as CompanionError where failure.isUnreachable || failure.needsPairing {
-                    setPendingForget(project: project, run: run, defaults)
+                    addPendingForget(project: project, run: run, defaults)
                 } catch let failure as CompanionError where macAnswered(failure) {
                     // Refused: the touch-up started, or a different scan is waiting. Nothing of this run is left there.
                 }
@@ -534,31 +543,40 @@ typealias MacError = CompanionError
         }
     }
 
-    /// Removed runs whose forget hasn't reached the Mac yet, by project (review of #819, F1). Tried again whenever the
-    /// Mac answers, and before any declare of that project, until the Mac answers it.
-    static func pendingForgets(_ defaults: UserDefaults = .standard) -> [String: String] {
-        (defaults.dictionary(forKey: pendingForgetsKey) as? [String: String]) ?? [:]
+    /// Removed runs whose forget hasn't reached the Mac yet, by project, oldest first (review of #819, F1, N1): every
+    /// one is kept, so a second Remove while the Mac is away never loses the first. Tried again whenever the Mac
+    /// answers, and before any declare of that project.
+    static func pendingForgets(_ defaults: UserDefaults = .standard) -> [String: [String]] {
+        (defaults.dictionary(forKey: pendingForgetsKey) as? [String: [String]]) ?? [:]
     }
-    static func setPendingForget(project: String, run: String?, _ defaults: UserDefaults = .standard) {
+    static func addPendingForget(project: String, run: String, _ defaults: UserDefaults = .standard) {
         var pending = pendingForgets(defaults)
-        pending[project] = run
+        if !(pending[project] ?? []).contains(run) { pending[project, default: []].append(run) }
+        defaults.set(pending, forKey: pendingForgetsKey)
+    }
+    static func removePendingForget(project: String, run: String, _ defaults: UserDefaults = .standard) {
+        var pending = pendingForgets(defaults)
+        let left = (pending[project] ?? []).filter { $0 != run }
+        pending[project] = left.isEmpty ? nil : left
         defaults.set(pending, forKey: pendingForgetsKey)
     }
     private static let pendingForgetsKey = "CounterpartPendingScanForgets"
 
-    /// Tries every pending forget once. One is done when the Mac answers it, forgotten or refused (the touch-up started,
-    /// another scan is waiting, or the Mac is too old to forget); one the Mac didn't answer stays for the next try.
+    /// Tries every pending forget, oldest first. One is done when the Mac forgets it, or refuses it because that scan
+    /// no longer matches what it holds (the touch-up started, another scan is waiting). One the Mac didn't answer, or a
+    /// Mac too old to forget, keeps it, and that project's later ones, for the next try.
     static func retryForgets(_ defaults: UserDefaults = .standard, forget: (String, String) async throws -> Void) async {
         for project in pendingForgets(defaults).keys.sorted() {
             await serially(project) {
-                guard let run = pendingForgets(defaults)[project] else { return }
-                do {
-                    try await forget(project, run)
-                    setPendingForget(project: project, run: nil, defaults)
-                } catch let failure as CompanionError where !macAnswered(failure) {
-                    // The Mac didn't answer: kept for the next time it does.
-                } catch {
-                    setPendingForget(project: project, run: nil, defaults)
+                for run in pendingForgets(defaults)[project] ?? [] {
+                    do {
+                        try await forget(project, run)
+                        removePendingForget(project: project, run: run, defaults)
+                    } catch let failure as CompanionError where keepsForgetPending(failure) {
+                        return
+                    } catch {
+                        removePendingForget(project: project, run: run, defaults)
+                    }
                 }
             }
         }
