@@ -970,6 +970,86 @@ private actor HeldDownload {
         XCTAssertEqual(ARModel.target(forSTL: stl, tint: nil).lastPathComponent, "model.neutral.ar.usdz")
     }
 
+    /// #840: David's Pink snap-lid box crashed the app on AR. Its merged mesh has sliver triangles (bytes from
+    /// `current/model.stl`, tris 5332, 5406, 5532, 34219, 34294); written beside a real part they make a real USDZ.
+    static let pinkBoxSlivers = [
+        "c45f0d42cdcc8e42c33b8533d82e0d42cdcc8e42802f8e33b4240d42cdcc8e428f0a9033",
+        "66669a4231ac6dc250656b3666669a42b0b86dc2b0706b3666669a4246bb6dc20b736b36",
+        "5fae0e4266668c4263d3d3336cb80e4266668c4255fcd133efe80e4266668c42e51bc933",
+        "b4240d42cdcc8e428f0a9033d82e0d42cdcc8e42802f8e33c45f0d42cdcc8e42c33b8533",
+        "66669a4246bb6dc20b736b3666669a42b0b86dc2b0706b3666669a4231ac6dc250656b36",
+    ]
+
+    /// The box STL with extra 36-byte corner records (hex) appended, its header counting them.
+    static func boxSTL(adding records: [String]) -> Data {
+        var data = boxSTL()
+        let count = UInt32(12 + records.count).littleEndian
+        withUnsafeBytes(of: count) { data.replaceSubrange(80..<84, with: $0) }
+        for record in records {
+            data.append(Data(count: 12))
+            var index = record.startIndex
+            while index < record.endIndex { let next = record.index(index, offsetBy: 2); data.append(UInt8(record[index..<next], radix: 16) ?? 0); index = next }
+            data.append(contentsOf: [0, 0])
+        }
+        return data
+    }
+
+    /// #840, the sweep: every file the AR chip can be pointed at. Each gives a real USDZ or nil (the chip's one sentence,
+    /// "AR didn’t open. Try Again"), never a crash: missing, empty, short, a 3MF under the STL's name, an ASCII STL, a
+    /// USDZ, the pink box's slivers, a header that lies, and a folder where the file should be.
+    func testNoFileTheARChipIsPointedAtStopsTheApp() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        var lying = Self.boxSTL(); withUnsafeBytes(of: UInt32.max.littleEndian) { lying.replaceSubrange(80..<84, with: $0) }
+        let ascii = Data("solid p\nvertex 0 0 0\nvertex 10 0 0\nvertex 0 10 0\nvertex 0 0 0\nvertex 0 10 0\nvertex 0 0 10\nendsolid p\n".utf8)
+        // true: a USDZ is made; false: nil; nil: either, so long as it doesn't crash.
+        let cases: [(String, Data?, Bool?)] = [
+            ("missing", nil, false),
+            ("empty", Data(), false),
+            ("84 bytes, no triangles", Data(count: 84), false),
+            ("85 bytes", Data(count: 85), false),
+            ("a 3MF under the STL's name", Data([0x50, 0x4B, 0x03, 0x04] + [UInt8](repeating: 0x20, count: 400)), false),
+            ("an ASCII STL", ascii, true),
+            ("the pink box's slivers beside a part", Self.boxSTL(adding: Self.pinkBoxSlivers), true),
+            ("the pink box's slivers alone", Self.boxSTL(adding: Self.pinkBoxSlivers).prefix(84) + Self.boxSTL(adding: Self.pinkBoxSlivers).suffix(5 * 50), nil),
+            ("a header that says 4 billion", lying, true),
+        ]
+        for (index, (name, data, makes)) in cases.enumerated() {
+            let part = folder.appendingPathComponent("case\(index)", isDirectory: true)
+            try FileManager.default.createDirectory(at: part, withIntermediateDirectories: true)
+            let stl = part.appendingPathComponent("model.stl")
+            if let data { try data.write(to: stl) }
+            let made = await ARModel.usdz(fromSTL: stl, tint: "#F5547C")
+            switch makes {
+            case true?: XCTAssertTrue(made.map(PartUSDZ.isUSDZ) ?? false, name)
+            case false?: XCTAssertNil(made, name)
+            case nil: if let made { XCTAssertTrue(PartUSDZ.isUSDZ(made), name) }
+            }
+        }
+        let directory = folder.appendingPathComponent("model.stl", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let fromDirectory = await ARModel.usdz(fromSTL: directory, tint: nil)
+        XCTAssertNil(fromDirectory, "a folder where the model should be")
+    }
+
+    /// #840: every crashed tap left a half-written `ar-<uuid>.usda` beside the STL (a trap skips `defer`). The next AR
+    /// clears the ones no write could still own, and keeps a fresh one another write may be making.
+    func testScratchFilesACrashedWriteLeftAreClearedOnTheNextAR() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let stl = folder.appendingPathComponent("model.stl")
+        try Self.boxSTL().write(to: stl)
+        let old = folder.appendingPathComponent("ar-\(UUID().uuidString).usda"), fresh = folder.appendingPathComponent("ar-\(UUID().uuidString).usda")
+        try Data("#usda 1.0".utf8).write(to: old); try Data("#usda 1.0".utf8).write(to: fresh)
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-3600)], ofItemAtPath: old.path)
+        ARModel.removeStale(beside: stl)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: old.path), "an abandoned scratch file is cleared")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fresh.path), "one a write may still be making is kept")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: stl.path), "the model itself is never touched")
+    }
+
     /// #606 (audit 2026-11-11 §1): writing the AR file has a deadline. Work that ignores cancellation, as Model I/O's
     /// conversion does, ends the wait at the deadline instead of leaving "Preparing AR…" up for good; work that finishes
     /// in time gives its result; a cancelled caller is let go at once.
