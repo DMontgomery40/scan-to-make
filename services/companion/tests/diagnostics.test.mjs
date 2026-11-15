@@ -176,7 +176,7 @@ test('an MCP file name that could leave its folder is left out with a note', asy
     files: [{name: '../../etc/passwd', content: 'x', truncated: false}, {name: '/abs.log', content: 'x', truncated: false}, {name: 'ok.log', content: 'fine', truncated: false}], notes: []}});
   const bundle = await diagnosticsBundle({eventsPath, sessions: () => [{destinationId: 'p1s', printer: 'P1S', session: bad.session}]});
   assert.deepEqual(bundle.files.map(item => item.name), ['events-tail.ndjson', 'mcp/P1S-bambu-printer-mcp-p1s/ok.log']);
-  assert.equal(bundle.notes.filter(note => note.includes('named a file this export can\'t use')).length, 2);
+  assert.deepEqual(bundle.notes.filter(note => note.includes('this export can\'t use')), ['bambu-printer-mcp for P1S named 2 files this export can\'t use; they were left out.']);
 });
 
 test('safe markers stay: [set], empty values and whether a credential is set (a "won\'t connect" report needs them)', () => {
@@ -277,4 +277,27 @@ test('at the schema\'s maximum (8 printers × 512 files and 512 notes of control
   assert.ok(size < 8 * 1024 * 1024);
   assert.ok(bundle.notes.every(note => !/[\x00-\x1f]/.test(note) && note.length <= 1000));
   assert.ok(bundle.notes.some(note => note.includes('left out to keep the export small')));
+});
+
+// #813 re-review (comment 6886880432): N2, N3, N4, N6, N11 cases are probes in the fixture; these are kept exactly.
+test('printer error codes, content hashes and settings names stay exactly as they are', () => {
+  const hash = 'ab12'.repeat(16);
+  for (const line of ['printer said HMS code 05004043 (heatbreak fan)', 'failed with code 1234', `{"type":"objects.updated","detail":"model ${hash} kept"}`,
+    '{"type":"settings.updated","data":{"keys":["general.autoUpdateMcps"]}}', '{"seq":12,"passIndex":2}'])
+    assert.equal(redact(line), line);
+});
+
+test('one MCP\'s files and notes, Counterpart\'s lines about it included, stay within the max_bytes it was asked for', async t => {
+  const {eventsPath} = await fixture(t, '');
+  const max = 20_000;
+  const noisy = session('p1s', {diagnostics: true, bundle: {package: 'bambu-printer-mcp', version: '1.1.90',
+    files: [...Array.from({length: 40}, (_, i) => ({name: `../bad${i}`, content: 'x', truncated: false})),
+      ...Array.from({length: 40}, (_, i) => ({name: `log${i}.log`, content: 'l'.repeat(3000), truncated: false}))],
+    notes: Array.from({length: 200}, (_, i) => `note ${i} ${'n'.repeat(200)}`)}});
+  const limits = {mcpBytes: max, mcpEachBytes: max, mcpMinBytes: 1000};
+  const bundle = await diagnosticsBundle({eventsPath, limits, sessions: () => [{destinationId: 'p1s', printer: 'P1S', session: noisy.session}]});
+  const mcp = bundle.files.filter(file => file.name.startsWith('mcp/'));
+  const cost = mcp.reduce((sum, file) => sum + Buffer.byteLength(JSON.stringify(file)), 0) + bundle.notes.reduce((sum, note) => sum + Buffer.byteLength(JSON.stringify(note)), 0);
+  assert.ok(cost <= max, `${cost} bytes for a ${max}-byte share`);
+  assert.ok(bundle.notes.some(note => note.includes('named 40 files')) && bundle.notes.some(note => note.includes('more of its notes were left out')));
 });

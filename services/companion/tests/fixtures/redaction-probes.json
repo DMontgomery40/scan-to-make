@@ -565,6 +565,76 @@
    "label": "lead: plural stripping (access-code:)",
    "input": "access-code: 99887766",
    "mustNotSurvive": "99887766"
+  },
+  {
+   "label": "#813 re-review N1 nested object",
+   "input": "{\"password\":{\"value\":\"nestedsecret99\"}}",
+   "mustNotSurvive": "nestedsecret99"
+  },
+  {
+   "label": "#813 re-review N1 array",
+   "input": "{\"tokens\":[\"arraysecret99value\"]}",
+   "mustNotSurvive": "arraysecret99value"
+  },
+  {
+   "label": "#813 re-review N1 array of objects",
+   "input": "{\"apiKeys\":[{\"value\":\"apikeysecret99\"}]}",
+   "mustNotSurvive": "apikeysecret99"
+  },
+  {
+   "label": "#813 re-review N1 name/value pair",
+   "input": "{\"name\":\"BAMBU_ACCESS_CODE\",\"value\":\"pairsecret99\"}",
+   "mustNotSurvive": "pairsecret99"
+  },
+  {
+   "label": "#813 re-review N1 key/value pair, value first",
+   "input": "{\"value\":\"pairsecret77\",\"key\":\"API_KEY\"}",
+   "mustNotSurvive": "pairsecret77"
+  },
+  {
+   "label": "#813 re-review N2 pin in prose, 64 hex",
+   "input": "pin is ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34 ok",
+   "mustNotSurvive": "ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34"
+  },
+  {
+   "label": "#813 re-review N2 sha256 named",
+   "input": "{\"sha256\":\"ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34\"}",
+   "mustNotSurvive": "ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34"
+  },
+  {
+   "label": "#813 re-review N2 cert named",
+   "input": "{\"cert\":\"certsecret99value\"}",
+   "mustNotSurvive": "certsecret99value"
+  },
+  {
+   "label": "#813 re-review N2 fingerprint colon-hex",
+   "input": "fingerprint: ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab",
+   "mustNotSurvive": "ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab"
+  },
+  {
+   "label": "#813 re-review N3 digest header username",
+   "input": "Authorization: Digest username=\"taylorperson\", response=\"6629fae49393a05397450978507c4ef1\"",
+   "mustNotSurvive": "taylorperson"
+  },
+  {
+   "label": "#813 re-review N3 digest header response",
+   "input": "Authorization: Digest username=\"taylorperson\", response=\"6629fae49393a05397450978507c4ef1\"",
+   "mustNotSurvive": "6629fae49393a05397450978507c4ef1"
+  },
+  {
+   "label": "#813 re-review N3 proxy header",
+   "input": "Proxy-Authorization: Digest username=\"p\", realm=\"r\", nonce=\"noncevalue99\"",
+   "mustNotSurvive": "noncevalue99"
+  },
+  {
+   "label": "#813 re-review N6 negotiate",
+   "input": "negotiate TlRMTVNTUAABAAA12345",
+   "mustNotSurvive": "TlRMTVNTUAABAAA12345"
+  },
+  {
+   "label": "#813 re-review N11 percent-encoded email",
+   "input": "to=someone%40example.com&x=1",
+   "mustNotSurvive": "someone%40example.com"
   }
  ]
 }

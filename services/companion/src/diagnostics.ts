@@ -64,7 +64,7 @@ export interface SoftwarePackage {
 // changed setting names) isn't a secret; `apiKeys` is, by `apikey` inside it.
 const SECRET_WORDS = new Set(['password', 'passwd', 'passcode', 'passphrase', 'pwd', 'secret', 'secrets', 'token', 'tokens', 'key',
   'apikey', 'accesscode', 'accesskey', 'privatekey', 'authorization', 'auth', 'cookie', 'cookies', 'credential', 'credentials', 'signature',
-  'ticket', 'login', 'email', 'userinfo', 'session', 'sessionid', 'sid', 'pin', 'otp', 'jwt', 'bearer', 'certificate']);
+  'ticket', 'login', 'email', 'userinfo', 'session', 'sessionid', 'sid', 'pin', 'otp', 'jwt', 'bearer', 'certificate', 'cert', 'sha256', 'fingerprint']);
 const SECRET_PAIRS = new Set(['access code', 'lan code', 'pair code', 'pairing code', 'user info', 'id token']);
 // Long words that are secrets even inside one unbroken name (`accesstoken`, `CLIENTSECRET`).
 const SECRET_INSIDE = /password|passwd|passcode|passphrase|secret|token|credential|cookie|authorization|signature|apikey|accesscode|privatekey/;
@@ -104,7 +104,10 @@ const VALUES: [RegExp, string][] = [
   // scheme://user:password@host keeps its host.
   [/\b([a-z][a-z0-9+.-]*:\/\/)[^/\s:@"'<>]+(?::[^/\s@"'<>]*)?@/gi, '$1[redacted]@'],
   // Authorization schemes, in any case (`authorization: bearer …`, `Basic dXNl…`).
-  [/\b(Bearer|Basic|Digest|Token)(\s+)[A-Za-z0-9._~+/=-]{6,}/gi, '$1$2[redacted]'],
+  // A whole Authorization or Proxy-Authorization header line, whatever its scheme (a Digest header's username and
+  // response are parameters, not one credential).
+  [/(^|[^"\w-])((?:Proxy-)?Authorization[ \t]*:)[^\n]*/gim, '$1$2 [redacted]'],
+  [/\b(Bearer|Basic|Digest|Negotiate|Token)(\s+)[A-Za-z0-9._~+/=-]{6,}/gi, '$1$2[redacted]'],
   // Cookie headers, whole line.
   [/^((?:Set-)?Cookie:).*$/gim, '$1 [redacted]'],
   // JSON web tokens.
@@ -120,10 +123,14 @@ const VALUES: [RegExp, string][] = [
   [/\b(?=[A-Za-z0-9_]*[A-Z])(?=[A-Za-z0-9_]*[a-z])(?=[A-Za-z0-9_]*[0-9])[A-Za-z0-9_]{24,}\b/g, '[redacted token]'],
   // A long base64 run (a DER certificate, a key), digits or not.
   [/\b(?=[A-Za-z0-9+]*[A-Z])(?=[A-Za-z0-9+]*[a-z])[A-Za-z0-9+]{40,}={0,2}/g, '[redacted token]'],
-  // A pairing code or PIN said in words: "The pairing code is 482913", "Enter PIN 482913".
-  [/\b((?:pin|code)(?:\s+is)?\s+)\d{4,8}\b/gi, '$1[redacted]'],
+  // A pairing code or PIN said in words: "The pairing code is 482913", "Enter PIN 482913". Never a bare "code": a
+  // printer's error code ("HMS code 05004043") is what these reports are read for.
+  [/\b((?:pin|passcode|pairing\s+code|access\s+code)(?:\s+is)?\s+)\d{4,8}\b/gi, '$1[redacted]'],
+  // A pin, fingerprint or certificate said in words, as hex or colon-hex ("pin is ab12…"). Bare hex elsewhere (the
+  // event log's content hashes) stays readable.
+  [/\b((?:pin|fingerprint|cert(?:ificate)?)(?:\s+(?:is|sha-?256))?[ \t]*[:=]?[ \t]*)((?:[0-9A-Fa-f]{2}:){15,}[0-9A-Fa-f]{2}|[0-9A-Fa-f]{32,})\b/gi, '$1[redacted]'],
   // Email addresses (an Apple Account, a Bambu account).
-  [/[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}/g, '[redacted email]'],
+  [/[A-Za-z0-9._%+-]+(?:@|%40)[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}/g, '[redacted email]'],
   // A pairing link carries its code.
   [/scantomake:\/\/pair\?[^\s"']+/g, 'scantomake://pair?[redacted]'],
 ];
@@ -133,6 +140,41 @@ const HOMES: [RegExp, string][] = [
   [/\b([A-Za-z]:\\{1,2}Users\\{1,2})([^\\\s"'<>:]+)/g, '$1[user]'],
   [/(^|[\s"'=(])~(?!\[)([A-Za-z_][A-Za-z0-9_.-]*)(?=\/)/gm, '$1~[user]'],
 ];
+
+/**
+ * A secret-named key whose value is an object or array (`{"password":{"value":"…"}}`, `{"tokens":["…"]}`): the whole
+ * value goes, to its matching close (strings and escapes respected). One that never closes goes to the end of its line.
+ */
+function redactNested(text: string): string {
+  const opener = new RegExp(String.raw`"(${KEY_CHARS})"\s*:\s*(?=[{\[])`, 'g');
+  let out = '', from = 0;
+  for (let match = opener.exec(text); match; match = opener.exec(text)) {
+    if (match.index < from || !isSecretName(match[1]!)) continue;
+    const start = match.index + match[0].length;
+    let depth = 0, quoted = false, end = -1;
+    for (let i = start; i < text.length; i++) {
+      const c = text[i];
+      if (quoted) { if (c === '\\') i++; else if (c === '"') quoted = false; continue; }
+      if (c === '"') quoted = true;
+      else if (c === '{' || c === '[') depth++;
+      else if (c === '}' || c === ']') { if (--depth === 0) { end = i + 1; break; } }
+      else if (c === '\n' && depth > 0 && i - start > 65536) break;
+    }
+    if (end < 0) { const line = text.indexOf('\n', start); end = line < 0 ? text.length : line; }
+    out += text.slice(from, start) + '"[redacted]"';
+    from = end; opener.lastIndex = end;
+  }
+  return out + text.slice(from);
+}
+
+/** `{"name":"BAMBU_ACCESS_CODE","value":"…"}`: a value whose sibling `name` or `key` is a secret's name goes. */
+function redactPairs(text: string): string {
+  return text.replace(/\{[^{}]{0,4096}\}/g, object => {
+    const named = /"(?:name|key)"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(object);
+    if (!named || !isSecretName(named[1]!)) return object;
+    return object.replace(/("value"\s*:\s*)("(?:[^"\\]|\\.)*"|[^\s,}\]]+)/g, (match, head: string, value: string) => safeValue(value) ? match : `${head}"[redacted]"`);
+  });
+}
 
 /**
  * Every secret value the bundle must never carry: each printer's configured secrets (access codes, keys, passwords)
@@ -156,6 +198,7 @@ export function redact(text: string, secrets: readonly string[] = [], home?: str
   let out = text;
   for (const secret of secrets) out = out.split(secret).join('[redacted]');
   for (const [pattern, replacement] of VALUES) out = out.replace(pattern, replacement);
+  out = redactPairs(redactNested(out));
   for (const [pattern, replace] of NAMED) out = out.replace(pattern, replace as (match: string, ...rest: string[]) => string);
   if (home && home.length > 1) out = out.split(home).join('~').split(home.replaceAll('/', '\\/')).join('~');
   for (const [pattern, replacement] of HOMES) out = out.replace(pattern, replacement);
@@ -168,6 +211,8 @@ const jsonBytes = (text: string) => bytes(JSON.stringify(text));
 /** `{"name":…,"content":…,"truncated":false},` around a file's name and content. */
 const FILE_OVERHEAD = 48;
 const MAX_MCP_NOTES = 64;
+/** Room kept in each MCP's share for Counterpart's own lines about it. */
+const SUMMARY_RESERVE = 1200;
 /** A note as one printable line of at most 1000 characters (control characters would escape to six bytes each). */
 const oneLine = (text: string) => { const line = text.replace(/[\x00-\x1f\x7f]+/g, ' ').trim(); return line.length > 1000 ? `${line.slice(0, 999)}…` : line; };
 
@@ -272,18 +317,21 @@ export async function diagnosticsBundle(source: DiagnosticsSource): Promise<Diag
       }
       const {diagnostics} = answer;
       const out: BundleFile[] = [], said: string[] = [];
-      if (answer.infoUnread) said.push(`${label} for ${printer}: its printer info couldn't be read, so Counterpart asked for its diagnostics without it.`);
-      // Names, contents and notes all count against the bundle's share, as JSON (escapes included).
-      let budget = maxBytes;
+      // Names, contents and notes all count against the bundle's share, as JSON (escapes included). The few lines
+      // Counterpart adds about this MCP (at most four, each well under 300 bytes) are reserved first.
+      let budget = maxBytes - SUMMARY_RESERVE;
+      let kept = 0;
       for (const note of diagnostics.notes.slice(0, MAX_MCP_NOTES)) {
         const line = oneLine(`${label} for ${printer}: ${note}`);
         if (jsonBytes(line) > budget) break;
-        budget -= jsonBytes(line); said.push(line);
+        budget -= jsonBytes(line); said.push(line); kept++;
       }
-      if (diagnostics.notes.length > said.length) said.push(`${label} for ${printer}: ${diagnostics.notes.length - said.length} more of its notes were left out to keep the export small.`);
-      let left = 0;
+      const summary: string[] = [];
+      if (answer.infoUnread) summary.push(`${label} for ${printer}: its printer info couldn't be read, so Counterpart asked for its diagnostics without it.`);
+      if (diagnostics.notes.length > kept) summary.push(`${label} for ${printer}: ${diagnostics.notes.length - kept} more of its notes were left out to keep the export small.`);
+      let left = 0, unsafe = 0;
       for (const file of diagnostics.files) {
-        if (!safeName(file.name)) { said.push(`${label} for ${printer} named a file this export can't use; it was left out.`); continue; }
+        if (!safeName(file.name)) { unsafe++; continue; }
         const name = `${folder}/${file.name}`;
         const room = budget - jsonBytes(name) - FILE_OVERHEAD;
         if (room < 0) { left++; continue; }
@@ -292,8 +340,9 @@ export async function diagnosticsBundle(source: DiagnosticsSource): Promise<Diag
         budget -= jsonBytes(name) + FILE_OVERHEAD + jsonBytes(kept.content);
         out.push({name, content: kept.content, truncated: file.truncated || kept.truncated});
       }
-      if (left) said.push(`${label} for ${printer}: ${left} of its files were left out to keep the export small.`);
-      return {files: out, notes: said};
+      if (unsafe) summary.push(`${label} for ${printer} named ${unsafe === 1 ? 'a file' : `${unsafe} files`} this export can't use; ${unsafe === 1 ? 'it was' : 'they were'} left out.`);
+      if (left) summary.push(`${label} for ${printer}: ${left} of its files were left out to keep the export small.`);
+      return {files: out, notes: [...summary.map(oneLine), ...said]};
     } catch (error) {
       return {files: [], notes: [`${label} for ${printer} (${destinationId}) didn't give its diagnostics: ${reason(error)}`]};
     }
