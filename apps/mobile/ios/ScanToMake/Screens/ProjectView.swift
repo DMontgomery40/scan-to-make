@@ -1067,8 +1067,11 @@ struct ProjectView: View {
         // (`PageActions`): never beside a card that already offers it.
         let canPrint = words.page.printInBar
         if canCorrect || canPrint {
+            // #844: at accessibility sizes Print Another's whole name beside the field was wider than the phone, and the
+            // bar took the page with it (614 pt on a 402 pt iPhone). There the field and Print each take a row.
+            let stacked = typeSize.isAccessibilitySize
             GlassEffectContainer(spacing: 10) {
-                HStack(spacing: 10) {
+                (stacked ? AnyLayout(VStackLayout(spacing: 10)) : AnyLayout(HStackLayout(spacing: 10))) {
                     if canCorrect {
                         HStack {
                             // A narrow field (beside Print Another) gets a placeholder that fits whole, never cut words.
@@ -1096,6 +1099,7 @@ struct ProjectView: View {
                             }
                         }
                         .padding(.horizontal, 16).frame(minHeight: 50)
+                        .frame(maxWidth: stacked ? .infinity : nil)
                         .glassEffect(.regular.interactive(), in: .capsule)
                     }
                     if canPrint && !writing {
@@ -1110,15 +1114,17 @@ struct ProjectView: View {
                             if quiet {
                                 Image(systemName: "printer.fill").frame(width: 36, height: 36)
                             } else {
-                                Label(name, systemImage: "printer.fill").fontWeight(.semibold).lineLimit(1)
-                                    .fixedSize().padding(.horizontal, 8).frame(height: 36)
+                                // Its own row at accessibility sizes: the whole name, on two lines if it must, never cut.
+                                Label(name, systemImage: "printer.fill").fontWeight(.semibold).lineLimit(stacked ? 3 : 1)
+                                    .fixedSize(horizontal: !stacked, vertical: true).padding(.horizontal, 8).frame(minHeight: 36)
+                                    .frame(maxWidth: stacked ? .infinity : nil)
                             }
                         }
                         .mainAction(words.page.printIsMain)
                         .disabled(away)
                         .buttonBorderShape(quiet ? .circle : .capsule)
                         .controlSize(.large)
-                        .fixedSize()
+                        .fixedSize(horizontal: !stacked, vertical: true)
                         .layoutPriority(1)
                         .keyboardShortcut("p", modifiers: .command)
                         .accessibilityLabel(name)
@@ -1200,6 +1206,7 @@ struct ResultSection: View {
     let store: ProjectsStore
     let project: Project
     @Environment(AppModel.self) private var app
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -1226,7 +1233,8 @@ struct ResultSection: View {
                 let time = Format.duration(project.print?.estimate?.seconds), grams = Format.grams(project.print?.estimate?.grams)
                 let printer = store.printerName(project)
                 if time != nil || grams != nil {
-                    HStack(spacing: 12) {
+                    // #844: three tiles side by side at accessibility sizes were wider than the phone: there they stack.
+                    (typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(spacing: 12)) : AnyLayout(HStackLayout(spacing: 12))) {
                         if let time { InfoTile(title: "Print time", value: time, symbol: "clock") }
                         if let grams { InfoTile(title: "Filament", value: grams, symbol: "scalemass") }
                         if let printer { InfoTile(title: "Printer", value: printer, symbol: "printer") }
