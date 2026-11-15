@@ -256,7 +256,7 @@ Add printer… on the iPhone, iPad and Android calls the same companion methods 
 
 | Path | Body | Reply |
 |---|---|---|
-| `/v1/printers/setup/discover` | `{}` | `{found, network, options}`: printers the MCPs found, and every MCP's own setup fields (`counterpart_setup_fields`). The brands list only MCPs that answered, so the form never offers one that isn't on the computer |
+| `/v1/printers/setup/discover` | `{}` | `{found, network, options}`: printers the MCPs found (`network`: `complete`, `unavailable` when installed printer software couldn't listen, or `no-software` when none is installed, so the client says to install it first, #826), and every MCP's own setup fields (`counterpart_setup_fields`). The brands list only MCPs that answered, so the form never offers one that isn't on the computer |
 | `/v1/printers/setup/check` | `{printer}` | `{check}` |
 | `/v1/printers/setup/obtain` | `{backend, printerType, host, port?, field, session?}` | one `printers.obtain` step (`status`, `message`, `approveUrl?`, `value?`) |
 | `/v1/printers/setup/add` | `{printer}` | `{id, destinationId?, sameAs?}` |

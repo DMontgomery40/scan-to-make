@@ -179,7 +179,7 @@ def render_notices(root: Path, manifest: dict, records: list[dict]) -> str:
                       "Adapted in " + ", ".join(f"`{f}`" for f in code["files"]) + f"; notice also in `{code['noticePath']}`.",
                       "", "~~~~", (root / code['licencePath']).read_text().strip(), "~~~~"]
     lines += ["", "## Companion npm production dependencies", "",
-              "Development dependencies, npm itself, pip and ensurepip are not shipped.", ""]
+              "Development dependencies, npx, corepack, pip and ensurepip are not shipped. npm ships unmodified inside Node.js (above).", ""]
     seen = set()
     for item in sorted(records, key=lambda i: (i["name"], i["version"])):
         if item["ecosystem"] != "npm" or (item["name"], item["version"]) in seen:
@@ -226,9 +226,20 @@ def verify_payload(root: Path, payload: Path) -> None:
     # code is not in the approved binary distributions and is never allowlisted.
     if any(p.name in {"jsonchecker", "aclocal.m4", "config.guess"} for p in payload.rglob("*")):
         raise ValueError("Unapproved source/build-only component in runtime payload")
-    for path in ["node/lib/node_modules", "python/lib/python3.12/ensurepip"]:
-        if (payload / path).exists():
-            raise ValueError(f"Unapproved package-manager payload: {path}")
+    if (payload / "python/lib/python3.12/ensurepip").exists():
+        raise ValueError("Unapproved package-manager payload: python/lib/python3.12/ensurepip")
+    # npm alone stays (#826: it installs printer software), at the version the pinned Node.js archive carries.
+    modules = payload / "node/lib/node_modules"
+    if modules.exists():
+        npm = modules / "npm"
+        if modules.is_symlink() or {p.name for p in modules.iterdir()} != {"npm"} or npm.is_symlink():
+            raise ValueError("Unapproved package-manager payload: node/lib/node_modules")
+        node_component = next(c for c in manifest["components"] if c["name"] == "Node.js")
+        if json.loads((npm / "package.json").read_text()).get("version") != node_component.get("npmVersion"):
+            raise ValueError("Unapproved package-manager payload: npm differs from the pinned Node.js release")
+    node_bin = payload / "node/bin"
+    if node_bin.is_dir() and not {p.name for p in node_bin.iterdir()} <= {"node", "npm"}:
+        raise ValueError("Unapproved package-manager payload: node/bin")
     expected_wheels = {c["pythonPackage"].replace("-", "_"): c for c in manifest["components"] if "pythonPackage" in c}
     site = payload / "python/lib/python3.12/site-packages"
     allowed_roots = {"README.txt"} | {p for c in expected_wheels.values() for p in c["pythonPaths"]}

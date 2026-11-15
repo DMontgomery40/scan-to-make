@@ -292,9 +292,16 @@ export function installedVersion(install: McpInstall, env: InstallEnvironment): 
   catch { return undefined; }
 }
 
-/** npm for an installation: the one beside its node, else the usual places, newest nvm last. */
-export function findNpm(node: string | undefined, env: InstallEnvironment, path = process.env.PATH ?? ''): string | undefined {
+/**
+ * npm for an installation: the app's own (beside `app`, the companion's Payload/node/bin/node, shipped from the same
+ * Node.js release so a Mac without Node.js still has one, #826), else the one beside the installation's node, else the
+ * usual places, newest nvm last.
+ */
+export function findNpm(node: string | undefined, env: InstallEnvironment, path = process.env.PATH ?? '', app?: string): string | undefined {
   const candidates = [
+    // The app's own npm always wins when it is there: Update and Download pass npm options (--allow-scripts) that an
+    // older npm on PATH or in Homebrew doesn't know (#826).
+    ...(app ? [join(dirname(app), 'npm')] : []),
     ...(node ? [join(dirname(node), 'npm')] : []),
     ...path.split(':').filter(Boolean).map(dir => join(dir, 'npm')),
     '/opt/homebrew/bin/npm', '/usr/local/bin/npm',
@@ -304,4 +311,13 @@ export function findNpm(node: string | undefined, env: InstallEnvironment, path 
     })(),
   ];
   return candidates.find(candidate => env.exists(candidate));
+}
+
+/**
+ * npm's own script for an npm command, so a node can run it without a shebang or PATH: through a symlink (Homebrew,
+ * an official tarball), else in the release layout beside a launcher (the app's Payload/node/bin/npm, Linux's).
+ */
+export function npmCli(npm: string, env: Pick<InstallEnvironment, 'exists' | 'realpath'>): string | undefined {
+  return [join(dirname(env.realpath(npm)), 'npm-cli.js'), join(dirname(dirname(npm)), 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js')]
+    .find(file => env.exists(file));
 }

@@ -48,7 +48,10 @@ struct AddPrinterView: View {
             }
             ForEach(model.discovery?.found ?? []) { candidate in AddPrinterCandidateRow(model: model, candidate: candidate, added: added) }
         } header: { Text("Found") } footer: {
-            if model.discovery?.network == "unavailable" {
+            if model.discovery?.network == "no-software" {
+                // #826: nothing is installed to listen, so nothing else is to blame.
+                Text("No printer software is installed on \(store.macName ?? "your Mac") yet. Install it there first, in Counterpart’s Settings → Printers → Printer software, then look again.")
+            } else if model.discovery?.network == "unavailable" {
                 Text("\(store.macName ?? "Your Mac") couldn’t listen for printers on this network (another app may be using it). Enter the address instead.")
             }
         }

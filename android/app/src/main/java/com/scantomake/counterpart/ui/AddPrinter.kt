@@ -197,7 +197,9 @@ fun AddPrinterScreen(back: () -> Unit, added: () -> Unit) {
                             setUp = { start(prefilledForm(candidate)) },
                             addFolder = { save(PrinterForm(folder = candidate.folder, model = folderModels[candidate.id] ?: candidate.filledModel(options)), candidate.id) })
                     }
-                    if (discovery?.network == "unavailable") Text("Your computer couldn't listen for printers on this network (another app may be using it). Enter the address instead.", color = Palette.secondary, fontSize = 12.sp)
+                    // #826: nothing is installed to listen, so nothing else is to blame.
+                    if (discovery?.network == "no-software") Text("No printer software is installed on your computer yet. Install it there first, in Counterpart's Settings under Printer software, then look again.", color = Palette.secondary, fontSize = 12.sp)
+                    else if (discovery?.network == "unavailable") Text("Your computer couldn't listen for printers on this network (another app may be using it). Enter the address instead.", color = Palette.secondary, fontSize = 12.sp)
                     problem?.let { Text(it, color = Palette.needsYou, fontSize = 13.sp) }
                     options?.updates?.forEach { Text(it.message, color = Palette.filament, fontSize = 13.sp) }
                     SecondaryButton("Enter Details", Modifier.fillMaxWidth().testTag("add-printer-manual"), enabled = !options?.types.isNullOrEmpty()) { start(PrinterForm()) }
