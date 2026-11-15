@@ -418,19 +418,32 @@ typealias MacError = CompanionError
     /// Names a run's photos to the Mac. A different run the Mac acknowledged before is forgotten first, with any of its
     /// photos that came: every run names its photos alike (0001.heic…) and a send skips names the Mac already has, so
     /// an older run's photos would otherwise be rebuilt as the newer scan.
+    /// A Mac older than `captureForget` (Mac beta 6) can't forget: the newer run is declared as before.
     private func declare(_ id: String, run: String, manifest: [String: Any]) async throws {
-        try await Self.declare(project: id, run: run, forget: { [client] in _ = try await client.forgetCapture($0) },
-                               declare: { [client] in _ = try await client.declareCapture($0, manifest: manifest) })
+        let forgets = try await client.capabilities().contains("captureForget")
+        try await Self.declare(project: id, run: run, forget: { [client] in
+            if forgets { _ = try await client.forgetCapture($0) }
+        }, declare: { [client] in _ = try await client.declareCapture($0, manifest: manifest) })
     }
 
     static func declare(project: String, run: String, _ defaults: UserDefaults = .standard,
                         forget: (String) async throws -> Void, declare: (String) async throws -> Void) async throws {
-        if let earlier = acknowledgedRuns(defaults)[project], earlier != run {
+        if let earlier = macRun(project, defaults), earlier != run {
             try await forget(project)
             setAcknowledgedRun(project: project, run: nil, defaults)
+            if declaredRuns(defaults)[project] == earlier { setDeclaredRun(project: project, run: nil, defaults) }
         }
         try await declare(project)
         setAcknowledgedRun(project: project, run: run, defaults)
+    }
+
+    /// The run whose photo list the Mac has, as far as this phone knows: the one it acknowledged, or, from a build before
+    /// `acknowledgedRuns` (202611142311), the declared run once no declare of it is pending (only an answered declare,
+    /// in `retryDeclares` or `sendCapture`, recorded it then).
+    static func macRun(_ project: String, _ defaults: UserDefaults = .standard) -> String? {
+        if let run = acknowledgedRuns(defaults)[project] { return run }
+        guard let run = declaredRuns(defaults)[project], pendingDeclares(defaults)[project] != run else { return nil }
+        return run
     }
 
     /// The run whose photo list the Mac last acknowledged, by project; nil once it was forgotten.
@@ -448,12 +461,17 @@ typealias MacError = CompanionError
     /// it was told, and this phone stops offering it. Kept on the phone; nothing deletes a capture. A declare that never
     /// reached the Mac (still pending, and the Mac doesn't answer) needs no forgetting.
     func removeStoppedScan(_ id: String, run: String) async throws {
-        try await Self.removeStoppedScan(project: id, run: run, forget: { [client] in _ = try await client.forgetCapture($0) })
+        try await Self.removeStoppedScan(project: id, run: run, forget: { [client] in
+            guard try await client.capabilities().contains("captureForget") else {
+                throw CompanionError(code: "needs-update", message: "Update Counterpart on your Mac to remove a scan it already knows about.")
+            }
+            _ = try await client.forgetCapture($0)
+        })
     }
 
     static func removeStoppedScan(project: String, run: String, _ defaults: UserDefaults = .standard,
                                   forget: (String) async throws -> Void) async throws {
-        let told = acknowledgedRuns(defaults)[project] == run, pending = pendingDeclares(defaults)[project] == run
+        let told = macRun(project, defaults) == run, pending = pendingDeclares(defaults)[project] == run
         if told || pending {
             do { try await forget(project) }
             catch let failure as CompanionError where !told && failure.isUnreachable {}

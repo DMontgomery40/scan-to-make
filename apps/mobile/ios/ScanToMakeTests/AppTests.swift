@@ -1144,6 +1144,26 @@ private actor HeldDownload {
         XCTAssertTrue(MacConnection.removedStoppedScans(defaults).contains(few))
     }
 
+    /// Scans the build before this one (202611142311) declared recorded only `declaredRuns`, set once the Mac answered.
+    /// After the update they are still the Mac's: Remove forgets them, and a newer run forgets them first.
+    func testScansDeclaredByTheEarlierBuildAreStillForgotten() async throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "earlier-\(UUID().uuidString)"))
+        let dad = "3b072103-c190-41b9-8158-03177424d0c5", newer = "eeeeeeee-0000-4000-8000-000000000005"
+        var forgotten: [String] = []
+        MacConnection.setDeclaredRun(project: "dad", run: dad, defaults)
+        XCTAssertEqual(MacConnection.macRun("dad", defaults), dad)
+        try await MacConnection.removeStoppedScan(project: "dad", run: dad, defaults, forget: { forgotten.append($0) })
+        XCTAssertEqual(forgotten, ["dad"], "the Mac had it: told to forget")
+
+        MacConnection.setDeclaredRun(project: "hook", run: dad, defaults)
+        try await MacConnection.declare(project: "hook", run: newer, defaults, forget: { forgotten.append($0) }, declare: { _ in })
+        XCTAssertEqual(forgotten, ["dad", "hook"], "a newer run forgets the earlier build's first")
+
+        MacConnection.setDeclaredRun(project: "clip", run: dad, defaults)
+        MacConnection.setPendingDeclare(project: "clip", run: dad, defaults)
+        XCTAssertNil(MacConnection.macRun("clip", defaults), "still pending: the Mac may never have had it")
+    }
+
     /// A newer run is never rebuilt with an older run's photos: runs name their photos alike (0001.heic…) and a send skips
     /// names the Mac already has, so a different run the Mac acknowledged is forgotten before the newer one is named.
     func testANewerRunIsDeclaredOnlyAfterTheMacForgetsTheOlderOne() async throws {
