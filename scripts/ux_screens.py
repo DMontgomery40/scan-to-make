@@ -313,7 +313,7 @@ def screens(ids: dict, record: str, offline_record: str, fixtures: Path, offline
     add('fx-ask-stranded', 'Project: question, stopped scan kept', '68 photos on this phone', 'fixture',
         fixture('-CounterpartScreen', 'ask', set_='ask-stranded'), pages=2)
     add('fx-ask-stranded-large', 'Project: question, stopped scan kept (largest text)', '68 photos, AX5', 'fixture',
-        fixture('-CounterpartScreen', 'ask', '-UIPreferredContentSizeCategoryName', 'UICTContentSizeCategoryAccessibilityXXXL', set_='ask-stranded'), pages=3)
+        fixture('-CounterpartScreen', 'ask', '-UIPreferredContentSizeCategoryName', 'UICTContentSizeCategoryAccessibilityXXXL', set_='ask-stranded'), pages=6)
     add('fx-failed', 'Project: failed (Activity)', 'Blender closed', 'fixture', fixture('-CounterpartScreen', 'failed'), pages=2)
     for screen, state in [('print', 'AMS printer'), ('print-noams', 'one spool'), ('print-loaded', 'printer that doesn\'t report'),
                           ('print-pauses', 'layer pauses')]:
