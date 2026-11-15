@@ -24,9 +24,10 @@ export function askKind(object: Pick<StmObject, 'ask' | 'reconstructionReview'>)
  * send it again?". A project with a model, or one waiting on a file, a choice, sizes or a reconstruction review, takes
  * none: its scan is no longer the question.
  */
-export function takesScan(object: Pick<StmObject, 'state' | 'current' | 'ask' | 'reconstructionReview'>): boolean {
+export function takesScan(object: Pick<StmObject, 'state' | 'current' | 'scan' | 'ask' | 'reconstructionReview'>): boolean {
   if (object.state === 'new') return true;
-  return object.state === 'needs-closeup' && !object.current && !object.reconstructionReview
+  // One with a scan already (a pass ran from it and asked for a close-up) is not waiting for a walk-around (review of #831, F1).
+  return object.state === 'needs-closeup' && !object.current && !object.scan && !object.reconstructionReview
     && object.ask?.status === 'open' && askKind(object) === 'closeup';
 }
 

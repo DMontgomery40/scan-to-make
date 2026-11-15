@@ -217,7 +217,6 @@ test('a scan stranded on the phone joins its project that asks for photos and ha
   assert.deepEqual(declared.captureDeclared.images, SIXTY_EIGHT);
   assert.equal(declared.state, 'needs-closeup', 'still asking until the start');
   // Arriving: nothing designs on part of it, and Best Guess waits for the scan.
-  await assert.rejects(service.answerCloseup(asking.id, {bestGuess: true}), /Your scan is still on the phone that took it \(68 photos\)/);
   await service.addCapturePhoto(asking.id, '0001.heic', Buffer.from('0001.heic'));
   await assert.rejects(service.answerCloseup(asking.id, {bestGuess: true}), /Resume sending it from the phone that recorded it/);
   assert.equal((await service.get(asking.id)).ask.status, 'open', 'the question is still open for the scan');
@@ -294,6 +293,47 @@ test('a project with a model, or one waiting on anything but photos, still refus
   await store.update(answered.id, o => ({...o, state: 'needs-closeup',
     ask: {id: '5105ec68-0678-4676-a896-615f17a7ce16', question: 'Photo?', status: 'answered', askedAtMs: 1, kind: 'closeup', answers: ['camera', 'photos', 'best-guess', 'text']}}));
   await assert.rejects(service.declareCapture(answered.id, {...objectCaptureManifest(APPLE), run: RUN_A}), refused);
+});
+
+test('an asking project that already has a scan takes no walk-around, and its question still answers (review of #831, F1)', async () => {
+  // A pass ran from a scan, asked for a close-up and made no model. A declare there would lock every route but itself.
+  const {service, store} = await setup();
+  const object = await service.create();
+  await store.update(object.id, o => ({...o, state: 'needs-closeup', scan: 'scan.usdz', instructions: 'Copy this',
+    ask: {id: '5105ec68-0678-4676-a896-615f17a7ce16', question: 'The underside?', status: 'open', askedAtMs: 1, kind: 'closeup', answers: ['camera', 'photos', 'best-guess', 'text']}}));
+  await store.addFile(object.id, 'scan', 'scan.usdz', Buffer.from('usdz'));
+  await assert.rejects(service.declareCapture(object.id, {...objectCaptureManifest(APPLE), run: RUN_A}), /can only be added before the touch-up starts/);
+  assert.equal((await service.get(object.id)).captureDeclared, undefined);
+  const answered = await service.answerCloseup(object.id, {bestGuess: true});
+  assert.equal(answered.state, 'touching-up', 'Best Guess still answers it');
+  await service.settled(object.id);
+});
+
+test('a scan declared on an asking project holds its question only while it is arriving (review of #831, F2)', async () => {
+  // A lease, not a lock: an answer clears a declaration that never sent a frame, waits ten minutes after the last
+  // frame, then clears that too, so a project is never stuck waiting for a scan no phone will send.
+  let now = 1_000_000;
+  const {service} = await setup({outcomes: [ASKS_FOR_PHOTOS, ASKS_FOR_PHOTOS, ASKS_FOR_PHOTOS], deps: {now: () => now}});
+  const asking = await stranded(service);
+  await service.declareCapture(asking.id, {...objectCaptureManifest(SIXTY_EIGHT), run: RUN_A});
+  const accepted = await service.answerCloseup(asking.id, {bestGuess: true});
+  assert.equal(accepted.captureDeclared, undefined, 'no frames came: the declaration goes and the answer runs');
+  assert.equal(accepted.state, 'touching-up');
+  const again = await service.settled(asking.id);
+  assert.equal(again.state, 'needs-closeup');
+
+  await service.declareCapture(asking.id, {...objectCaptureManifest(SIXTY_EIGHT), run: RUN_A});
+  now += 60_000;
+  await service.addCapturePhoto(asking.id, '0001.heic', Buffer.from('0001.heic'));
+  now += 9 * 60_000;
+  await assert.rejects(service.answerCloseup(asking.id, {bestGuess: true}), /Resume sending it from the phone that recorded it/);
+  assert.equal((await service.get(asking.id)).ask.status, 'open', 'arriving: the question waits for it');
+  now += 60_000 + 1;
+  const late = await service.answerCloseup(asking.id, {text: 'Just make it 10 cm wide'});
+  assert.equal(late.captureDeclared, undefined, 'ten minutes with no frame: the scan stopped coming');
+  assert.deepEqual(late.capture ?? [], []);
+  assert.equal(late.state, 'touching-up');
+  await service.settled(asking.id);
 });
 
 test('a new project takes a scan exactly as before (#825)', async () => {

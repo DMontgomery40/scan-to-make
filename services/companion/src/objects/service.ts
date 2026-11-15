@@ -187,6 +187,8 @@ const SCAN_STILL_ARRIVING = 'This scan is still arriving from the phone that rec
 export function scanStillOnPhone(photos: number): string {
   return `Your scan is still on the phone that took it (${photos} photo${photos === 1 ? '' : 's'}). Send it from that phone; its project there has Send to your Mac.`;
 }
+/** How long an answer waits on a declared scan after its last frame or depth file arrived (review of #831, F2). */
+const CAPTURE_LEASE_MS = 10 * 60_000;
 const CAPTURE_PENDING ='The capture is still missing camera or depth files, or its completed file list. Resume sending it from the phone that recorded it.';
 /** The design's Linux gate: an iPhone's Object Capture scan is rebuilt only by a Mac (PhotogrammetrySession). */
 export const SCANS_NEED_A_MAC = 'Scans from iPhone are rebuilt on a Mac. Pair this iPhone with a Mac to use Scan it.';
@@ -313,6 +315,8 @@ export interface ObjectServiceDeps {
   /** A short title for a request ("Mic mount"), best effort; the worker names it otherwise. */
   titleFor?: (request: string) => Promise<string | undefined>;
   reportsCompletion?: (note: string) => Promise<'works' | 'changes' | 'unknown'>;
+  /** The clock a declared scan's lease is read by (tests set it). */
+  now?: () => number;
 }
 
 /** What the print sheet sends with Print (PRD §8.5). */
@@ -1541,7 +1545,7 @@ export class ObjectService {
       // A project asking for photos with no model yet takes one too (#825): it started from its words while the scan was on the phone.
       if (!takesScan(object)) throw new InvalidStateError('The scan can only be added before the touch-up starts.');
       const run = captureRun(value);
-      return this.#changed(await this.#deps.store.update(id, o => ({...o, captureDeclared: {source: 'object-capture' as const, images: manifest.images, ...(run ? {run} : {})}})));
+      return this.#changed(await this.#deps.store.update(id, o => ({...o, captureDeclared: {source: 'object-capture' as const, images: manifest.images, ...(run ? {run} : {}), atMs: this.#now()}})));
     });
   }
 
@@ -1564,12 +1568,23 @@ export class ObjectService {
       if (declared.run ? declared.run !== named.run : JSON.stringify(declared.images) !== JSON.stringify(named.images)) {
         throw new InvalidStateError(NOT_THIS_SCAN);
       }
-      await rm(join(this.dir(id), 'capture'), {recursive: true, force: true});
-      await clearReconstructionInputs(this.dir(id));
-      return this.#changed(await this.#deps.store.update(id, o => ({...o, captureDeclared: undefined, capture: undefined,
-        captureDepth: undefined, captureCamera: undefined, captureCompletion: undefined, reconstructionReview: undefined})));
+      return this.#changed(await this.#dropCapture(id));
     });
   }
+
+  /**
+   * A declared walk-around and everything of it that came: its list, frames, depth, camera and completion. A pass would
+   * otherwise refuse while it is declared (`#requireCaptureCompletion`) or rebuild from whatever frames are left. Used by
+   * a forget, and by an answer once the scan has stopped coming (review of #831, F2).
+   */
+  async #dropCapture(id: string): Promise<StmObject> {
+    await rm(join(this.dir(id), 'capture'), {recursive: true, force: true});
+    await clearReconstructionInputs(this.dir(id));
+    return this.#deps.store.update(id, o => ({...o, captureDeclared: undefined, capture: undefined,
+      captureDepth: undefined, captureCamera: undefined, captureCompletion: undefined, reconstructionReview: undefined}));
+  }
+
+  #now(): number { return this.#deps.now?.() ?? Date.now(); }
 
   /** One photo of a handheld scan (the object turned in front of a still phone). */
   addCapturePhoto(id: string, name: string, bytes: Buffer): Promise<StmObject> {
@@ -1586,7 +1601,8 @@ export class ObjectService {
       await this.#deps.store.addFile(id, 'capture', name, bytes);
       return this.#changed(await this.#deps.store.update(id, o => {
         const capture = o.capture ?? [];
-        return {...o, capture: capture.includes(name) ? capture : [...capture, name], captureCompletion: undefined};
+        return {...o, capture: capture.includes(name) ? capture : [...capture, name], captureCompletion: undefined,
+          ...(o.captureDeclared ? {captureDeclared: {...o.captureDeclared, atMs: this.#now()}} : {})};
       }));
     });
   }
@@ -1622,6 +1638,7 @@ export class ObjectService {
       return this.#changed(await this.#deps.store.update(id, o => ({...o,
         captureDepth: o.captureDepth?.includes(name) ? o.captureDepth : [...(o.captureDepth ?? []), name],
         captureCompletion: undefined,
+        ...(o.captureDeclared ? {captureDeclared: {...o.captureDeclared, atMs: this.#now()}} : {}),
       })));
     });
   }
@@ -1884,13 +1901,16 @@ export class ObjectService {
   }
 
   async #reservedAnswerCloseup(id: string, answer: AskAnswer): Promise<StmObject> {
-    const object = await this.get(id);
+    let object = await this.get(id);
     if (object.state !== 'needs-closeup') throw new InvalidStateError('No close-up was asked for.');
     // A reconstruction review is not a close-up: Best Guess, words or photos must not approve it.
     if (object.reconstructionReview) throw new InvalidStateError(RECONSTRUCTION_REVIEW_UPDATE);
-    // A scan asked for is arriving (#825): no answer, Best Guess included, takes the question from it before it's here.
+    // A scan the question asked for is declared (#825). A lease, not a lock (review of #831, F2): while its frames are
+    // arriving (one in the last ten minutes) the answer waits for it; one that never sent a frame, or stopped sending,
+    // is dropped and the answer goes ahead, so no project waits for a scan nobody will send.
     if (object.captureDeclared) {
-      throw new InvalidStateError((object.capture ?? []).length === 0 ? scanStillOnPhone(object.captureDeclared.images.length) : CAPTURE_PENDING);
+      if ((object.capture ?? []).length > 0 && this.#now() - (object.captureDeclared.atMs ?? 0) < CAPTURE_LEASE_MS) throw new InvalidStateError(CAPTURE_PENDING);
+      object = await this.#dropCapture(id);
     }
     // Carry on with what the asking pass was doing: a correction keeps its note and its model.
     // Only this answer's explicit attachments belong to it. Other pending photos may already
