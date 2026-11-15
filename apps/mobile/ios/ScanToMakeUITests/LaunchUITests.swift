@@ -2454,7 +2454,8 @@ final class LayoutParityUITests: XCTestCase {
         // Board X100: the line comes from the actual reason. The canned Mac has no file for 01 (404): it would not send it,
         // and with the picture missing too, the stage says both in one line with one Try Again. 02 is too large: said so.
         for (id, line) in [("6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01", "Your Mac didn’t send"),
-                           ("6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a02", "your scan’s 3D model is too large a file to show on a phone.")] {
+                           // The line names the device it's on (#831's review): "an iPad" on regular width, "a phone" here.
+                           ("6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a02", "your scan’s 3D model is too large a file to show on \(regular ? "an iPad" : "a phone").")] {
             let page = XCUIApplication()
             page.launchArguments = ["-CounterpartFixtures", NSTemporaryDirectory() + "no-assets", "-CounterpartFixtureSet", "scan-stage",
                                     "-CounterpartOpen", "counterpart://project/\(id)"]
