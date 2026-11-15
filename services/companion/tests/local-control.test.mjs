@@ -4,7 +4,7 @@ import {mkdtemp,mkdir,rm,stat,writeFile,readFile,symlink,chmod} from 'node:fs/pr
 import {join} from 'node:path';
 import {connect,createServer,Socket} from 'node:net';
 import {randomUUID} from 'node:crypto';
-import {fileURLToPath} from 'node:url';
+import {fileURLToPath,pathToFileURL} from 'node:url';
 import {spawn} from 'node:child_process';
 import {RemoteAuthStore} from '../dist/remote-auth.js';
 import {startLocalControl} from '../dist/local-control.js';
@@ -335,11 +335,25 @@ test('#850: status.get says which app build launched the companion, from its env
   assert.equal('appBuild' in untold,false,'a companion not launched by the app says nothing');
 });
 
-test('#850: the companion the app launches reports that build (server-cli reads it from its environment)', async t => {
-  const {call,stop}=await freshCompanion(t,{env:{SCAN_TO_MAKE_APP_BUILD:'202611151139',SCAN_TO_MAKE_APP_PAYLOAD:'/Applications/Counterpart.app/Contents/Resources/Payload'}});
+test('#850: the companion the app launches reports that build, and nothing it starts inherits it', async t => {
+  // Review F5: a probe loaded into server-cli itself (NODE_OPTIONS --import) records, once the companion is up, what its
+  // own environment holds and what a child started the way the companion starts npm, the model worker and its tools
+  // ({...process.env} at call time) inherits. Printer MCPs get the MCP SDK's minimal environment, so they can't either.
+  const {tmpdir}=await import('node:os');
+  const dir=await mkdtemp(join(tmpdir(),'stm-850-env-'));t.after(()=>rm(dir,{recursive:true,force:true}));
+  const probe=join(dir,'probe.mjs'),out=join(dir,'env.json');
+  await writeFile(probe,`import {writeFileSync} from 'node:fs';import {execFileSync} from 'node:child_process';
+setTimeout(()=>{const own=Object.keys(process.env).filter(k=>k.startsWith('SCAN_TO_MAKE_APP_'));
+const child=JSON.parse(execFileSync(process.execPath,['-e','console.log(JSON.stringify(Object.keys(process.env).filter(k=>k.startsWith("SCAN_TO_MAKE_APP_"))))'],{env:{...process.env,NODE_OPTIONS:''}}).toString());
+writeFileSync(${JSON.stringify(out)},JSON.stringify({own,child}));},1000).unref();
+`);
+  const {call,stop}=await freshCompanion(t,{env:{SCAN_TO_MAKE_APP_BUILD:'202611151139',SCAN_TO_MAKE_APP_PAYLOAD:'/Applications/Counterpart.app/Contents/Resources/Payload',
+    NODE_OPTIONS:`--import=${pathToFileURL(probe).href}`}});
   const status=(await call('status.get')).result;
   assert.equal(status.appBuild,'202611151139');
   assert.equal(status.appPayload,'/Applications/Counterpart.app/Contents/Resources/Payload');
+  let seen;for(let i=0;i<100&&!seen;i++){seen=await readFile(out,'utf8').then(JSON.parse,()=>undefined);if(!seen)await new Promise(r=>setTimeout(r,50));}
+  assert.deepEqual(seen,{own:[],child:[]},'read once and taken out of the environment before anything is spawned');
   await stop();
 });
 
