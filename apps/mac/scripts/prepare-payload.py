@@ -15,8 +15,14 @@ MANIFEST = json.loads((MAC / 'distribution.json').read_text())
 # #826: the app's own npm, from the same Node.js release as its node, so Settings → Printers can install printer
 # software on a Mac without Node.js. Run by the node beside it: no PATH, shebang or Node.js install needed.
 NPM_LAUNCHER = '''#!/bin/sh
-# npm from the same Node.js release as the node beside it, run by that node (Scan to Make, #826).
-case $0 in */*) bin=${0%/*} ;; *) bin=. ;; esac
+# npm from the same Node.js release as the node beside it, run by that node (Scan to Make, #826). Its own real path
+# first, so a symlink to it elsewhere still finds that node.
+self=$0
+while [ -L "$self" ]; do
+  link=$(/usr/bin/readlink "$self")
+  case $link in /*) self=$link ;; *) case $self in */*) self=${self%/*}/$link ;; *) self=$link ;; esac ;; esac
+done
+case $self in */*) bin=${self%/*} ;; *) bin=. ;; esac
 exec "$bin/node" "$bin/../lib/node_modules/npm/bin/npm-cli.js" "$@"
 '''
 
