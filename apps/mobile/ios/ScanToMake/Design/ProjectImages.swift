@@ -157,6 +157,8 @@ struct StagePicture: View {
     /// The 3D model under this stage that couldn't be had either (`ProjectGalleryView`): when this picture fails too, the
     /// stage's one line says both and its one Try Again tries both (board X100: never two Try Again buttons).
     var modelMissing: (line: String, retry: (() -> Void)?)? = nil
+    /// The model drawn over this picture failed: a picture still coming waits quietly, without its spinner.
+    var modelFailed = false
     /// Whether this picture's fetch failed, for the gallery's line under the stage.
     var failedChanged: (Bool) -> Void = { _ in }
     /// The height the stage's own controls take at its bottom (AR, the size chip). The waiting and not-available words lay
@@ -174,16 +176,18 @@ struct StagePicture: View {
 
     /// `decoding`: the phone has this picture and is decoding it now (a few milliseconds): the bare stage, never a
     /// spinner or "coming from your Mac" for something it already has (#720).
-    enum Shows { case shown(UIImage), loading(UIImage?), decoding, waiting, notAvailable(String, retry: Bool) }
+    /// `quiet`: the bare stage, saying nothing itself: the picture is still coming, but the model over it failed, and the
+    /// stage's Try 3D Again and the line under it say so once. Never a spinner beside a failure (review of #831).
+    enum Shows { case shown(UIImage), loading(UIImage?), decoding, waiting, quiet, notAvailable(String, retry: Bool) }
     private var shows: Shows {
         guard case .picture(let path) = still else {
             return Self.decide(still: still, key: key, load: load, memory: nil, kept: nil, earlier: nil, libraryHas: false,
-                               missing: modelMissing.map { ($0.line, $0.retry != nil) }, unavailableLine: unavailableLine)
+                               missing: modelMissing.map { ($0.line, $0.retry != nil) }, unavailableLine: unavailableLine, modelFailed: modelFailed)
         }
         return Self.decide(still: still, key: key, load: load, memory: ImageMemory.shared.image(key), kept: kept,
                            earlier: ImageMemory.shared.anySize(project, path),
                            libraryHas: app.companion.library.latest(project: project.id, name: path) != nil,
-                           missing: modelMissing.map { ($0.line, $0.retry != nil) }, unavailableLine: unavailableLine)
+                           missing: modelMissing.map { ($0.line, $0.retry != nil) }, unavailableLine: unavailableLine, modelFailed: modelFailed)
     }
 
     /// What the stage shows for `key`, from what this stage and the phone have (pure, so a gallery switch is unit-tested).
@@ -192,9 +196,9 @@ struct StagePicture: View {
     /// picture). `earlier` is the same path at another size or version (`ImageMemory.anySize`).
     static func decide(still: Project.Still, key: String, load: PictureLoad<UIImage>, memory: UIImage?,
                        kept: (key: String, image: UIImage)?, earlier: UIImage?, libraryHas: Bool,
-                       missing: (line: String, retry: Bool)?, unavailableLine: String) -> Shows {
+                       missing: (line: String, retry: Bool)?, unavailableLine: String, modelFailed: Bool = false) -> Shows {
         switch still {
-        case .waiting: return .waiting
+        case .waiting: return modelFailed ? .quiet : .waiting
         // No picture can be had; with the model missing too the gallery's line says both, and Try Again tries the model.
         case .notAvailable: return .notAvailable(missing?.line ?? unavailableLine, retry: missing?.retry == true)
         case .picture:
@@ -221,6 +225,7 @@ struct StagePicture: View {
         let label: String = switch shows {
         case .shown, .loading(_?), .decoding: "\(label), as your Mac drew it"
         case .loading(nil), .waiting: coming
+        case .quiet: label
         case .notAvailable(let line, _): "\(label). \(line)"
         }
         ZStack {
@@ -237,7 +242,7 @@ struct StagePicture: View {
                         if case .loading = shows { ProgressView().tint(.white.opacity(0.6)).padding(14) }
                     }
                     .accessibilityHidden(true).allowsHitTesting(false)
-            case .decoding:
+            case .decoding, .quiet:
                 EmptyView()
             case .loading(nil), .waiting:
                 // Above the chips; side by side when the stage is too short to stack them.
@@ -316,6 +321,7 @@ private extension StagePicture.Shows {
         switch self {
         case .shown: "shown"
         case .loading, .decoding, .waiting: "loading"
+        case .quiet: "quiet"
         case .notAvailable: "not available"
         }
     }

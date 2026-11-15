@@ -133,11 +133,11 @@ struct ProjectGalleryView: View {
         let neverDrawn = still == .notAvailable
         let missing: (line: String, retry: (() -> Void)?)? = problem.map { problem in
             let retry: (() -> Void)? = problem.reason.retryable ? problem.path.map { path in { store.models.retry(project, path) } } : nil
-            return (problem.reason.line(entry.kind, pictureToo: true, neverDrawn: neverDrawn), retry)
+            return (problem.reason.line(entry.kind, pictureToo: true, neverDrawn: neverDrawn, device: Self.device), retry)
         }
         return StagePicture(project: project, still: still, label: entry.label,
                             unavailableLine: entry.kind == .plate ? "No picture of this plate came with the file." : "Your Mac couldn’t draw a picture of this.",
-                            modelMissing: missing,
+                            modelMissing: missing, modelFailed: problem != nil,
                             failedChanged: { failed in if failed { pictureFailed.insert(entry.id) } else { pictureFailed.remove(entry.id) } },
                             controlsInset: Self.controlsHeight)
     }
@@ -172,7 +172,7 @@ struct ProjectGalleryView: View {
         if let problem = modelProblem(entry), !pictureFailed.contains(entry.id), project.still(for: entry) != .notAvailable {
             if problem.reason.retryable {
                 HStack(spacing: 8) {
-                    Text(problem.reason.line(entry.kind)).font(.footnote).foregroundStyle(.secondary)
+                    Text(problem.reason.line(entry.kind, device: Self.device)).font(.footnote).foregroundStyle(.secondary)
                     if let path = problem.path {
                         Button("Try Again") { store.models.retry(project, path) }.font(.footnote.weight(.semibold))
                             .accessibilityIdentifier("gallery-model-retry")
@@ -181,7 +181,7 @@ struct ProjectGalleryView: View {
                 .padding(.horizontal, 16)
                 .accessibilityElement(children: .contain).accessibilityIdentifier("gallery-model-unavailable")
             } else {
-                Text(problem.reason.line(entry.kind)).font(.footnote).foregroundStyle(.secondary)
+                Text(problem.reason.line(entry.kind, device: Self.device)).font(.footnote).foregroundStyle(.secondary)
                     .multilineTextAlignment(.center).padding(.horizontal, 16).accessibilityIdentifier("gallery-model-unavailable")
             }
         }
@@ -214,10 +214,20 @@ struct ProjectGalleryView: View {
             StagePicture(project: project, still: .picture(photo), label: "Your photo")
         } else {
             // Nothing to show yet: coming while the Mac works, else said plainly.
-            StagePicture(project: project, still: words.busy ? .waiting : .notAvailable, label: project.title ?? "Your project",
-                         unavailableLine: "Nothing to show yet.")
+            let empty = Self.emptyStage(project, busy: words.busy)
+            StagePicture(project: project, still: empty.still, label: project.title ?? "Your project", unavailableLine: empty.line)
         }
     }
+
+    /// The stage of a project with nothing to draw (no scan, no model, no photo): while the Mac works, that it's coming;
+    /// otherwise one calm line that names no failure and offers no Try Again (review of #831). Kept as a stage rather
+    /// than dropped: the page's toolbar floats over it on every layout, and it is where the scan appears once it comes.
+    static func emptyStage(_ project: Project, busy: Bool) -> (still: Project.Still, line: String) {
+        (busy ? .waiting : .notAvailable, "Nothing to show yet.")
+    }
+
+    /// The device the stage's lines name ("this iPad", "this phone").
+    static var device: String { UIDevice.current.userInterfaceIdiom == .pad ? "iPad" : "phone" }
 
     /// The model drew (`ModelStage` measured it): its size for the chip, and any earlier "couldn't be shown" line goes
     /// (review S5 on #539). ModelStage measures before it draws its poster, so a poster that then fails still says so.

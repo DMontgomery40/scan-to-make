@@ -1700,6 +1700,44 @@ extension AppTests {
     }
 }
 
+// MARK: The stage over a project with nothing to show (review of #831)
+
+extension AppTests {
+    /// Lead, review of #831: David's DAD project has no scan and no model (its scan stopped on the phone). Nothing loads,
+    /// so nothing loads or fails on the stage: no scan entry, and one calm line that names no failure, with no Try Again.
+    func testAProjectWithNoScanAndNoModelShowsNoLoadingOrFailedStage() {
+        var dad = Project(id: "b8158144-d1c2-41e7-a356-9948167964ea", createdAtMs: 1, updatedAtMs: 2, instructions: "A replica of this DAD desk thing",
+                          state: .needsCloseup)
+        dad.ask = Project.Ask(id: "5f868ee2-bd8c-49ff-97e4-8e3e7644a9cc", question: "Can you rescan it?", answers: ["camera", "photos"], kind: "closeup")
+        XCTAssertEqual(ProjectGallery(project: dad).entries, [], "no scan or model entry: nothing for the stage to load")
+        let empty = ProjectGalleryView.emptyStage(dad, busy: false)
+        XCTAssertEqual(empty.still, .notAvailable)
+        guard case .notAvailable(let line, let retry) = StagePicture.decide(still: empty.still, key: "k", load: PictureLoad<UIImage>(), memory: nil,
+                                                                             kept: nil, earlier: nil, libraryHas: false, missing: nil,
+                                                                             unavailableLine: empty.line) else { return XCTFail("one calm line") }
+        XCTAssertEqual(line, "Nothing to show yet.")
+        XCTAssertFalse(retry, "nothing failed, so nothing to try again")
+        XCTAssertEqual(ProjectGalleryView.emptyStage(dad, busy: true).still, .waiting, "while the Mac works, it is coming")
+    }
+
+    /// Never a spinner beside a failure: a model that couldn't be drawn over a picture still coming leaves the stage quiet,
+    /// with the failure said once under it (the line and Try 3D Again). A real failure still shows (#805).
+    func testAStageNeverSpinsBesideAFailure() {
+        func shows(_ still: Project.Still, failed: Bool, missing: (line: String, retry: Bool)? = nil) -> StagePicture.Shows {
+            StagePicture.decide(still: still, key: "k", load: PictureLoad<UIImage>(), memory: nil, kept: nil, earlier: nil, libraryHas: false,
+                                missing: missing, unavailableLine: "Your Mac couldn’t draw a picture of this.", modelFailed: failed)
+        }
+        guard case .quiet = shows(.waiting, failed: true) else { return XCTFail("no spinner over a failed model") }
+        guard case .waiting = shows(.waiting, failed: false) else { return XCTFail("still coming, nothing failed: the spinner") }
+        let didntCome = ModelUnavailable.didntCome.line(.scan, pictureToo: true)
+        guard case .notAvailable(let line, let retry) = shows(.notAvailable, failed: true, missing: (didntCome, true)) else {
+            return XCTFail("a real failure still says so")
+        }
+        XCTAssertEqual(line, didntCome)
+        XCTAssertTrue(retry)
+    }
+}
+
 /// A Mac as the phone's declares and forgets see it (review of #819): the run whose list it holds, what it heard, and
 /// whether it answers. `dropReply`: a declare lands but its reply is lost, so the phone sees the Mac as unreachable.
 @MainActor final class FakeMac {

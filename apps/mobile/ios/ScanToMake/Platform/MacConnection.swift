@@ -255,7 +255,8 @@ typealias MacError = CompanionError
         #if DEBUG
         // The made-up sets' phone holds a scan (scanB.usdz). Not the photo-only set, whose phone sent photos and
         // nothing else, nor the real projects, whose files are the Mac's.
-        if let folder = Fixtures.folder, !["photo-only", "real"].contains(Fixtures.set) { return folder.appending(path: "scanB.usdz") }
+        // Nor the DAD project's (`ask-stranded`): its scan stopped, so this phone has photos and no model (#825).
+        if let folder = Fixtures.folder, !["photo-only", "real", "ask-stranded"].contains(Fixtures.set) { return folder.appending(path: "scanB.usdz") }
         #endif
         let drafts = (try? NativeCaptureCoordinator.shared.drafts()) ?? []
         guard let run = drafts.first(where: {
