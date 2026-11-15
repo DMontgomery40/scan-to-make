@@ -300,7 +300,7 @@ struct ProjectGalleryView: View {
             if let scanURL, scanURL.pathExtension.lowercased() == "usdz" { return arFailed ? .failedScan(scanURL) : .show(scanURL) }
             if case .file = scanModel, store.away { return .needsMac }
             if case .file(let file) = scanModel, (file as NSString).pathExtension.lowercased() == "usdz" { return waiting(for: file) }
-            return localScan == nil ? waiting(for: path) : nil
+            return nil
         case .together, .plate:
             return nil
         }
