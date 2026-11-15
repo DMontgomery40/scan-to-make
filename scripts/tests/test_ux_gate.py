@@ -17,6 +17,9 @@ import ux_blank  # noqa: E402
 import ux_gate  # noqa: E402
 
 SCREENS = ['project-aaaa-result', 'project-bbbb-result']
+COMMIT = '9f62b69f4ac31489dac3d19f76e73a5e275c8597'  # the commit being gated
+SOURCE = '9f62b69f (train/2026-11-14b)'  # how ux_screens.py records a frame built from it
+EARLIER = '840a4540 (train/2026-11-14)'  # an earlier build's frames in the same folder
 
 
 class FakeHolds:
@@ -36,13 +39,13 @@ def asks(out: Path, device: str) -> None:
     (out / 'asked.json').write_text(json.dumps({'condition': 'slow', 'screens': [{'device': device, 'name': n} for n in SCREENS]}))
 
 
-def frames(out: Path, device: str, names) -> None:
+def frames(out: Path, device: str, names, source: str = SOURCE) -> None:
     (out / device).mkdir(exist_ok=True)
     with open(out / 'results.jsonl', 'a') as file:
         for name in names:
             image = out / device / f'{name}-p1.png'
             image.write_bytes(b'png')
-            file.write(json.dumps({'device': device, 'name': name, 'image': str(image), 'page': 1}) + '\n')
+            file.write(json.dumps({'device': device, 'name': name, 'image': str(image), 'page': 1, 'source': source}) + '\n')
 
 
 def done(code: int, text: str):
@@ -95,6 +98,7 @@ class GateTests(unittest.TestCase):
         fake = FakeHolds(*holds)
         argv = ['ux_gate.py', str(folder), '--devices', 'iphone', '--conditions', 'slow', '--holds', '3']
         with mock.patch.object(ux_gate.subprocess, 'run', fake), mock.patch.object(sys, 'argv', argv), \
+                mock.patch.object(ux_gate, 'gated_commit', lambda: COMMIT), \
                 mock.patch.object(ux_blank, 'check_folder', lambda out: [(out / 'iphone' / f'{SCREENS[0]}-p1.png', ['empty stage'])] if flagged else []), \
                 mock.patch('sys.stdout'), mock.patch('sys.stderr'):
             code = ux_gate.main()
@@ -147,7 +151,42 @@ class GateTests(unittest.TestCase):
             return result
         code, report, _ = self.gate(lost, lost, lost)
         self.assertEqual(code, 2)
-        self.assertIn(f'1 of 2 screens captured; without a frame: iphone/{SCREENS[1]}', report)
+        self.assertIn(f'1 of 2 screens captured from this commit; without a frame: iphone/{SCREENS[1]}', report)
+
+    def test_a_hold_asked_for_no_screens_fails(self):
+        def empty_copy(out, device):  # a copy with no projects: nothing asked, nothing captured, exit 0
+            (out / 'asked.json').write_text(json.dumps({'condition': 'slow', 'screens': []}))
+            return done(0, '0 images so far; 0 screens left\n')
+        code, report, fake = self.gate(empty_copy, empty_copy, empty_copy)
+        self.assertEqual(code, 2)
+        self.assertIn('FAILED', report)
+        self.assertIn('asked for 0 screens', report)
+        self.assertEqual(len(fake.calls), 1)
+
+    def test_an_earlier_builds_frames_in_the_same_folder_do_not_count(self):
+        def earlier_build_only(out, device):  # ux_screens said every screen is captured, from the last train's build
+            asks(out, device)
+            if not (out / 'results.jsonl').exists():
+                frames(out, device, SCREENS, source=EARLIER)
+            return done(0, 'every screen is captured; --redo captures them again\n')
+        code, report, _ = self.gate(earlier_build_only, earlier_build_only, earlier_build_only)
+        self.assertEqual(code, 2)
+        self.assertIn('0 of 2 screens captured from this commit', report)
+
+    def test_frames_recaptured_from_this_commit_count(self):
+        def recaptured(out, device):
+            asks(out, device)
+            frames(out, device, SCREENS, source=EARLIER)
+            frames(out, device, SCREENS)  # this build's rows, written after the earlier ones
+            return done(0, '2 images so far; 0 screens left\n')
+        self.assertEqual(self.gate(recaptured)[0], 0)
+
+    def test_a_recorded_source_matches_only_its_own_commit(self):
+        self.assertTrue(ux_gate.built_from({'source': SOURCE}, COMMIT))
+        self.assertTrue(ux_gate.built_from({'source': '9f62b69f (x) with uncommitted changes'}, COMMIT))
+        self.assertFalse(ux_gate.built_from({'source': EARLIER}, COMMIT))
+        self.assertFalse(ux_gate.built_from({}, COMMIT))
+        self.assertFalse(ux_gate.built_from({'source': '9f6 (x)'}, COMMIT))  # too short to name a commit
 
 
 if __name__ == '__main__':

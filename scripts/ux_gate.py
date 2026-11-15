@@ -37,21 +37,36 @@ def hold_error(code: int, text: str) -> str:
     return f'exit {code}: ' + (lines[-1][:300] if lines else 'no output')
 
 
-def shortfall(out: Path) -> tuple[int, int | None, list[str]]:
+def gated_commit() -> str:
+    """The commit this gate checks: the checkout ux_screens.py builds the app and companion from."""
+    return subprocess.run(['git', '-C', str(REPO), 'rev-parse', 'HEAD'], capture_output=True, text=True, check=True).stdout.strip()
+
+
+def built_from(row: dict, commit: str) -> bool:
+    """A frame counts only when it was built from the gated commit. ux_screens.py records each row's source as
+    "<short sha> (<branch>)[ with uncommitted changes]": a rerun into the same folder must not pass on an earlier
+    build's frames."""
+    recorded = (row.get('source') or '').split(' ')[0]
+    return len(recorded) >= 7 and commit.startswith(recorded)
+
+
+def shortfall(out: Path, commit: str) -> tuple[int, int | None, list[str]]:
     """(screens with a frame, screens asked for or None when no hold got as far as asking, the screens without one),
-    from what ux_screens.py wrote in <out>: asked.json, and results.jsonl rows whose image is on disk."""
+    from what ux_screens.py wrote in <out>: asked.json, and results.jsonl rows built from `commit` whose image is on
+    disk."""
     asked_path = out / 'asked.json'
     if not asked_path.exists():
         return 0, None, []
     asked = [(s['device'], s['name']) for s in json.loads(asked_path.read_text())['screens']]
     rows = [json.loads(line) for line in (out / 'results.jsonl').read_text().splitlines() if line.strip()] \
         if (out / 'results.jsonl').exists() else []
-    framed = {(r['device'], r['name']) for r in rows if Path(r['image']).exists()}
+    framed = {(r['device'], r['name']) for r in rows if Path(r['image']).exists() and built_from(r, commit)}
     missing = [f'{d}/{n}' for d, n in asked if (d, n) not in framed]
     return len(asked) - len(missing), len(asked), missing
 
 
-def run_until_done(out: Path, work: Path, device: str, condition: str, max_minutes: float, holds: int) -> list[str]:
+def run_until_done(out: Path, work: Path, device: str, condition: str, max_minutes: float, holds: int,
+                   commit: str) -> list[str]:
     """ux_screens.py holds for one device and condition until every screen it is asked for has a frame. Returns what
     went wrong: each failed hold, and the screens left without a frame; empty only when every screen has one."""
     errors: list[str] = []
@@ -64,14 +79,16 @@ def run_until_done(out: Path, work: Path, device: str, condition: str, max_minut
         if why := hold_error(run.returncode, text):
             errors.append(f'hold {hold} failed ({out.name}-hold{hold}.log): {why}')
             break  # a hold that failed (a dead device session, a build that broke) fails the same way again
-        framed, asked, _ = shortfall(out)
-        if asked is not None and framed == asked:
+        framed, asked, _ = shortfall(out, commit)
+        if asked is not None and framed == asked:  # asked for none: no hold will do better, and it fails below
             break
-    framed, asked, missing = shortfall(out)
+    framed, asked, missing = shortfall(out, commit)
     if asked is None:
         errors.append('no frames: no hold got as far as choosing the screens')
+    elif asked == 0:
+        errors.append('asked for 0 screens (no project in the copy?), so nothing was checked')
     elif framed < asked:
-        errors.append(f'{framed} of {asked} screens captured; without a frame: {", ".join(missing[:10])}'
+        errors.append(f'{framed} of {asked} screens captured from this commit; without a frame: {", ".join(missing[:10])}'
                       + (f' and {len(missing) - 10} more' if len(missing) > 10 else ''))
     for error in errors:
         print(f'{device} {condition}: {error}', file=sys.stderr)
@@ -91,11 +108,12 @@ def main() -> int:
     sys.path.insert(0, str(REPO / 'scripts'))
     import ux_blank
     flagged, unfinished = [], []
+    commit = gated_commit()
     for device in args.devices.split(','):
         for condition in args.conditions.split(','):
             out = folder / f'{device}-{condition}'
             unfinished += [(device, condition, why) for why in
-                           run_until_done(out, folder / 'work', device, condition, args.max_minutes, args.holds)]
+                           run_until_done(out, folder / 'work', device, condition, args.max_minutes, args.holds, commit)]
             if out.exists():
                 flagged += [(device, condition, png, problems) for png, problems in ux_blank.check_folder(out)]
     verdict = ('FAILED' if flagged or unfinished else 'Passed') + (
