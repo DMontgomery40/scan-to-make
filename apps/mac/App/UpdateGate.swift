@@ -177,6 +177,9 @@ enum UpdateGate {
     /// About two minutes, under load, for a restarted companion to answer as this build (review F3).
     static let pauseSeconds = 2.0
     static let attempts = 60
+    /// Asks (`pause` apart, about 30 s) of a companion that answers status.get with a refusal before it is taken as a
+    /// build from before #850.
+    static let refusedAttempts = 15
     /// Asks after `kickstart -k` before it is taken not to have restarted it and the agent is sent SIGTERM instead.
     static let kickstartAttempts = 10
     enum Restart: Equatable {
@@ -217,15 +220,29 @@ enum UpdateGate {
     func run() async -> Outcome {
         let note = effects.note
         note("started: app build \(appBuild), payload \(appPayload)")
-        // Two tries (review F2); still no answer: the usual start (pairing, readiness) deals with it.
+        // No answer at all (no socket, a timeout): two tries (review F2), then the usual start (pairing, readiness) deals
+        // with it. A refusal is an answer from a running companion (#850: beta 6's refused status.get while the new app
+        // minted its pairing code), so it is asked for longer, and one that keeps refusing is taken as a build from before
+        // #850: a current companion never refuses status.get.
         var first = await effects.status()
         note("status.get: \(Self.describe(first))")
-        if case .failure = first {
+        var asks = 1
+        while case .failure(let error) = first, asks < (error is ControlRemoteError ? Self.refusedAttempts : 2) {
             await effects.pause()
             first = await effects.status()
-            note("status.get again: \(Self.describe(first))")
+            asks += 1
+            note("status.get again (\(asks)): \(Self.describe(first))")
         }
-        guard case .success(let running) = first else { note("result: notRunning"); return .notRunning }
+        let running: Reported
+        switch first {
+        case .success(let reported): running = reported
+        case .failure(let error) where error is ControlRemoteError:
+            note("it answers but refuses status.get after \(asks) asks; taken as a build from before #850")
+            running = Reported(build: nil, payload: nil)
+        case .failure:
+            note("result: notRunning")
+            return .notRunning
+        }
         if let payload = running.payload, !Self.same(payload, appPayload) {
             note("another installed copy runs the companion (\(payload)); not restarted")
             effects.say(Self.otherCopy(payload))

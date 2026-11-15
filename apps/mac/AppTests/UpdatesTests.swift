@@ -292,6 +292,23 @@ final class UpdateStagingTests: XCTestCase {
         XCTAssertEqual(silent.restarts, 0)
     }
 
+    /// #850, the cause on the clones: beta 6's companion answers the first status.get calls after the new app opens with a
+    /// refusal (`unavailable`, from its auth store, while the app mints a pairing code). That is a companion answering, not
+    /// none: it is asked for longer, and one that keeps refusing is taken as a build from before #850 and restarted.
+    func testACompanionRefusingStatusIsStillRestarted() async {
+        let refused = ControlRemoteError(code: "unavailable", message: "That isn’t available on your Mac right now.")
+        let fake = Fake()
+        fake.answers = [.failure(refused), .failure(refused), .failure(refused), Self.running(nil, nil), Self.running("202611151700")]
+        let outcome = await check(fake).run()
+        XCTAssertEqual(outcome, .restarted, "refused three times, then answered: restarted")
+        let stubborn = Fake()
+        stubborn.answers = Array(repeating: .failure(refused), count: CompanionBuildCheck.refusedAttempts) + [Self.running("202611151700")]
+        let restarted = await check(stubborn).run()
+        XCTAssertEqual(restarted, .restarted, "never answers status.get: a build from before #850, restarted")
+        XCTAssertEqual(stubborn.restarts, 1)
+        XCTAssertTrue(stubborn.notes.contains { $0.contains("refuses status.get") }, stubborn.notes.joined(separator: "\n"))
+    }
+
     /// #850, clean-Mac re-verify of B: launchctl refusing kickstart ends the agent instead; launchd's KeepAlive starts it
     /// again from the bundle on disk (what ending it by hand did on the clones).
     func testAKickstartThatFailsEndsTheAgentInstead() async {
