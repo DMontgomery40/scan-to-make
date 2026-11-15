@@ -34,6 +34,8 @@ export const counterpartPrinterInfoSchema = z.object({
     pause: z.boolean(), resume: z.boolean(), cancel: z.boolean(), print3mf: z.boolean(), gcode: z.boolean(),
     /** What slice_stl can apply with the MCP's slicer for this printer (PRD §8.0): the app never knows slicers. */
     slicing: z.object({supports: z.boolean(), copies: z.boolean(), orient: z.boolean()}).optional(),
+    /** `counterpart_diagnostics` is there: the MCP hands over its own redacted bundle for Export Diagnostics (#799). */
+    diagnostics: z.boolean().optional().catch(undefined),
   }),
 });
 export type CounterpartPrinterInfo = z.infer<typeof counterpartPrinterInfoSchema>;
@@ -198,6 +200,38 @@ export async function readPrinterInfo(session: PrinterSession, options: SessionC
   const result = await session.call('counterpart_printer_info', argsFor(session.getTool('counterpart_printer_info'), routeArgs(session.config)), {timeoutMs: 15000, ...options});
   const parsed = counterpartPrinterInfoSchema.safeParse(toolResultJson(result));
   return parsed.success ? parsed.data : undefined;
+}
+
+/**
+ * `counterpart_diagnostics` (#799): the MCP's own redacted bundle for a tester's report. Names are relative paths the
+ * MCP chose; the app adds them to its export as they are (after its own redaction) and knows none of them.
+ */
+export const counterpartDiagnosticsSchema = z.object({
+  package: z.string().max(128),
+  version: z.string().max(64),
+  files: z.array(z.object({name: z.string().min(1).max(512), content: z.string(), truncated: z.boolean()})).max(512),
+  notes: z.array(z.string().max(8192)).max(512),
+});
+export type CounterpartDiagnostics = z.infer<typeof counterpartDiagnosticsSchema>;
+
+/**
+ * The MCP's diagnostics bundle, at most `maxBytes` (its names, contents and notes). `unsupported` when the install
+ * doesn't advertise `capabilities.diagnostics` in `counterpart_printer_info` (an older MCP): the caller says to update it.
+ * Throws when the MCP can't be started, doesn't answer, or answers something else.
+ */
+export async function readDiagnostics(session: PrinterSession, maxBytes: number, options: SessionCallOptions = {}): Promise<{server: {name: string; version: string}} & (
+  {diagnostics: CounterpartDiagnostics; infoUnread?: true} | {unsupported: true})> {
+  const catalog = await session.connect({...(options.signal ? {signal: options.signal} : {}), ...(options.failFast ? {failFast: true} : {})});
+  const server = {name: catalog.server.name, version: catalog.server.version};
+  if (!session.hasTool('counterpart_diagnostics')) return {server, unsupported: true};
+  // Printer info may ask the printer itself (an OctoPrint that's away times out): a printer that can't be reached is
+  // when diagnostics matter most, so an unreadable answer doesn't stop the ask; the listed tool says it's there.
+  const info = await readPrinterInfo(session, {...options, timeoutMs: 8000}).catch(() => undefined);
+  if (info && info.capabilities.diagnostics !== true) return {server, unsupported: true};
+  const result = await session.call('counterpart_diagnostics', {max_bytes: maxBytes}, {timeoutMs: 20000, largeResult: true, ...options});
+  const parsed = counterpartDiagnosticsSchema.safeParse(toolResultJson(result));
+  if (!parsed.success) throw new PrinterMcpError('invalid-response');
+  return {server, diagnostics: parsed.data, ...(info ? {} : {infoUnread: true as const})};
 }
 
 /**

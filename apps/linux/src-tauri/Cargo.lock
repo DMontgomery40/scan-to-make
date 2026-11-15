@@ -387,6 +387,7 @@ name = "counterpart"
 version = "0.1.0"
 dependencies = [
  "libc",
+ "regex",
  "rfd",
  "serde",
  "serde_json",

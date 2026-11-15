@@ -175,6 +175,24 @@ What to Test for build 4 (saved November 7):
 > Neither is needed to test your printer. Reporting guide:
 > https://counterpart.dtmont.com/help.html#report
 
+What to Test for the next build (steps 4 and 5 changed and step 6 added by #799, #814 and #816; not yet saved in App Store Connect). The rest is as above:
+
+> 4. For a failure, send a screenshot through TestFlight with the steps, expected
+>    result, actual result, approximate time and project name. Include your phone and
+>    computer OS versions, printer firmware, slicer and connection method. You don’t need to
+>    copy versions from Settings → Printers: the diagnostics ZIP includes the app’s version,
+>    your printers and the printer software they use, with its version.
+> 5. Just after the problem, on the Mac choose Settings → Advanced → Export Diagnostics…
+>    (on Linux, Settings → About → Export Diagnostics…). It saves a local ZIP with the
+>    event log and the printer software’s own diagnostics; nothing is sent. Email it to the
+>    developer’s feedback address in TestFlight’s App Details, with the same time and
+>    project name. Review it before sharing; it keeps printer serial numbers and network
+>    addresses, and removes the access codes, keys, tokens and email addresses it recognises; look before you send.
+> 6. On your phone or tablet, Settings → Share Diagnostics… (iPhone and iPad) or Settings → Help →
+>    Share Diagnostics… (Android) makes a ZIP of what the phone knows: its connection to your
+>    computer, recent request errors and the scans it keeps, without the pictures. Email it
+>    with the computer’s ZIP; it works even when your computer is away.
+
 Review notes addition:
 
 > This beta focuses on pairing, printer setup and printing with testers’ own hardware.
