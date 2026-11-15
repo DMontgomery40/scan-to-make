@@ -110,7 +110,7 @@ def drawn(image, area: tuple[float, float, float, float], scale: float, exclude:
 
 
 def stage_states(image, elements: list[dict], scale: float, width: float, screen_h: float) -> list[str]:
-    """main's stage (#539, StagePicture): one element `gallery-stage-picture`, value "shown", "loading" or "not available".
+    """main's stage (#539, StagePicture): one element `gallery-stage-picture`, value "shown", "loading", "not available" or "quiet".
     Shown must have something drawn; loading and not available must draw their line of words (a bare backdrop or a
     spinner without words fails)."""
     problems = []
@@ -132,6 +132,11 @@ def stage_states(image, elements: list[dict], scale: float, width: float, screen
             if span < LINE_MIN_PT:
                 problems.append(f'stage says "{value}" but draws no line of words (widest drawn run {span:.0f} pt): '
                                 f'a bare backdrop or a spinner alone')
+        elif value == 'quiet':
+            # Review of #831: a picture still coming under a model that failed draws no spinner; the line under the
+            # stage says why, once. Quiet with no such line says nothing.
+            if not any(n['id'] == 'gallery-model-unavailable' for n in elements):
+                problems.append('stage is quiet and no line under it says why')
         else:
             problems.append(f'stage has no state it should have (value "{node["value"]}")')
     return problems

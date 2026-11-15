@@ -356,6 +356,8 @@ struct AskButtons: View {
     let project: Project
     /// The size card's numbers as they stand, when these buttons sit on one: a caliper photo goes with them.
     var sizes: AskSizesForm? = nil
+    /// A stopped scan on this phone answers it (#825): its Send is the card's one filled action, so the camera steps back.
+    var keptScan = false
     @Binding var working: Bool
     @Binding var problem: String?
 
@@ -393,8 +395,8 @@ struct AskButtons: View {
                 HStack(alignment: .top, spacing: 8) {
                     if answers.contains("camera") {
                         // A size question's obvious action is Confirm; the camera is there for a caliper photo.
-                        if project.openAsk?.kind == "sizes" {
-                            Button { answer(camera: true) } label: { StackLabel(text: "Caliper photo", symbol: "camera") }.buttonStyle(.glass)
+                        if project.openAsk?.kind == "sizes" || keptScan {
+                            Button { answer(camera: true) } label: { StackLabel(text: keptScan ? "Camera" : "Caliper photo", symbol: "camera") }.buttonStyle(.glass)
                         } else {
                             Button { answer(camera: true) } label: { StackLabel(text: "Camera", symbol: "camera.fill") }.buttonStyle(.glassProminent)
                         }

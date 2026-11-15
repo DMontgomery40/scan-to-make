@@ -102,6 +102,9 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
     public var kind: String?
     /// A structured question from the Mac, PR 4.
     public var ask: Ask?
+    /// A rebuilt scan the Mac wants checked (which part is the object, how big it is), answered through its own route.
+    /// Read only to know it is there: a phone never sends a scan to a project in review (#825, review of #831 F5).
+    public var reconstructionReview: JSONValue?
     /// The project's folder on the Mac. Only the Mac's control socket (`objects.list`) sends it; absent on `/v1/objects`.
     public var directory: String?
     /// Project Settings (PRD §5.4), stored by the companion: so far, the status you set.
@@ -212,7 +215,7 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case id, createdAtMs, updatedAtMs, instructions, state, scan, photos, capture, captureDepth, progress, passes, current, question
-        case failure, canRetryCleanup, print, printerDestinationId, printConfirmation, status, title, kind, ask, directory, settings, outcome, archived, picture, pictures, pictureStates, scanFiles, scanFrom, inherited, versions, prints, historyRestored, credit, files, plates, publishedSelection, completion, pendingFollowup, pendingMessageId, messages, requestPhotos, pendingPhotos
+        case failure, canRetryCleanup, print, printerDestinationId, printConfirmation, status, title, kind, ask, directory, settings, outcome, archived, picture, pictures, pictureStates, scanFiles, scanFrom, inherited, versions, prints, historyRestored, credit, files, plates, publishedSelection, completion, pendingFollowup, pendingMessageId, messages, requestPhotos, pendingPhotos, reconstructionReview
     }
 
     /// One odd object never drops out of the list: missing lists are empty, and an optional that doesn't
@@ -259,6 +262,7 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
         title = optional(String.self, .title)
         kind = optional(String.self, .kind)
         ask = optional(Ask.self, .ask)
+        reconstructionReview = optional(JSONValue.self, .reconstructionReview)
         directory = optional(String.self, .directory)
         settings = optional(Settings.self, .settings)
         outcome = optional(String.self, .outcome)

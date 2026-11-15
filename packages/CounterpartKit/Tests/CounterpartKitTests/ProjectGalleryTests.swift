@@ -182,4 +182,16 @@ final class ProjectGalleryTests: XCTestCase {
         XCTAssertTrue(ModelUnavailable.refused.retryable && ModelUnavailable.notAnswering.retryable && ModelUnavailable.didntCome.retryable)
         XCTAssertFalse(ModelUnavailable.tooLarge.retryable || ModelUnavailable.undrawable.retryable)
     }
+
+    /// Lead, review of #831: a line about the device names the one it's on. "This phone" on an iPad reads as a bug.
+    func testTheLineNamesTheDeviceItIsOn() {
+        XCTAssertEqual(ModelUnavailable.undrawable.line(.scan, device: "iPad"), "Your scan’s 3D model couldn’t be shown on this iPad. Open it on your Mac.")
+        XCTAssertEqual(ModelUnavailable.undrawable.line(.scan), "Your scan’s 3D model couldn’t be shown on this phone. Open it on your Mac.", "a phone by default")
+        XCTAssertEqual(ModelUnavailable.tooLarge.line(.part, device: "iPad"),
+                       "This part’s 3D model is too large a file to show on an iPad. Open it on your Mac to see it from every side.")
+        XCTAssertEqual(ModelUnavailable.tooLarge.line(.scan, pictureToo: true, device: "iPhone"),
+                       "The picture didn’t come from your Mac, and your scan’s 3D model is too large a file to show on an iPhone.")
+        XCTAssertEqual(ModelUnavailable.undrawable.line(.part, pictureToo: true, neverDrawn: true, device: "iPad"),
+                       "Your Mac couldn’t draw a picture of this part, and this part’s 3D model couldn’t be shown on this iPad.")
+    }
 }

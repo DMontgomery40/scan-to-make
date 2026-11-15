@@ -350,7 +350,9 @@ public enum ModelUnavailable: Equatable, Sendable {
     /// The one line under the stage. `pictureToo`: the stage's picture didn't come either, so this is the stage's own
     /// line for both (the gallery then shows no second line).
     /// `neverDrawn`: the Mac couldn't draw a picture at all (not "didn't come"), so the line says that.
-    public func line(_ kind: ProjectGallery.Entry.Kind, pictureToo: Bool = false, neverDrawn: Bool = false) -> String {
+    /// `device`: the one it's on ("phone", "iPhone", "iPad"), so an iPad never reads "this phone" (review of #831).
+    public func line(_ kind: ProjectGallery.Entry.Kind, pictureToo: Bool = false, neverDrawn: Bool = false, device: String = "phone") -> String {
+        let onThis = "on this \(device)", onA = "on \(device.first.map { "AEIOUaeiou".contains($0) } == true ? "an" : "a") \(device)"
         let thing = switch kind { case .part: "this part"; case .plate: "this plate"; case .scan: "your scan"; case .together: "the part and your scan" }
         let model = kind == .together ? "\(thing) in 3D" : "\(thing)’s 3D model"
         let Model = model.prefix(1).uppercased() + model.dropFirst()
@@ -360,8 +362,8 @@ public enum ModelUnavailable: Equatable, Sendable {
             case .notAnswering: return "\(first), and it isn’t answering, so \(model) can’t come yet."
             case .didntCome: return "\(first), and \(model) didn’t come."
             case .refused: return "\(first), and it didn’t send \(model)."
-            case .tooLarge: return "\(first), and \(model) is too large a file to show on a phone."
-            case .undrawable: return "\(first), and \(model) couldn’t be shown on this phone."
+            case .tooLarge: return "\(first), and \(model) is too large a file to show \(onA)."
+            case .undrawable: return "\(first), and \(model) couldn’t be shown \(onThis)."
             }
         }
         if pictureToo {
@@ -369,16 +371,16 @@ public enum ModelUnavailable: Equatable, Sendable {
             case .notAnswering: return "Your Mac isn’t answering, so the picture and 3D model of \(thing) can’t come yet."
             case .refused: return "Your Mac didn’t send the picture or 3D model of \(thing)."
             case .didntCome: return "The picture and 3D model of \(thing) didn’t come from your Mac."
-            case .tooLarge: return "The picture didn’t come from your Mac, and \(model) is too large a file to show on a phone."
-            case .undrawable: return "The picture didn’t come from your Mac, and \(model) couldn’t be shown on this phone."
+            case .tooLarge: return "The picture didn’t come from your Mac, and \(model) is too large a file to show \(onA)."
+            case .undrawable: return "The picture didn’t come from your Mac, and \(model) couldn’t be shown \(onThis)."
             }
         }
         switch self {
         case .notAnswering: return "Your Mac isn’t answering, so \(model) can’t come yet."
         case .didntCome: return "\(Model) didn’t come from your Mac."
         case .refused: return "Your Mac didn’t send \(model)."
-        case .tooLarge: return "\(Model) is too large a file to show on a phone. Open it on your Mac to see it from every side."
-        case .undrawable: return "\(Model) couldn’t be shown on this phone. Open it on your Mac."
+        case .tooLarge: return "\(Model) is too large a file to show \(onA). Open it on your Mac to see it from every side."
+        case .undrawable: return "\(Model) couldn’t be shown \(onThis). Open it on your Mac."
         }
     }
 }
