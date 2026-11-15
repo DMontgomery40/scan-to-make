@@ -131,7 +131,8 @@ Settings → Help → **Share Diagnostics…** makes `Counterpart Android Diagno
 (FileProvider, `cache/Diagnostics/`). It holds `about.txt`, `connection.json` (the pairing's shape: no token, pin, device id or address,
 only each address's kind), `request-errors.json` (the last 50 failed requests, kept in memory by `api/RecentFailures`; Android keeps
 no log file), `captures.json` (the scans on the phone, without their pictures) and `notes.txt`. Everything goes through
-`Diagnostics.redact`, the companion's rules (`services/companion/src/diagnostics.ts`) plus a pin, a pairing code and a token anywhere.
+`app/Redaction.kt` (written for the phone after the review of #813's redactor found leaks; its rules are listed at the top of the file).
+A file name the ZIP can't take, or a source that can't be read, gets a line in `notes.txt` and the export carries on.
 The companion's own log and the printer software come from the computer's Export Diagnostics.
 
 ## What's verified, and what isn't

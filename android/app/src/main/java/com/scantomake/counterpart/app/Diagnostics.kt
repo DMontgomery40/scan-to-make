@@ -57,6 +57,8 @@ object Diagnostics {
         val captures: List<Capture>,
         /** Values that must never appear: the token, the pin, the device id, the computer's addresses. */
         val secrets: List<String>,
+        /** What couldn't be read, in words; the export carries on without it. */
+        val notes: List<String> = emptyList(),
     )
 
     fun fileName(nowMs: Long): String = "Counterpart Android Diagnostics ${day(nowMs)}.zip"
@@ -65,31 +67,35 @@ object Diagnostics {
     fun files(input: Input): LinkedHashMap<String, String> {
         val out = LinkedHashMap<String, String>()
         val secrets = input.secrets.filter { it.length >= 4 }.distinct().sortedByDescending { it.length }
-        fun add(name: String, text: String) { out[name] = redact(text, secrets) }
-        add("about.txt", listOf(
+        val notes = input.notes.toMutableList()
+        // A file that fails to build is left out with a note; the rest still go in.
+        fun add(name: String, text: () -> String) {
+            try { out[name] = redact(text(), secrets) } catch (e: Exception) { notes += "$name couldn't be made (${e.javaClass.simpleName})." }
+        }
+        add("about.txt") { listOf(
             "Counterpart for Android ${input.appVersion} (${input.versionCode})",
             "Android ${input.androidRelease} (API ${input.sdk})",
             "Device: ${input.device}",
             "Exported: ${time(input.nowMs)}",
-        ).joinToString("\n", postfix = "\n"))
-        add("connection.json", pretty(connection(input)))
-        add("request-errors.json", pretty(buildJsonArray {
+        ).joinToString("\n", postfix = "\n") }
+        add("connection.json") { pretty(connection(input)) }
+        add("request-errors.json") { pretty(buildJsonArray {
             input.failures.forEach { f -> add(buildJsonObject {
                 put("at", time(f.atMs)); put("method", f.method); put("route", f.route)
                 f.status?.let { put("status", it) }; f.code?.let { put("code", it) }
             }) }
-        }))
-        add("captures.json", pretty(buildJsonArray {
+        }) }
+        add("captures.json") { pretty(buildJsonArray {
             input.captures.forEach { c -> add(buildJsonObject {
                 put("id", c.id); put("finished", c.finished); put("kind", c.kind); put("frames", c.frames)
                 put("cameraMetadata", c.cameraMetadata); put("bytes", c.bytes); put("projectState", c.projectState?.let(::JsonPrimitive) ?: JsonNull)
             }) }
-        }))
-        add("notes.txt", listOf(
+        }) }
+        out["notes.txt"] = redact((listOf(
             "This phone keeps no log file of its own. request-errors.json lists the requests to the computer that failed since Counterpart last opened (${input.failures.size}).",
             "The computer's own Settings → Advanced → Export Diagnostics… (Mac) or Settings → About → Export Diagnostics… (Linux) has the companion's log and the printer software.",
-            "Removed: the pairing token, the computer's pin and addresses, this phone's id and name, e-mail addresses and anything named like a key, code or password.",
-        ).joinToString("\n", postfix = "\n"))
+            "Left out on purpose: the pairing token, the computer's pin, certificate and addresses, this phone's id and name, e-mail addresses, and every value whose name says it is secret.",
+        ) + notes.ifEmpty { listOf("Everything was read.") }).joinToString("\n", postfix = "\n"), secrets)
         return out
     }
 
@@ -131,50 +137,41 @@ object Diagnostics {
         }
     }
 
-    // MARK: Redaction, as the companion's (services/companion/src/diagnostics.ts, PR #813), plus the phone's own words.
+    /** Text with every secret removed ([Redaction]). */
+    fun redact(text: String, secrets: List<String> = emptyList()): String = Redaction.redact(text, secrets)
 
-    // Names that say a value is a secret, whatever the case or joining. `auth` and `pin` only as words of their own
-    // (`AUTH_TOKEN`, `pin=`), so "authenticate", "pinned" and "mapping" keep their words.
-    private const val SECRET_WORD = """(?:password|passwd|passcode|pwd|secret|token|api[_-]?key|apikey|access[_-]?code|accesscode|access[_-]?key|authorization|auth(?:[_-]?key)?(?![a-z])|cookie|credential|private[_-]?key|signature|ticket|login|email|user[_-]?info|pin(?![a-z])|pairing[_-]?code|sha256)"""
-    private const val SECRET_KEY = """[A-Za-z0-9_.-]*$SECRET_WORD[A-Za-z0-9_.-]*"""
-    /** Values that are already safe after a secret's name: "[set]", "[redacted…]", empty, true/false/null. */
-    private const val SAFE = """(?!"(?:\[set\]|\[redacted[^"]*\])?"|\[set\]|\[redacted|true\b|false\b|null\b|"")"""
-    private val RULES: List<Pair<Regex, String>> = listOf(
-        Regex("""-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)""") to "[redacted private key]",
-        Regex("""\b([a-z][a-z0-9+.-]*://)[^/\s:@"'<>]+(?::[^/\s@"'<>]*)?@""", RegexOption.IGNORE_CASE) to "$1[redacted]@",
-        // Authorization schemes, before the key=value rules: those take "Bearer" as the value and would leave the
-        // credential after it ("Authorization: [redacted] <token>", as the companion's order does).
-        Regex("""\b(Bearer|Basic|Digest|Token)\s+[A-Za-z0-9._~+/=-]{6,}""") to "$1 [redacted]",
-        Regex("""(\\"$SECRET_KEY\\"\s*:\s*)\\"(?:[^"\\]|\\[^"])*\\"""", RegexOption.IGNORE_CASE) to "\$1\\\\\"[redacted]\\\\\"",
-        Regex("""("$SECRET_KEY"\s*:\s*)$SAFE(?:"(?:[^"\\]|\\.)*"|[^\s,}\]]+)""", RegexOption.IGNORE_CASE) to "$1\"[redacted]\"",
-        Regex("""(\b$SECRET_KEY[ \t]*[=:][ \t]*|--$SECRET_KEY[ \t]+)$SAFE(?:"[^"\n]*"|'[^'\n]*'|[^\s,;&}\]"']+)""", RegexOption.IGNORE_CASE) to "$1[redacted]",
-        Regex("""^((?:Set-)?Cookie:).*$""", setOf(RegexOption.IGNORE_CASE, RegexOption.MULTILINE)) to "$1 [redacted]",
-        Regex("""\beyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]+""") to "[redacted token]",
-        Regex("""\b(?:sk|pk|rk)-[A-Za-z0-9_-]{16,}""") to "[redacted key]",
-        Regex("""[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}""") to "[redacted email]",
-        Regex("""scantomake://pair\?[^\s"']+""") to "scantomake://pair?[redacted]",
-        // The phone's own: a 64-hex pin or hash, and a 43-character pairing token, wherever they appear.
-        Regex("""\b[a-fA-F0-9]{64}\b""") to "[redacted hash]",
-        Regex("""(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{43}(?![A-Za-z0-9_-])""") to "[redacted token]",
-    )
+    /** A name the ZIP takes: one plain file name, no folder, no `..`, at most 100 characters. */
+    private val ENTRY = Regex("""[A-Za-z0-9][A-Za-z0-9._ -]{0,99}""")
 
-    /** Text with every secret removed: the known values first (longest first), then everything secret-shaped. */
-    fun redact(text: String, secrets: List<String> = emptyList()): String {
-        var out = text
-        for (secret in secrets.filter { it.length >= 4 }.sortedByDescending { it.length }) out = out.replace(secret, "[redacted]")
-        for ((pattern, replacement) in RULES) out = pattern.replace(out, replacement)
-        return out
-    }
-
-    /** A plain ZIP of the files, UTF-8 names. */
+    /**
+     * A plain ZIP of the files, UTF-8 names. A file with a name the ZIP can't take, or one that fails to write, is left
+     * out and `notes.txt` says so; the rest still go in.
+     */
     fun zip(files: Map<String, String>, nowMs: Long): ByteArray {
+        val notes = mutableListOf<String>()
+        val accepted = LinkedHashMap<String, String>()
+        for ((name, text) in files) {
+            if (!ENTRY.matches(name) || name.contains("..") || name in accepted) notes += "A file was left out: its name couldn't go in a ZIP."
+            else accepted[name] = text
+        }
         val bytes = ByteArrayOutputStream()
         ZipOutputStream(bytes).use { zip ->
-            for ((name, text) in files) {
-                zip.putNextEntry(ZipEntry(name).apply { time = nowMs })
-                zip.write(text.toByteArray(Charsets.UTF_8))
-                zip.closeEntry()
+            for ((name, text) in accepted) {
+                if (name == "notes.txt") continue
+                try {
+                    val data = text.toByteArray(Charsets.UTF_8)
+                    zip.putNextEntry(ZipEntry(name).apply { time = nowMs })
+                    zip.write(data)
+                    zip.closeEntry()
+                } catch (e: Exception) {
+                    notes += "$name couldn't be added (${e.javaClass.simpleName})."
+                    try { zip.closeEntry() } catch (_: Exception) {}
+                }
             }
+            val noteText = (accepted["notes.txt"] ?: "") + notes.joinToString("") { "$it\n" }
+            zip.putNextEntry(ZipEntry("notes.txt").apply { time = nowMs })
+            zip.write(noteText.toByteArray(Charsets.UTF_8))
+            zip.closeEntry()
         }
         return bytes.toByteArray()
     }
@@ -187,18 +184,29 @@ object Diagnostics {
     // MARK: On the phone
 
     /** The scans in this phone's Captures folder, with their project's state when the list has it. */
-    fun captures(context: Context, projectStates: Map<String, String>): List<Capture> =
-        File(context.filesDir, "Captures").listFiles { f -> f.isDirectory }?.sortedBy { it.name }?.map { folder ->
+    fun captures(context: Context, projectStates: Map<String, String>, notes: MutableList<String> = mutableListOf()): List<Capture> {
+        val root = File(context.filesDir, "Captures")
+        if (!root.exists()) return emptyList()
+        val folders = root.listFiles { f -> f.isDirectory } ?: run { notes += "The scans folder couldn't be read."; return emptyList() }
+        return folders.sortedBy { it.name }.mapNotNull { folder ->
             val id = folder.name
-            Capture(id, Media.captureFinished(context, id), Media.captureKind(context, id), Media.captureFrames(context, id).size,
-                File(folder, "capture-camera.json").exists(), folder.walkTopDown().filter { it.isFile }.sumOf { it.length() }, projectStates[id])
-        } ?: emptyList()
+            try {
+                // An unreadable folder lists nothing: say so rather than report a scan with no frames.
+                if (folder.list() == null) throw java.io.IOException("unreadable")
+                Capture(id, Media.captureFinished(context, id), Media.captureKind(context, id), Media.captureFrames(context, id).size,
+                    File(folder, "capture-camera.json").exists(), folder.walkTopDown().filter { it.isFile }.sumOf { it.length() }, projectStates[id])
+            } catch (e: Exception) { notes += "The scan $id couldn't be read (${e.javaClass.simpleName})."; null }
+        }
+    }
 
     /** Reads this phone's state now. */
     fun input(app: Counterpart, nowMs: Long = System.currentTimeMillis()): Input {
         val state = app.state
-        val record = try { app.pairingStore.read() } catch (_: Exception) { null }
-        val info = try { app.packageManager.getPackageInfo(app.packageName, 0) } catch (_: Exception) { null }
+        val notes = mutableListOf<String>()
+        fun <T> read(what: String, fallback: T, block: () -> T): T =
+            try { block() } catch (e: Exception) { notes += "$what couldn't be read (${e.javaClass.simpleName})."; fallback }
+        val record = read("The pairing", null) { app.pairingStore.read() }
+        val info = read("The app's version", null) { app.packageManager.getPackageInfo(app.packageName, 0) }
         val code = info?.let { if (Build.VERSION.SDK_INT >= 28) it.longVersionCode else @Suppress("DEPRECATION") it.versionCode.toLong() } ?: 0L
         val link = when (val l = state.link.value) {
             is com.scantomake.counterpart.api.MacLink.NeedsPairing -> "needs pairing (${l.code})"
@@ -215,9 +223,10 @@ object Diagnostics {
             androidRelease = Build.VERSION.RELEASE ?: "unknown", sdk = Build.VERSION.SDK_INT,
             device = app.deviceModel() ?: "unknown", nowMs = nowMs, pairing = record, link = link,
             eventsSupported = state.eventsSupported.value, capabilities = state.capabilities.value,
-            failures = app.failures.list(),
-            captures = captures(app, state.projects.value.associate { it.id to it.state.wire }),
+            failures = read("The request errors", emptyList()) { app.failures.list() },
+            captures = read("The scans", emptyList()) { captures(app, state.projects.value.associate { it.id to it.state.wire }, notes) },
             secrets = secrets,
+            notes = notes,
         )
     }
 

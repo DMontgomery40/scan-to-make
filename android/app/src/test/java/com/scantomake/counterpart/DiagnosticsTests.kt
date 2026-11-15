@@ -147,31 +147,150 @@ class DiagnosticsTests {
         assertFalse(all.contains(plantedPin))
         assertFalse(all.contains(plantedEmail))
         assertTrue(all.contains("[redacted email]"))
+        // The notes still read as sentences.
+        assertTrue(files.getValue("notes.txt"), files.getValue("notes.txt").contains("Left out on purpose: the pairing token, the computer's pin"))
     }
 
-    /** The companion's rules (#813), carried over, with the same safe markers and words kept. */
-    @Test fun redactionMatchesTheCompanionsRules() {
-        fun r(text: String) = Diagnostics.redact(text)
-        assertEquals("""{"accessCode": "[redacted]", "BAMBU_ACCESS_CODE": "[set]", "token": "", "apiKey": null}""",
-            r("""{"accessCode": "12345678", "BAMBU_ACCESS_CODE": "[set]", "token": "", "apiKey": null}"""))
-        assertEquals("""say \"refresh_token\":\"[redacted]\"""", r("""say \"refresh_token\":\"abc.def\""""))
-        assertEquals("PASSWORD=[redacted] --api-key [redacted] pin: [redacted]", r("PASSWORD=hunter22 --api-key sk_live_x pin: 482913"))
-        assertEquals("Authorization: [redacted] [redacted]", r("Authorization: Bearer abcdefghij"))
-        assertEquals("authorization=[redacted] [redacted]", r("authorization=Basic dXNlcjpwYXNz"))
-        assertEquals("Bearer [redacted]", r("Bearer abcdefghij"))
-        assertEquals("Cookie: [redacted]", r("Cookie: session=1"))
-        assertEquals("https://[redacted]@printer.local/", r("https://me:pw@printer.local/"))
-        assertEquals("[redacted token]", r("eyJhbGciOi.eyJzdWIiOi.c2lnbmF0dXJl"))
-        assertEquals("[redacted key]", r("sk-abcdefghijklmnopqrst"))
-        assertEquals("mail [redacted email] now", r("mail someone@example.co.uk now"))
-        assertEquals("scantomake://pair?[redacted]", r("scantomake://pair?v=2&code=123456"))
-        assertEquals("[redacted private key]", r("-----BEGIN PRIVATE KEY-----\nMIIE\n-----END PRIVATE KEY-----"))
-        assertEquals("[redacted hash]", r(KEY_PIN))
-        // Words that only look like secret names keep their words.
-        assertEquals("Failed to authenticate: retry", r("Failed to authenticate: retry"))
-        assertEquals("pinned: yes, colour-mapping: auto", r("pinned: yes, colour-mapping: auto"))
-        // Known values go whatever their shape.
+    /**
+     * Every leak the review of #813's redactor found (comment 6886304221, probes in ~/stm-gates/probes), and the lead's
+     * list for Android: each is planted, and its secret must not survive.
+     */
+    @Test fun everyPlantedSecretIsRemoved() {
+        val cases = listOf(
+            // Auth schemes and headers, any case.
+            "authorization: bearer abcDEF123456ghiJKL789" to "abcDEF123456ghiJKL789",
+            "Authorization: Bearer abcDEF123456ghiJKL789" to "abcDEF123456ghiJKL789",
+            "AUTHORIZATION: BASIC dXNlcjpwYXNzd29yZA==" to "dXNlcjpwYXNzd29yZA==",
+            "Proxy-Authorization: basic dXNlcjpwYXNzd29yZA==" to "dXNlcjpwYXNzd29yZA==",
+            "authorization: digest abcdef0123456789" to "abcdef0123456789",
+            "authorization=Basic dXNlcjpwYXNz" to "dXNlcjpwYXNz",
+            "sent with bearer abc-def_123456 to it" to "abc-def_123456",
+            "set-cookie: sid=lowcookie123; HttpOnly" to "lowcookie123",
+            """{"headers":{"authorization":"Bearer abcdefghijkl"}}""" to "abcdefghijkl",
+            // Names with key, passphrase, pin, session, token, secret, password, cookie, credential.
+            "SCAN_TO_MAKE_MODEL_KEY=hf_9f8e7d6c5b4a39281706f5e4d3c2b1a0" to "9f8e7d6c5b4a39281706f5e4d3c2b1a0",
+            """{"SCAN_TO_MAKE_LAN_TLS_KEY":"/k/p.key","SCAN_TO_MAKE_AI_KEY":"plainhex0123456789abcdef0123"}""" to "plainhex0123456789abcdef0123",
+            """{"session_key":"s3ss10nV4lue98765"}""" to "s3ss10nV4lue98765",
+            "session_key=s3ss10nV4lue98765" to "s3ss10nV4lue98765",
+            "encryption_key: deadbeefcafe0123456789" to "deadbeefcafe0123456789",
+            "passphrase=hunter2-horse-battery" to "hunter2-horse-battery",
+            "PAIRING_PIN=482910" to "482910",
+            """{"pin":"482913"}""" to "482913",
+            """{"pairingCode":482913}""" to "482913",
+            "pin: 482913" to "482913",
+            "The pairing code is 482913" to "482913",
+            "Enter PIN 482913 on the Mac" to "482913",
+            """{"otp":"731204"}""" to "731204",
+            """{"sessionId":"7f3a9c1e88b24d6fa015"}""" to "7f3a9c1e88b24d6fa015",
+            """{"cookie":"sid=zzz999yyy888"}""" to "zzz999yyy888",
+            "access-code: 31415926" to "31415926",
+            "lan_code=87654321" to "87654321",
+            "client_secret=cs_9876543210abcdef" to "cs_9876543210abcdef",
+            "refresh token: rt_abcdef0123456789" to "rt_abcdef0123456789",
+            "X-Api-Key: headervalue123456" to "headervalue123456",
+            """{"privateKey":"MIIEvQIBADANBgkq"}""" to "MIIEvQIBADANBgkq",
+            """{"credentials":{"user":"x"},"bambuCredential":"cred-value-77"}""" to "cred-value-77",
+            "MY_SECRET=topsecret77 DB_PASSWORD='correct horse battery'" to "correct horse",
+            """{"password":"correct horse battery"}""" to "correct horse",
+            """{"\u0070assword":"unicodesecret1"}""" to "unicodesecret1",
+            """say \"refresh_token\":\"abc.def.ghi\"""" to "abc.def.ghi",
+            "--api-key sk_live_0123456789abcdefgh" to "sk_live_0123456789abcdefgh",
+            "--token=tok0123456789" to "tok0123456789",
+            "GET https://api.example.com/x?access_token=tokABC123456&y=1" to "tokABC123456",
+            "https://ex.com/cb#id_token=tokXYZ987654" to "tokXYZ987654",
+            "https://me:pw0rd99@printer.local/" to "pw0rd99",
+            // Safe-looking values that are still secrets: a safe word only when it is the whole value.
+            "token=[set]hunter2value" to "hunter2value",
+            "password=true-secret-value" to "true-secret-value",
+            "api_key=null-123456789" to "null-123456789",
+            "secret=false_value99" to "false_value99",
+            """{"password":"true-secret"}""" to "true-secret",
+            """{"token":"[set]hunter2"}""" to "hunter2",
+            // Bare tokens by their shape, and PEM blocks.
+            "cloned with ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6" to "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6",
+            "github_pat_11ABCDEFG0123456789_abcdefghijklmnopqrstuvwxyz" to "11ABCDEFG0123456789_abcdefghij",
+            "aws id AKIAIOSFODNN7EXAMPLE ok" to "IOSFODNN7EXAMPLE",
+            "key AIzaSyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r done" to "SyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r",
+            "k sk-ant-api03-abcdefghijklmnopqrstuvwx" to "abcdefghijklmnopqrstuvwx",
+            "t eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.signaturepart99" to "eyJzdWIiOiIxIn0",
+            "-----BEGIN CERTIFICATE-----\nMIIBszCCAVmgAwIBAgIUZZZ\n-----END CERTIFICATE-----" to "MIIBszCCAVmgAwIBAgIUZZZ",
+            "-----BEGIN EC PRIVATE KEY-----\nMHQCAQEEIAbc123\n-----END EC PRIVATE KEY-----" to "MHQCAQEEIAbc123",
+            "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXk=\n-----END OPENSSH PRIVATE KEY-----" to "b3BlbnNzaC1rZXk=",
+            """{"pem":"-----BEGIN CERTIFICATE-----\nMIIBszCCAVmgAwIBAgIUYYY\n-----END CERTIFICATE-----"}""" to "MIIBszCCAVmgAwIBAgIUYYY",
+            "der MIIBszCCAVmgAwIBAgIUZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ== end" to "MIIBszCCAVmgAwIBAgIUZZZZ",
+            // E-mail addresses, and paths with the user's name.
+            "a.b+tag@sub.example.co.uk" to "a.b+tag@sub.example.co.uk",
+            "mail someone@example.com now" to "someone@example.com",
+            "/Users/someoneelse/Library/x" to "someoneelse",
+            "/home/otherperson/y" to "otherperson",
+            "C:\\Users\\DavidM\\z" to "DavidM",
+            """{\"path\":\"\/Users\/davidm\/Library\"}""" to "davidm",
+            "log at ~davidm/Library/Logs" to "davidm",
+            // The pairing link, PIN and certificate pin in any form.
+            "scantomake://pair?v=2&code=482913&pk=abc" to "482913",
+            KEY_PIN to KEY_PIN,
+            KEY_PIN.uppercase() to KEY_PIN.uppercase(),
+            KEY_PIN.chunked(2).joinToString(":") to KEY_PIN.chunked(2).joinToString(":"),
+            java.util.Base64.getEncoder().encodeToString(KEY_PIN.chunked(2).map { it.toInt(16).toByte() }.toByteArray()) to
+                java.util.Base64.getEncoder().encodeToString(KEY_PIN.chunked(2).map { it.toInt(16).toByte() }.toByteArray()),
+            """{"publicKeySha256":"q83vASNFZ4mrze8BI0VniavN7wEjRWeJq83vASNFZ4k"}""" to "q83vASNFZ4mrze8BI0VniavN7wEjRWeJq83vASNFZ4k",
+            """{"certificateSha256":"short-but-secret"}""" to "short-but-secret",
+            "token $plantedToken" to plantedToken,
+        )
+        val leaks = cases.filter { (input, secret) -> Diagnostics.redact(input).contains(secret) }
+            .map { (input, _) -> "$input -> ${Diagnostics.redact(input)}" }
+        assertTrue("Leaked:\n" + leaks.joinToString("\n"), leaks.isEmpty())
+    }
+
+    /** A known value goes in any form: the pin as hex in either case, colon pairs, base64 and base64url. */
+    @Test fun aKnownPinGoesInEveryForm() {
+        val bytes = KEY_PIN.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+        val forms = listOf(KEY_PIN, KEY_PIN.uppercase(), KEY_PIN.chunked(2).joinToString(":"),
+            java.util.Base64.getEncoder().encodeToString(bytes), java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(bytes))
+        for (form in forms) assertFalse(form, Diagnostics.redact("pinned to $form here", listOf(KEY_PIN)).contains(form))
         assertEquals("x [redacted] y", Diagnostics.redact("x 10.0.0.5 y", listOf("10.0.0.5")))
+    }
+
+    /** Markers that only say whether a secret is set stay whole, and ordinary words keep their words. */
+    @Test fun markersAndOrdinaryWordsStay() {
+        fun r(text: String) = Diagnostics.redact(text)
+        assertEquals("""{"accessCode": "[set]", "token": "", "apiKey": null, "PASSWORD": true}""",
+            r("""{"accessCode": "[set]", "token": "", "apiKey": null, "PASSWORD": true}"""))
+        assertEquals("TOKEN=[set] password=false KEY=", r("TOKEN=[set] password=false KEY="))
+        for (kept in listOf("Failed to authenticate: retry", "pinned: yes, colour-mapping: auto", "keyboard: us", "code: unreachable",
+            """{"code":"timeout","route":"/v1/objects/x/passes/2/activity","status":409}""", "Device: Google Pixel 8",
+            "/data/user/0/com.scantomake/files/Captures", "Tailscale address (IPv4)")) assertEquals(kept, r(kept))
+    }
+
+    @Test fun aBadFileNameOrAFailingFileNeverFailsTheExport() {
+        val now = System.currentTimeMillis()
+        val bytes = Diagnostics.zip(linkedMapOf("about.txt" to "a", "../escape.txt" to "x", "/abs.txt" to "y",
+            "x".repeat(300) to "z", "notes.txt" to "Everything was read.\n"), now)
+        val files = unzip(bytes)
+        assertEquals(listOf("about.txt", "notes.txt"), files.keys.toList())
+        assertEquals(3, Regex("A file was left out").findAll(files.getValue("notes.txt")).count())
+    }
+
+    @Test fun anUnreadableSourceGetsANoteAndTheExportCarriesOn() {
+        // The pairing can't be read (the Keystore failing) and one scan's folder can't be listed.
+        app.pairingStore = PairingStore(object : com.scantomake.counterpart.pairing.SecureStore {
+            override fun read(account: String): ByteArray? = throw IllegalStateException("keystore")
+            override fun write(account: String, data: ByteArray) {}
+            override fun add(account: String, data: ByteArray) = false
+            override fun delete(account: String) {}
+        })
+        scan("11111111-2222-4333-8444-555555555555", frames = 2, finished = true, ar = false)
+        val locked = File(File(app.filesDir, "Captures"), "66666666-7777-4888-8999-aaaaaaaaaaaa").apply { mkdirs() }
+        File(locked, "0001.jpg").writeBytes(byteArrayOf(1))
+        assertTrue(locked.setReadable(false))
+        try {
+            val files = unzip(Diagnostics.zip(Diagnostics.files(Diagnostics.input(app, System.currentTimeMillis())), System.currentTimeMillis()))
+            assertEquals(listOf("about.txt", "connection.json", "request-errors.json", "captures.json", "notes.txt"), files.keys.toList())
+            val notes = files.getValue("notes.txt")
+            assertTrue(notes, notes.contains("The pairing couldn't be read"))
+            assertTrue(notes, notes.contains("The scan 66666666-7777-4888-8999-aaaaaaaaaaaa couldn't be read"))
+            assertTrue(files.getValue("captures.json").contains("11111111-2222-4333-8444-555555555555"))
+        } finally { locked.setReadable(true) }
     }
 
     @Test fun anAddressIsOnlyItsKind() {
