@@ -625,7 +625,7 @@ struct AISettings: View {
     @AppStorage("ai.lastTestSeconds") private var lastTestSeconds: Double = 0
     @State private var testStarted: Date?
 
-    enum FusionState: Equatable { case checking, notInstalled, found, settingUp, setUp, unchecked }
+    typealias FusionState = FusionSetup.Row
 
     private var choice: ModelAccessChoice { model.snapshot?.choice ?? .none }
 
@@ -674,6 +674,8 @@ struct AISettings: View {
                         case .found, .settingUp: Label("Fusion found", systemImage:"checkmark.circle.fill").font(.caption).foregroundStyle(Color.okGreen)
                         case .setUp: Label("Fusion is set up", systemImage:"checkmark.circle.fill").font(.caption).foregroundStyle(Color.okGreen)
                         case .unchecked: Label("Couldn't check Fusion", systemImage:"questionmark.circle").font(.caption).foregroundStyle(.secondary)
+                        // #827: no printer yet. The companion's sentence says what's missing; it shows below, not in red.
+                        case .unavailable: Label("Not checked yet", systemImage:"minus.circle").font(.caption).foregroundStyle(.secondary)
                         }
                     }
                     Spacer()
@@ -688,7 +690,7 @@ struct AISettings: View {
                      ? "Install Autodesk Fusion if you want to use it for new designs. You can also design with Blender."
                      : "Set Up connects Fusion to Counterpart for new designs and later changes to them.")
                     .font(.caption).foregroundStyle(.secondary)
-                if let fusionProblem { Text(fusionProblem).font(.caption).foregroundStyle(.red) }
+                if let fusionProblem { Text(fusionProblem).font(.caption).foregroundStyle(fusion == .unavailable ? Color.secondary : Color.red) }
                 if let fusionStatus, fusion == .setUp {
                     Label(fusionStatus.words, systemImage:fusionStatus.ok ? "checkmark.circle.fill" : "exclamationmark.circle")
                         .font(.caption).foregroundStyle(fusionStatus.ok ? Color.okGreen : Color.orange)
@@ -699,8 +701,12 @@ struct AISettings: View {
                 }
                 LabeledContent("Clean up a scan") { Text("The code design engine when it's set up, otherwise Blender").foregroundStyle(.secondary).multilineTextAlignment(.trailing) }
             } header: { Text("Design engine") } footer: {
-                Text("Blender and Fusion are optional. Printing existing models and reprinting needs neither. Fusion and its licence are yours; its bridge is fusion360-mcp-server by Faust Machines (MIT).")
-                    .font(.caption).foregroundStyle(.secondary)
+                VStack(alignment:.leading, spacing:4) {
+                    Text("Blender and Fusion are optional. Printing existing models and reprinting needs neither. Fusion and its licence are yours; its bridge is fusion360-mcp-server by Faust Machines (MIT).")
+                    // #827: where Blender, Fusion and the scan cleanup tools are installed, in the setup page's own guide.
+                    Link("Setting up Blender, Fusion and scan cleanup", destination:SetupNeeds.cleanupGuide)
+                }
+                .font(.caption).foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
@@ -768,8 +774,9 @@ struct AISettings: View {
                 let setup = try await FusionSetup.check(state:state, socket:ModelAccessModel.socketPath(for: Installation(bundle: .main)), force:true)
                 fusion = !setup.fusionInstalled ? .notInstalled : setup.ready ? .setUp : .found
             } catch {
-                fusion = .unchecked
-                fusionProblem = error.localizedDescription
+                let after = FusionState.afterCheck(failed: error)
+                fusion = after.0
+                fusionProblem = after.1
             }
         }
     }

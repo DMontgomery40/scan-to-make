@@ -6,6 +6,32 @@ import CounterpartKit
 import ControlKit
 #endif
 
+/// #827: what the main window says is still missing on this Mac, each with its next step, in the setup page's words
+/// (beta.html: "In Settings › Printers, add your printer."; "Printing published models needs none of this."). A Mac
+/// with no printer and no AI, one with a printer and no AI (printing an existing file needs no AI), and one with both.
+struct SetupNeeds {
+    enum Place: Equatable { case printers, ai }
+    struct Line: Equatable, Identifiable {
+        let place: Place, title: String, text: String, action: String
+        var id: Place { place }
+    }
+    /// The setup page's cleanup tools section (Blender, Fusion and the cleanup workers).
+    static let cleanupGuide = URL(string: "https://counterpart.dtmont.com/beta.html#cleanup")!
+    /// `nil` is not known yet (the companion hasn't answered): nothing is claimed missing then.
+    static func lines(printers: Int?, aiChosen: Bool?) -> [Line] {
+        var lines: [Line] = []
+        if printers == 0 {
+            lines.append(Line(place: .printers, title: "Add your printer",
+                              text: "In Settings › Printers, add your printer. Counterpart installs the printer software it needs.", action: "Add a Printer…"))
+        }
+        if aiChosen == false {
+            lines.append(Line(place: .ai, title: "Choose your AI for design",
+                              text: "For design and changes, choose your AI in Settings › AI. Printing published models needs none of this.", action: "Choose AI…"))
+        }
+        return lines
+    }
+}
+
 /// What the objects window needs from the companion: local-control's `objects.*` methods.
 protocol ObjectsCompanion: Sendable {
     func addStarter(_ starterId: String) async throws -> Project

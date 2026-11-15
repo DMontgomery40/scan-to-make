@@ -251,6 +251,51 @@ test('server CLI owns the control socket lifecycle without exposing admin method
   await assert.rejects(stat(path),error=>error.code==='ENOENT');
 });
 
+// #827: a fresh Mac has no printer handoff config. Projects, settings and the Blender, Fusion and code engine rows
+// still answer (in words a person can read), over the control socket and over HTTP; nothing about printing is offered.
+test('server CLI with no printer set up answers projects, settings and the design tool rows', async t => {
+  const f=await fixture(t);await f.server.close();
+  const capture=join(f.root,'capture');await mkdir(capture,{mode:0o700});
+  const path=join(f.auth.directory,'control.sock');
+  const call=(method,params={})=>wire(path,{v:1,id:randomUUID(),method,params});
+  const {request}=await import('node:http');
+  const child=spawn(process.execPath,[new URL('../dist/server-cli.js',import.meta.url).pathname],{
+    env:{PATH:process.env.PATH,HOME:f.root,SCAN_TO_MAKE_REMOTE_AUTH_DIR:f.auth.directory,SCAN_TO_MAKE_CAPTURE_DIR:capture,SCAN_TO_MAKE_GENERATION_PORT:'0'},stdio:['ignore','pipe','pipe'],
+  });
+  const exited=new Promise(resolve=>child.once('exit',resolve));
+  t.after(async()=>{if(child.exitCode===null&&child.signalCode===null){child.kill('SIGTERM');await exited;}});
+  let stderr='';child.stderr.on('data',chunk=>stderr+=chunk);
+  const address=await new Promise((resolve,reject)=>{
+    let stdout='';const timer=setTimeout(()=>reject(Error('CLI startup timeout')),15000);
+    child.once('error',error=>{clearTimeout(timer);reject(error);});
+    child.once('exit',()=>{clearTimeout(timer);reject(Error('CLI exited before readiness: '+stderr));});
+    child.stdout.on('data',chunk=>{stdout+=chunk;const match=/ready at (http:\/\/[^\s]+)/.exec(stdout);if(match){clearTimeout(timer);resolve(match[1]);}});
+  });
+  assert.deepEqual((await call('objects.list')).result,{objects:[]});
+  assert.ok((await call('settings.get')).result?.settings,'settings answer');
+  assert.deepEqual((await call('objects.printers')).result?.destinations,[]);
+  const status=(await call('status.get')).result.capabilities;
+  assert.equal(status.printerHandoff,false);assert.equal(status.printSettings,false);assert.equal(status.printControl,false);
+  // The design tools are checked through a printer's MCP: with none yet, each row says so in plain words.
+  const noPrinter=/Add a printer in Settings › Printers/;
+  const blender=(await call('blender.check')).result?.blender;
+  assert.ok(blender,'blender.check answers');
+  const settled=blender.state==='checking'?await (async()=>{for(let i=0;i<100;i++){const now=(await call('blender.status')).result.blender;if(now.state!=='checking')return now;await new Promise(r=>setTimeout(r,20));}})():blender;
+  assert.equal(settled.state,'unavailable');assert.match(settled.message,noPrinter);
+  const fusion=await call('fusion.status');
+  assert.equal(fusion.error?.code,'unavailable');assert.match(fusion.error.message,noPrinter);
+  const cad=(await call('cad.status')).result?.cad;
+  assert.equal(cad?.state,'unavailable');assert.match(cad.message,noPrinter);assert.equal(cad.canSetUp,false);
+  // A paired phone's project list answers too (not 404, which phones read as "isn't ready").
+  const invitation=(await call('pairing.create')).result;
+  const phone=await f.auth.exchange('owner@example.test',{code:invitation.code,deviceName:'Local fixture'});
+  const listed=await new Promise((resolve,reject)=>{
+    const req=request(address+'/v1/objects',{headers:{host:f.auth.host,'x-forwarded-host':f.auth.host,'x-forwarded-proto':'https','tailscale-user-login':'owner@example.test','x-scan-device':phone.deviceId,authorization:`Bearer ${phone.token}`}},res=>{let body='';res.on('data',c=>body+=c);res.once('end',()=>resolve({status:res.statusCode,body}));});req.once('error',reject);req.end();
+  });
+  assert.equal(listed.status,200,listed.body);
+  child.kill('SIGTERM');await exited;
+});
+
 test('long methods get their own socket deadline; everything else keeps 10 s', async () => {
   const {methodDeadlineMs} = await import('../dist/local-control.js');
   assert.equal(methodDeadlineMs('objects.correct', {}), 25000);
