@@ -1148,6 +1148,7 @@ struct ResultSection: View {
     let store: ProjectsStore
     let project: Project
     @Environment(AppModel.self) private var app
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
