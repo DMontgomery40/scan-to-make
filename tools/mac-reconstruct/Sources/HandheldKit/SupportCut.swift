@@ -41,7 +41,9 @@ public struct SupportCut: Equatable {
 /// half. With the backdrop keyed out (BackdropKey) Apple keeps the rig's stand under the plate, which pushes the plate
 /// just past the bottom half: on David's Nov 14 scan as a loose chunk, on his Nov 8 scan joined to the plate, at 52% of
 /// the model's height. A support sits low with the object standing on it; an object's own high step (a step stool's
-/// top, a shelf's top board) sits above 60% and is never searched (review of #801, F3). Step 4 still has to hold.
+/// top, a shelf's top board) sits above 60% and is never searched (review of #801, F3). Step 4 still has to hold, and
+/// it is the only guard in the 50–60% band: an object's own step there (a chair's seat under a tall back) is cut as a
+/// support (#803; `testAnObjectsOwnStepInTheRetryBandIsNeverCutAsASupport` is an expected failure until it is settled).
 public func removeSupport(_ corners: [SIMD3<Float>], clearance: Double = 0.5, band: Double = 2,
                           maximumTilt: Double = 15, minimumOutsideArea: Double = 5000) -> (corners: [SIMD3<Float>], cut: SupportCut)? {
     if let cut = removeSupportOnce(corners, clearance: clearance, band: band, maximumTilt: maximumTilt, minimumOutsideArea: minimumOutsideArea) {

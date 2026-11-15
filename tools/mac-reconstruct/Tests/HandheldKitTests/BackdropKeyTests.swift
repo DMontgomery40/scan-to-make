@@ -130,8 +130,40 @@ final class BackdropKeyTests: XCTestCase {
         let frame = try BackdropKey.key(image: try pixelBuffer(from: ctx.makeImage()!), depth: DepthImage(width: dw, height: dh, metres: metres))
         XCTAssertGreaterThan(frame.panelShare, 0.2, "one big, flat region of the colour")
         XCTAssertGreaterThanOrEqual((frame.backdropDepth ?? 0) - (frame.nearestDepth ?? 1), BackdropKey.minimumGap, "deep enough to pass the old test")
-        XCTAssertFalse(frame.isBackdrop, "front step \(String(describing: frame.frontStep))")
+        // Review of #811 (R1): pin the measured step, not only the decision. Its near edge is 2 cells inside the crate
+        // (0.225 m) against 3 cells out on the table (0.189 m): 0.036 m, just under the threshold.
+        let step = try XCTUnwrap(frame.frontStep, "the table is nearer than the crate's near edge")
+        XCTAssertEqual(step, 0.036, accuracy: 0.002)
+        XCTAssertLessThan(step, BackdropKey.minimumFrontStep)
+        XCTAssertFalse(frame.isBackdrop, "front step \(step)")
         XCTAssertEqual(frame.keep.onCount, frame.keep.width * frame.keep.height, "the crate keeps its back")
+    }
+
+    /// Review of #811 (R1): the other side of the threshold. On Nov 8's dim rig photos the surfaces next to the panel
+    /// sit only about 0.05 m nearer than it: the plate runs back towards the panel, and the depth map blurs the step. A
+    /// panel at 0.41 m, the plate rising away from the camera to meet it (0.017 m per depth cell, so 0.051 m across
+    /// the sampled five cells), and the letter at 0.17 m: it must still key. A change to how `frontStep` samples that
+    /// shrinks this step fails here, before it lets the green back into dim rig scans.
+    func testADimRigPhotoWithAShallowFrontStepIsStillKeyed() throws {
+        let w = 120, h = 80, dw = 60, dh = 40
+        let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
+                            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)!
+        ctx.setFillColor(CGColor(red: 166/255, green: 139/255, blue: 116/255, alpha: 1)); ctx.fill(CGRect(x: 0, y: 0, width: w, height: h))  // plate
+        ctx.setFillColor(CGColor(red: 160/255, green: 147/255, blue: 31/255, alpha: 1)); ctx.fill(CGRect(x: 60, y: 0, width: 60, height: h))  // panel
+        ctx.setFillColor(CGColor(red: 35/255, green: 27/255, blue: 18/255, alpha: 1)); ctx.fill(CGRect(x: 10, y: 20, width: 20, height: 40)) // letter
+        // Depth: the panel (cell columns 30…59) at 0.41 m; the plate left of it rising from 0.17 m to meet it; the
+        // letter (cell columns 5…14) at 0.17 m.
+        var metres = [Float](repeating: 0.41, count: dw * dh)
+        for y in 0..<dh { for x in 0..<30 { metres[y * dw + x] = max(0.17, 0.41 - 0.017 * Float(30 - x)) } }
+        for y in 10..<30 { for x in 5..<15 { metres[y * dw + x] = 0.17 } }
+        let frame = try BackdropKey.key(image: try pixelBuffer(from: ctx.makeImage()!), depth: DepthImage(width: dw, height: dh, metres: metres))
+        let step = try XCTUnwrap(frame.frontStep)
+        XCTAssertEqual(step, 0.051, accuracy: 0.002, "as Nov 8's dim photos measure")
+        XCTAssertGreaterThanOrEqual(step, BackdropKey.minimumFrontStep)
+        XCTAssertTrue(frame.isBackdrop, "front step \(step)")
+        XCTAssertFalse(kept(frame, 100, 40), "the panel")
+        XCTAssertTrue(kept(frame, 20, 40), "the letter")
+        XCTAssertTrue(kept(frame, 40, 10), "the plate")
     }
 
     /// Review of #801 (F5): the object mask on a synthetic keyed photo. The panel's area and the room outside Vision's

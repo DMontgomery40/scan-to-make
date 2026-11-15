@@ -53,7 +53,8 @@ macOS command-line tools for rebuilding and checking scans on the Mac.
   outside the footprint of what stands on it, so an object's own step (a sign's plank under its letters) is never
   cut. When nothing is found it tries again without loose pieces floating wholly below the largest one, then over the
   model's lower 60% (a rig's stand under its plate pushes the plate just past the bottom half; an object's own high
-  step, a stool's top or a shelf's top board, sits above that and is never cut). The cut is then closed (`HandheldKit/Cap.swift`): each opening it left on the plane is filled flat by ear
+  step, a stool's top or a shelf's top board, sits above that and is never cut; one between 50% and 60%, such as a
+  chair's seat under a tall back, is still cut, #803). The cut is then closed (`HandheldKit/Cap.swift`): each opening it left on the plane is filled flat by ear
   clipping its own edge, holes kept (a hollow foot gets a ring, not a disc), with no new corners, so the kept triangles
   are unchanged and a scan that was watertight stays watertight. The result is levelled on the plane, turned so its
   long side runs along x, and drawn for the project page. The `{"done":…}` line then carries `"support"`, with

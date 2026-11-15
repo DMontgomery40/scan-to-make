@@ -285,6 +285,26 @@ final class HandheldKitTests: XCTestCase {
         XCTAssertNil(removeSupport(tilted(legs + seat + rail)))
     }
 
+    /// Review of #811 (R3): a chair, scanned on the floor with nothing under it. Its seat is at 52–58% of its height,
+    /// where the Nov 8 rig's plate sat, with a tall back standing on its rear edge. The bottom half has no wide upward
+    /// face, so the retry over the lower 60% finds the seat, and what stands on it (the back) leaves most of the seat
+    /// outside its footprint, as a plate does: today the seat is taken for a support and the legs are cut away.
+    ///
+    /// Expected to fail until #803 is settled. Tried: keep the retry's cut only when what lies below halfway down sits
+    /// mostly under what stands on it (a stand under the sign, not legs at the corners). That passes this chair, but
+    /// the Nov 8 rebuilds that reach the retry fail it, so their plate would stay on: `out-nov8-H2` 9,252 mm² beside
+    /// the sign's footprint against 5,868 under it, `nov8-C` 2,142 against 1,520. The rig's stand reaches wider than
+    /// the 35 mm-deep sign. A chair whose back stands over its back legs would measure the same.
+    func testAnObjectsOwnStepInTheRetryBandIsNeverCutAsASupport() {
+        let legs = [SIMD3<Float>(-90, -90, 0), SIMD3(70, -90, 0), SIMD3(-90, 70, 0), SIMD3(70, 70, 0)]
+            .flatMap { box($0, $0 + SIMD3(20, 20, 52)) }
+        let seat = box(SIMD3(-100, -100, 52), SIMD3(100, 100, 58))
+        let back = box(SIMD3(-100, 90, 58), SIMD3(100, 100, 100))
+        XCTExpectFailure("#803: an object's own step at 50–60% of its height is cut by the retry for a rig's plate")
+        XCTAssertNil(removeSupport(legs + seat + back))
+        XCTAssertNil(removeSupport(tilted(legs + seat + back)))
+    }
+
     /// A hollow object (a tube 60 mm across with a 40 mm bore, closed at the top) on a plate: the cut leaves a ring with
     /// a hole in it. Only the ring is filled; the bore stays open underneath, so the volume leaves it out.
     func testAHollowObjectsCutIsARingNotADisc() throws {
