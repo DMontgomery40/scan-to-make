@@ -346,13 +346,15 @@ private extension StagePicture.Shows {
         while !Task.isCancelled {
             do {
                 if snapshots {
-                    let frame = project != nil ? try await client.camera(project: project!, fullScreen: fullScreen, previous: previous)
-                        : try await client.camera(printer: printer!, fullScreen: fullScreen, previous: previous)
+                    let frame: CompanionClient.CameraFrame
+                    if let project { frame = try await client.camera(project: project, fullScreen: fullScreen, previous: previous) }
+                    else if let printer { frame = try await client.camera(printer: printer, fullScreen: fullScreen, previous: previous) }
+                    else { return }
                     if previous == nil || frame.etag == nil || frame.etag != previous?.etag { await display(frame) }
                     previous = frame; problem = nil
                 } else {
-                    let frames = project != nil ? client.cameraFrames(project: project!, fullScreen: fullScreen)
-                        : client.cameraFrames(printer: printer!, fullScreen: fullScreen)
+                    guard let frames = project.map({ client.cameraFrames(project: $0, fullScreen: fullScreen) })
+                        ?? printer.map({ client.cameraFrames(printer: $0, fullScreen: fullScreen) }) else { return }
                     for try await frame in frames { await display(frame) }
                 }
             } catch let error as CompanionError {
@@ -510,7 +512,8 @@ struct ZoomableImage: UIViewRepresentable {
             accessibilityTraits = [.image]
             accessibilityLabel = "Picture"
         }
-        required init?(coder: NSCoder) { fatalError() }
+        /// Never made from a storyboard; nil rather than a crash if it ever were (#840).
+        required init?(coder: NSCoder) { return nil }
 
         override func layoutSubviews() {
             super.layoutSubviews()
