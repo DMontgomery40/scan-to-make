@@ -490,15 +490,17 @@ struct CounterpartCommands: Commands {
         guard path.hasPrefix("/Applications/") || path.hasPrefix(userApps), installation.service.status == .enabled,
               let build = installation.bundle.object(forInfoDictionaryKey:"CFBundleVersion") as? String, !build.isEmpty else { return }
         let socket = ModelAccessModel.socketPath(for:installation), target = "gui/\(getuid())/\(installation.label)"
-        let check = CompanionBuildCheck(appBuild:build, effects:.init(
+        let check = CompanionBuildCheck(appBuild:build, appPayload:installation.resources.appendingPathComponent("Payload").path, effects:.init(
             status: {
-                do { return .success(try await ControlClient(socketPath:socket, timeout:5).status().appBuild) }
-                catch { return .failure(error) }
+                do {
+                    let status = try await ControlClient(socketPath:socket, timeout:5).status()
+                    return .success(.init(build:status.appBuild, payload:status.appPayload))
+                } catch { return .failure(error) }
             },
             ask: { await Self.askOnce() },
             waitUntilIdle: { [weak self] in await self?.waitUntilIdle(announce:true) },
             restart: { _ = try? await Task.detached { try command(URL(fileURLWithPath:"/bin/launchctl"), ["kickstart", "-k", target]) }.value },
-            pause: { try? await Task.sleep(for:.seconds(2)) },
+            pause: { try? await Task.sleep(for:.seconds(CompanionBuildCheck.pauseSeconds)) },
             say: { [weak self] in self?.showNotice($0) }))
         Task { @MainActor in _ = await check.run() }
     }

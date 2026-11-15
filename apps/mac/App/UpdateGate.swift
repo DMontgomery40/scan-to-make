@@ -163,34 +163,56 @@ enum UpdateGate {
 /// working companion is restarted only once idle (the update gate, with its waiting sentence); one that doesn't come
 /// back as this build is said plainly instead of leaving Settings › Printers spinning.
 @MainActor final class CompanionBuildCheck {
-    enum Outcome: Equatable { case current, restarted, notRunning, didNotComeBack }
+    enum Outcome: Equatable { case current, restarted, notRunning, didNotComeBack, otherCopy }
+    /// What status.get says launched the companion: `appBuild` and `appPayload`, both nil before #850.
+    struct Reported: Equatable { var build: String?; var payload: String? }
     static let didNotComeBack = "Counterpart couldn’t restart in the background after this update. Restart this Mac, then open Counterpart."
-    /// Asks after a restart (`pause` between each) before it is said not to have come back.
-    static let attempts = 30
+    /// Review F1: the agent belongs to another installed copy, and `kickstart -k` would relaunch that copy, not this one.
+    static func otherCopy(_ payload: String, home: String = NSHomeDirectory()) -> String {
+        var folder = URL(fileURLWithPath: payload).standardizedFileURL.deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent().path
+        if folder == home || folder.hasPrefix(home + "/") { folder = "~" + folder.dropFirst(home.count) }
+        return "Another copy of Counterpart, in \(folder), runs in the background. Open that one, or remove the extra copy."
+    }
+    /// About two minutes, under load, for a restarted companion to answer as this build (review F3).
+    static let pauseSeconds = 2.0
+    static let attempts = 60
     struct Effects {
-        /// status.get's `appBuild` (nil when it has none), or why it didn't answer.
-        var status: () async -> Result<String?, Error>
+        /// status.get's `appBuild` and `appPayload`, or why it didn't answer.
+        var status: () async -> Result<Reported, Error>
         var ask: () async -> UpdateGate.Decision
         /// Waits, saying so, until the companion is idle.
         var waitUntilIdle: () async -> Void
         /// `launchctl kickstart -k` of the companion's LaunchAgent.
         var restart: () async -> Void
+        /// `pauseSeconds`.
         var pause: () async -> Void
         var say: (String) -> Void
     }
-    let appBuild: String
+    let appBuild: String, appPayload: String
     private let effects: Effects
-    init(appBuild: String, effects: Effects) { self.appBuild = appBuild; self.effects = effects }
+    init(appBuild: String, appPayload: String, effects: Effects) { self.appBuild = appBuild; self.appPayload = appPayload; self.effects = effects }
+
+    private static func same(_ a: String, _ b: String) -> Bool {
+        let path = { (p: String) in URL(fileURLWithPath: p).standardizedFileURL.resolvingSymlinksInPath().path }
+        return path(a) == path(b)
+    }
 
     func run() async -> Outcome {
-        // Not answering: the usual start (pairing, readiness) deals with it.
-        guard case .success(let running) = await effects.status() else { return .notRunning }
-        if running == appBuild { return .current }
+        // Two tries (review F2); still no answer: the usual start (pairing, readiness) deals with it.
+        var first = await effects.status()
+        if case .failure = first { await effects.pause(); first = await effects.status() }
+        guard case .success(let running) = first else { return .notRunning }
+        if let payload = running.payload, !Self.same(payload, appPayload) {
+            effects.say(Self.otherCopy(payload))
+            return .otherCopy
+        }
+        if running.build == appBuild { return .current }
         if await effects.ask() == .wait { await effects.waitUntilIdle() }
         await effects.restart()
         for _ in 0..<Self.attempts {
             await effects.pause()
-            if case .success(let build) = await effects.status(), build == appBuild { return .restarted }
+            if case .success(let now) = await effects.status(), now.build == appBuild { return .restarted }
         }
         effects.say(Self.didNotComeBack)
         return .didNotComeBack
