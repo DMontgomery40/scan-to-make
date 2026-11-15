@@ -2094,8 +2094,11 @@ final class LayoutParityUITests: XCTestCase {
         for _ in 0..<12 where !(share.exists && share.isHittable) { app.swipeUp() }
         XCTAssertTrue(share.isHittable, "Share Diagnostics… is reachable on the \(regular ? "iPad" : "iPhone")")
         XCTAssertTrue(share.label.contains("Share Diagnostics…"), share.label)
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "A ZIP of this \(regular ? "iPad" : "iPhone")")).firstMatch.exists,
-                      "it says what it sends")
+        // The footer is the List's last lines: on the iPad's shorter landscape sheet it can still be below the fold.
+        let says = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "A ZIP of this \(regular ? "iPad" : "iPhone")")).firstMatch
+        for _ in 0..<4 where !(says.exists && says.isHittable) { app.swipeUp() }
+        XCTAssertTrue(says.waitForExistence(timeout: 5), "it says what it sends")
+        XCTAssertTrue(share.isHittable)
         try shoot(app, "share-diagnostics-row")
         share.tap()
         // The share sheet runs out of process; its title row names the file, and it offers Save to Files.
