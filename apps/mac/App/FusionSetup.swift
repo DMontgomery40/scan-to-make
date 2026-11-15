@@ -39,6 +39,17 @@ enum FusionSetup {
         }
     }
 
+    /// Settings → AI's Fusion row. `unavailable`: the companion said why Fusion can't be checked here (with no printer
+    /// yet, the printer MCP that finds Fusion isn't there), in its own words; nothing to retry until that changes.
+    enum Row: Equatable {
+        case checking, notInstalled, found, settingUp, setUp, unchecked, unavailable
+        /// The row and its words after a check that didn't answer: a companion refusal reads as its sentence (#827).
+        static func afterCheck(failed error: Error) -> (Row, String) {
+            if let refusal = error as? ControlRemoteError, refusal.code == "unavailable" { return (.unavailable, refusal.localizedDescription) }
+            return (.unchecked, error.localizedDescription)
+        }
+    }
+
     enum Failure: LocalizedError, Equatable {
         case busy, noPrinterMCP, noSetupTool(server: String), notReady(String?), setup(String)
         var errorDescription: String? {

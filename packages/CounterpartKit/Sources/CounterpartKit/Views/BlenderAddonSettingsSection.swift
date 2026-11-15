@@ -9,6 +9,8 @@ public struct BlenderAddonSettingsSection: View {
     @State private var working = false
     @State private var action = BlenderAddonStatus.Action.check
     @State private var revision = 0
+    /// The setup page's cleanup tools section.
+    public static let cleanupGuide = URL(string: "https://counterpart.dtmont.com/beta.html#cleanup")!
     public init(request: @escaping @MainActor @Sendable (BlenderAddonStatus.Action) async throws -> BlenderAddonStatus) { self.request = request }
     public var body: some View {
         Section {
@@ -23,7 +25,11 @@ public struct BlenderAddonSettingsSection: View {
                 }
             }
         } header: { Text("Blender · Optional") } footer: {
-            Text("Blender is used for scan cleanup and model changes. Printing an existing model or reprinting needs neither Blender nor Fusion. Updating the add-on backs up its existing file; save your work before restarting Blender.")
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Blender is used for scan cleanup and model changes. Printing an existing model or reprinting needs neither Blender nor Fusion. Updating the add-on backs up its existing file; save your work before restarting Blender.")
+                // #827: how to install Blender and the scan cleanup tools, in the setup page's own guide.
+                Link("Setting up Blender and scan cleanup", destination: Self.cleanupGuide)
+            }
         }
         .task(id: revision) { await run() }
     }
