@@ -122,6 +122,15 @@ class BlankCheckTests(unittest.TestCase):
         unknown = self.check(self.stage_frame(picture=True), *CHIPS, self.stage(''))
         self.assertTrue(unknown and 'no state' in unknown[0], unknown)
 
+    def test_a_quiet_stage_passes_only_with_the_line_under_it_saying_why(self):
+        # Review of #831: a model that failed over a picture still coming leaves the stage quiet, never a spinner
+        # beside the failure; the line under the stage says why.
+        line = node('StaticText', "Your scan's 3D model couldn't be shown on this iPad.", (16, 390, W - 32, 20),
+                    identifier='gallery-model-unavailable')
+        self.assertEqual(self.check(self.stage_frame(), *CHIPS, self.stage('quiet'), line), [])
+        silent = self.check(self.stage_frame(), *CHIPS, self.stage('quiet'))
+        self.assertTrue(silent and 'quiet' in silent[0], silent)
+
     def test_a_folder_flags_frames_without_the_app_and_writes_blank_md(self):
         with tempfile.TemporaryDirectory() as folder:
             out = Path(folder)

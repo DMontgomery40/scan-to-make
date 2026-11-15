@@ -308,7 +308,7 @@ def screens(ids: dict, record: str, offline_record: str, fixtures: Path, offline
     add('fx-ask', 'Project: question', 'close-up asked', 'fixture', fixture('-CounterpartScreen', 'ask'), pages=2)
     # A scan stopped before the #795 fix, sent by itself to the project asking for it (#825).
     add('fx-ask-stranded-sending', 'Project: sending a stranded scan', 'sending 68 kept photos', 'fixture',
-        fixture('-CounterpartScreen', 'ask', '-CounterpartRecoveringScan', '68'), pages=1)
+        fixture('-CounterpartScreen', 'ask', '-CounterpartRecoveringScan', '68', set_='ask-stranded'), pages=1)
     # The question asking for photos that a stopped scan on this phone can answer: Send or Remove (review of #831).
     add('fx-ask-stranded', 'Project: question, stopped scan kept', '68 photos on this phone', 'fixture',
         fixture('-CounterpartScreen', 'ask', set_='ask-stranded'), pages=2)
