@@ -1567,9 +1567,11 @@ enum ARModel {
             }
         }
         let abandoned = now.addingTimeInterval(-2 * Double(exportDeadline.components.seconds))
-        for name in names where name.hasPrefix("ar-") && [".usda", ".usdz"].contains(where: { name.lowercased().hasSuffix($0) }) {
+        // Only the writer's own scratch names (`PartUSDZ.isScratch`), and only when the file's date can be read and is old
+        // enough that no write could still own it (review R4 on #843).
+        for name in names where PartUSDZ.isScratch(name) {
             let file = folder.appendingPathComponent(name)
-            let modified = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
+            guard let modified = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate else { continue }
             if modified < abandoned {
                 try? FileManager.default.removeItem(at: file)
                 MediaTrace.record("ar.scratch-removed", ["name": String(name.suffix(5))])

@@ -20,7 +20,7 @@ public enum PartUSDZ {
     /// scratch file beside it so a half-written file is never there to be reused. Call it off the main actor.
     public static func write(_ triangles: [Triangle], srgb: SIMD3<Float>, to target: URL) throws {
         let folder = target.deletingLastPathComponent()
-        let scratch = folder.appendingPathComponent("ar-\(UUID().uuidString)")
+        let scratch = folder.appendingPathComponent(scratchPrefix + UUID().uuidString)
         let layer = scratch.appendingPathExtension("usda"), packed = scratch.appendingPathExtension("usdz")
         defer { try? FileManager.default.removeItem(at: layer); try? FileManager.default.removeItem(at: packed) }
         guard try usda(triangles, srgb: srgb, to: layer) > 0 else { throw Failure.empty }
@@ -29,6 +29,22 @@ public enum PartUSDZ {
         guard isUSDZ(packed) else { throw Failure.notUSDZ }
         try? FileManager.default.removeItem(at: target)
         try FileManager.default.moveItem(at: packed, to: target)
+    }
+
+    /// The writer's scratch files beside the target: `ar-scratch-1-<UUID>.usda` and `.usdz` (the 1 is this naming's
+    /// version), so a cleanup can tell them from anything else in the folder.
+    public static let scratchPrefix = "ar-scratch-1-"
+
+    /// Whether `name` is one of this writer's scratch files: its exact prefix and a whole UUID, or the bare `ar-<UUID>` that
+    /// builds before #840 left beside a part each time the write trapped. Nothing else matches (review R4 on #843).
+    public static func isScratch(_ name: String) -> Bool {
+        let ext = (name as NSString).pathExtension, stem = (name as NSString).deletingPathExtension
+        guard ext == "usda" || ext == "usdz" else { return false }
+        for prefix in [scratchPrefix, "ar-"] where stem.hasPrefix(prefix) {
+            let id = String(stem.dropFirst(prefix.count))
+            if id.count == 36, UUID(uuidString: id) != nil { return true }
+        }
+        return false
     }
 
     /// Whether the file is a USDZ package: a zip whose first entry is a USD layer (`.usdc` or `.usda`, by its bytes too).
@@ -90,8 +106,10 @@ public enum PartUSDZ {
         /// A number with `places` decimals, without Foundation's formatter (millions of them). Total (#840): a value that
         /// isn't a finite number within `Int64` is written as 0 rather than converted, which trapped.
         func number(_ v: Float, places: Int, scale: Float) {
-            let scaled = (Double(v) * Double(scale)).rounded(), unit = Int64(scale)
-            guard scaled.isFinite, abs(scaled) < 1e15, unit > 0 else { text("0"); return }
+            let scaled = (Double(v) * Double(scale)).rounded()
+            // Every value is checked before it becomes an Int64, the scale too (review R3 on #843).
+            guard scaled.isFinite, abs(scaled) < 1e15, Double(scale) >= 1, Double(scale) < 1e15 else { text("0"); return }
+            let unit = Int64(Double(scale).rounded())
             var n = Int64(scaled)
             if n < 0 { buffer.append(UInt8(ascii: "-")); n = -n }
             let whole = n / unit, fraction = n % unit

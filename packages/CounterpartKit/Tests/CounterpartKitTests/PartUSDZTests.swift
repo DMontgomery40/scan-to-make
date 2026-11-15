@@ -142,6 +142,19 @@ final class PartUSDZTests: XCTestCase {
         }
     }
 
+    /// Review R4 on #843: the cleanup deletes only the writer's own scratch names, the current ones and the bare
+    /// `ar-<UUID>` crashed builds left; never a served file, a part's AR file, or a near miss.
+    func testOnlyTheWritersScratchNamesAreScratch() {
+        let id = UUID().uuidString
+        for name in ["\(PartUSDZ.scratchPrefix)\(id).usda", "\(PartUSDZ.scratchPrefix)\(id).usdz", "ar-\(id).usda", "ar-\(id).usdz"] {
+            XCTAssertTrue(PartUSDZ.isScratch(name), name)
+        }
+        for name in ["model.neutral.ar.usdz", "v1794096120479-current_model.f5547c.ar.usdz", "ar-\(id).stl", "ar-notauuid.usda",
+                     "ar-\(id.dropLast()).usda", "xar-\(id).usda", "ar-\(id)-1.usda", "scan_scan.usdz", "ar-.usda", "\(PartUSDZ.scratchPrefix).usdz"] {
+            XCTAssertFalse(PartUSDZ.isScratch(name), name)
+        }
+    }
+
     func testNothingToDrawWritesNothing() throws {
         let target = try folder().appendingPathComponent("empty.usdz")
         XCTAssertThrowsError(try PartUSDZ.write([], srgb: [1, 1, 1], to: target))
