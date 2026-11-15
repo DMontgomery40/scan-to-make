@@ -806,8 +806,10 @@ struct ProjectView: View {
             }
             // The photos it asks for may already be on this phone: a scan stopped before it was sent (#825). Sending it is a
             // tap; so is taking it off. The way out, too, when the phone's own send of it was refused.
-            if MacConnection.asksForScan(object), let stopped = store.stoppedScans[object.id] { keptScanAnswer(object, stopped) }
-            if answerable { AskButtons(store: store, project: object, sizes: sizesForm(object), working: $askWorking, problem: $askProblem) }
+            let kept = MacConnection.asksForScan(object) ? store.stoppedScans[object.id] : nil
+            if let kept { keptScanAnswer(object, kept) }
+            if answerable { AskButtons(store: store, project: object, sizes: sizesForm(object), keptScan: kept != nil && store.macCapabilities.contains("captureOnAsk"),
+                                       working: $askWorking, problem: $askProblem) }
             // The Mac takes a typed answer when it says so (KAN-214 #204, `answers` includes "text").
             if answerable, object.openAsk?.answers.contains("text") == true {
                 HStack(spacing: 8) {
