@@ -1554,8 +1554,9 @@ enum ARModel {
     }
 
     /// The AR files the app wrote before Nov 11 beside this STL (`model.usdz`, `model.<rrggbb>.usdz`) are Reality files:
-    /// never handed to AR Quick Look again, and their space comes back.
-    static func removeStale(beside url: URL) {
+    /// never handed to AR Quick Look again, and their space comes back. So do the scratch files a write left when the app
+    /// stopped partway (`ar-<uuid>.usda`/`.usdz`, #840: every crashed tap left one), once no write could still own them.
+    static func removeStale(beside url: URL, now: Date = Date()) {
         let folder = url.deletingLastPathComponent(), base = url.deletingPathExtension().lastPathComponent + "."
         guard let names = try? FileManager.default.contentsOfDirectory(atPath: folder.path) else { return }
         for name in names where name.hasPrefix(base) && name.lowercased().hasSuffix(".usdz") {
@@ -1563,6 +1564,15 @@ enum ARModel {
             if !PartUSDZ.isUSDZ(file) {
                 try? FileManager.default.removeItem(at: file)
                 MediaTrace.record("ar.stale-removed", ["name": name])
+            }
+        }
+        let abandoned = now.addingTimeInterval(-2 * Double(exportDeadline.components.seconds))
+        for name in names where name.hasPrefix("ar-") && [".usda", ".usdz"].contains(where: { name.lowercased().hasSuffix($0) }) {
+            let file = folder.appendingPathComponent(name)
+            let modified = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
+            if modified < abandoned {
+                try? FileManager.default.removeItem(at: file)
+                MediaTrace.record("ar.scratch-removed", ["name": String(name.suffix(5))])
             }
         }
     }

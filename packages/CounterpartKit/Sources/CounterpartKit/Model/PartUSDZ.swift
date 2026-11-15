@@ -50,20 +50,30 @@ public enum PartUSDZ {
     }
 
     /// sRGB-encoded to linear: UsdPreviewSurface's `diffuseColor` is linear, so the hex the printer reports is decoded.
-    public static func linear(_ c: Float) -> Float { c <= 0.04045 ? c / 12.92 : powf((c + 0.055) / 1.055, 2.4) }
+    /// A value outside 0…1 (or not a number) is held to it: a colour never stops the writer (#840).
+    public static func linear(_ c: Float) -> Float {
+        let c = c.isFinite ? min(1, max(0, c)) : 0
+        return c <= 0.04045 ? c / 12.92 : powf((c + 0.055) / 1.055, 2.4)
+    }
+
+    /// The farthest a corner may sit from the origin, in metres, for the part to be written: a printable part is well
+    /// inside it, and every number the layer writes stays far inside `Int64` (#840: a number that wasn't trapped the app).
+    static let reach: Float = 100_000
 
     /// The USD layer, streamed to `url` in chunks (a part can be half a million triangles). Returns the triangle count.
+    /// Nothing in a triangle can stop it (#840): a triangle with a corner that isn't a finite number within `reach`, or
+    /// with no normal (`STLMesh.faceNormal`), is left out, and every number is written by `number`, which can't trap.
     static func usda(_ triangles: [Triangle], srgb: SIMD3<Float>, to url: URL) throws -> Int {
         func stage(_ p: SIMD3<Float>) -> SIMD3<Float> { SIMD3(p.x, p.z, -p.y) * 0.001 }
-        var kept: [Triangle] = []
-        kept.reserveCapacity(triangles.count)
+        func near(_ p: SIMD3<Float>) -> Bool { p.x.isFinite && p.y.isFinite && p.z.isFinite && simd_reduce_max(simd_abs(p)) <= reach }
+        var kept: [Triangle] = [], normals: [SIMD3<Float>] = []
+        kept.reserveCapacity(triangles.count); normals.reserveCapacity(triangles.count)
         var low = SIMD3<Float>(repeating: .infinity), high = SIMD3<Float>(repeating: -.infinity)
         for t in triangles {
             let a = stage(t.0), b = stage(t.1), c = stage(t.2)
-            guard [a, b, c].allSatisfy({ $0.x.isFinite && $0.y.isFinite && $0.z.isFinite }),
-                  simd_length(simd_cross(b - a, c - a)) > 0 else { continue }
+            guard near(a), near(b), near(c), let n = STLMesh.faceNormal(a, b, c) else { continue }
             low = simd_min(low, simd_min(a, simd_min(b, c))); high = simd_max(high, simd_max(a, simd_max(b, c)))
-            kept.append((a, b, c))
+            kept.append((a, b, c)); normals.append(n)
         }
         guard !kept.isEmpty else { return 0 }
         // Resting on y = 0, its footprint centred on the origin.
@@ -77,14 +87,17 @@ public enum PartUSDZ {
             guard force || buffer.count > 1 << 22 else { return }
             try out.write(contentsOf: buffer); buffer.removeAll(keepingCapacity: true)
         }
-        /// A number with `places` decimals, without Foundation's formatter (millions of them).
+        /// A number with `places` decimals, without Foundation's formatter (millions of them). Total (#840): a value that
+        /// isn't a finite number within `Int64` is written as 0 rather than converted, which trapped.
         func number(_ v: Float, places: Int, scale: Float) {
-            var n = Int64((v * scale).rounded())
+            let scaled = (Double(v) * Double(scale)).rounded(), unit = Int64(scale)
+            guard scaled.isFinite, abs(scaled) < 1e15, unit > 0 else { text("0"); return }
+            var n = Int64(scaled)
             if n < 0 { buffer.append(UInt8(ascii: "-")); n = -n }
-            let whole = n / Int64(scale), fraction = n % Int64(scale)
+            let whole = n / unit, fraction = n % unit
             text(String(whole)); buffer.append(UInt8(ascii: "."))
             let digits = String(fraction)
-            for _ in digits.count..<places { buffer.append(UInt8(ascii: "0")) }
+            for _ in 0..<max(0, places - digits.count) { buffer.append(UInt8(ascii: "0")) }
             text(digits)
         }
         func vector(_ v: SIMD3<Float>, places: Int, scale: Float) {
@@ -121,8 +134,7 @@ public enum PartUSDZ {
         for i in 0..<(kept.count * 3) { if i > 0 { text(", ") }; text(String(i)); if i % 65_536 == 0 { try flush() } }
         text("]\n        rel material:binding = </Part/Materials/Filament>\n        normal3f[] normals = [")
         // Flat, per corner, as the stage draws it (`ModelStage.geometry`): a printed part's edges stay sharp.
-        for (i, t) in kept.enumerated() {
-            let n = simd_normalize(simd_cross(t.1 - t.0, t.2 - t.0))
+        for (i, n) in normals.enumerated() {
             for k in 0..<3 { if i > 0 || k > 0 { text(", ") }; vector(n, places: 4, scale: 1e4) }
             if i % 16_384 == 0 { guard !Task.isCancelled else { throw Failure.cancelled }; try flush() }
         }

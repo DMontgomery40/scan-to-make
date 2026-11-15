@@ -56,6 +56,92 @@ final class PartUSDZTests: XCTestCase {
         XCTAssertEqual(PartUSDZ.linear(0.02), 0.02 / 12.92, accuracy: 0.00001)
     }
 
+    /// #840, the exact crash input: sliver triangles from the merged mesh a Blender pass wrote beside David's Pink snap-lid
+    /// box 3MF (tris 5332, 5406, 5532, 34219, 34294 of `current/model.stl`) and his Guitar pick (tris 11562, 11718), byte
+    /// for byte (STL corners, little-endian Float32). Each cross product is about 1e-20, so its squared length is subnormal:
+    /// `simd_normalize` overflowed to `(nan, nan, ±inf)` and writing that normal (`Int64(NaN)`, PartUSDZ.swift:82) trapped.
+    static let slivers = [
+        "c45f0d42cdcc8e42c33b8533d82e0d42cdcc8e42802f8e33b4240d42cdcc8e428f0a9033",
+        "66669a4231ac6dc250656b3666669a42b0b86dc2b0706b3666669a4246bb6dc20b736b36",
+        "5fae0e4266668c4263d3d3336cb80e4266668c4255fcd133efe80e4266668c42e51bc933",
+        "b4240d42cdcc8e428f0a9033d82e0d42cdcc8e42802f8e33c45f0d42cdcc8e42c33b8533",
+        "66669a4246bb6dc20b736b3666669a42b0b86dc2b0706b3666669a4231ac6dc250656b36",
+        "0ba8a53f9b96cbbe9a99193f33c9a53ffb73c8be9a99193f5aeaa53f5b51c5be9a99193f",
+        "8610fa3f0a841a3e9a99193fd00bfb3f06991a3e9a99193f1907fc3f02ae1a3e9a99193f",
+    ].map(triangle)
+
+    /// Whether a USD layer writes a number that isn't one (`nan`, `inf`), as a word (never `assetInfo`).
+    static func notANumber(_ layer: String) -> Bool {
+        layer.range(of: #"(?<![A-Za-z])-?(nan|inf|infinity)(?![A-Za-z])"#, options: [.regularExpression, .caseInsensitive]) != nil
+    }
+
+    /// Three corners from 36 hex-encoded bytes (9 little-endian Float32s), as an STL record stores them.
+    static func triangle(_ hex: String) -> PartUSDZ.Triangle {
+        var bytes = [UInt8](); var index = hex.startIndex
+        while index < hex.endIndex { let next = hex.index(index, offsetBy: 2); bytes.append(UInt8(hex[index..<next], radix: 16) ?? 0); index = next }
+        let f: [Float] = (0..<9).map { i -> Float in
+            var bits: UInt32 = 0
+            for k in 0..<4 { bits |= UInt32(bytes[i * 4 + k]) << UInt32(8 * k) }
+            return Float(bitPattern: bits)
+        }
+        return (SIMD3(f[0], f[1], f[2]), SIMD3(f[3], f[4], f[5]), SIMD3(f[6], f[7], f[8]))
+    }
+
+    /// #840: the pink box's slivers beside a real part write a real USDZ. A sliver keeps its true normal (worked in
+    /// `Double`), and no number in the layer is NaN or infinite.
+    func testThePinkSnapLidBoxsSliverTrianglesWriteAUSDZInsteadOfCrashing() throws {
+        let folder = try folder()
+        let layer = folder.appendingPathComponent("layer.usda")
+        let kept = try PartUSDZ.usda(Self.box() + Self.slivers, srgb: [0.96, 0.33, 0.49], to: layer)
+        let stage = { (p: SIMD3<Float>) in SIMD3(p.x, p.z, -p.y) * 0.001 }
+        let normals = Self.slivers.compactMap { STLMesh.faceNormal(stage($0.0), stage($0.1), stage($0.2)) }
+        XCTAssertGreaterThanOrEqual(normals.count, 5, "a sliver with an area keeps its true normal; one exactly on a line has none")
+        XCTAssertEqual(kept, Self.box().count + normals.count, "every triangle with a normal is written")
+        for n in normals {
+            XCTAssertEqual(simd_length(n), 1, accuracy: 0.001)
+            XCTAssertEqual(simd_reduce_max(simd_abs(n)), 1, accuracy: 0.001, "a flat sliver on the lid faces straight along an axis")
+        }
+        XCTAssertFalse(Self.notANumber(try String(contentsOf: layer, encoding: .utf8)), "every number written is finite")
+        let target = folder.appendingPathComponent("model.f5547c.ar.usdz")
+        try PartUSDZ.write(Self.box() + Self.slivers, srgb: [0.96, 0.33, 0.49], to: target)
+        XCTAssertTrue(PartUSDZ.isUSDZ(target))
+    }
+
+    /// #840, the sweep: no triangle the writer can be handed stops the app. Each odd triangle, alone and beside a real part:
+    /// the writer either writes a USDZ whose numbers are all finite or says there is nothing to show.
+    func testNoTriangleCanStopTheWriter() throws {
+        let folder = try folder()
+        let big = Float.greatestFiniteMagnitude, tiny = Float.leastNonzeroMagnitude
+        let odd: [String: PartUSDZ.Triangle] = [
+            "nan": (SIMD3(.nan, 0, 0), SIMD3(1, 0, 0), SIMD3(0, 1, 0)),
+            "infinity": (SIMD3(.infinity, 0, 0), SIMD3(1, 0, 0), SIMD3(0, 1, 0)),
+            "largest float": (SIMD3(big, 0, 0), SIMD3(-big, big, 0), SIMD3(0, -big, big)),
+            "1e30 mm": (SIMD3(1e30, 0, 0), SIMD3(0, 1e30, 0), SIMD3(0, 0, 1e30)),
+            "1e16 mm (past Int64 at 1e6 per metre)": (SIMD3(1e16, 0, 0), SIMD3(0, 1e16, 0), SIMD3(0, 0, 1e16)),
+            "subnormal corners": (SIMD3(tiny, 0, 0), SIMD3(0, tiny, 0), SIMD3(0, 0, tiny)),
+            "one point": (SIMD3(5, 5, 5), SIMD3(5, 5, 5), SIMD3(5, 5, 5)),
+            "a line": (SIMD3(0, 0, 0), SIMD3(1, 1, 1), SIMD3(2, 2, 2)),
+            "a sliver at 1e-6 mm": (SIMD3(35, 71, 0), SIMD3(35.5, 71, 1e-6), SIMD3(36, 71, 0)),
+            "a sliver at 1e-9 mm": (SIMD3(35, 71, 0), SIMD3(35.5, 71, 1e-9), SIMD3(36, 71, 0)),
+            "a speck": (SIMD3(0, 0, 0), SIMD3(1e-20, 0, 0), SIMD3(0, 1e-20, 0)),
+        ]
+        for (name, triangle) in odd {
+            for triangles in [[triangle], Self.box() + [triangle]] {
+                let target = folder.appendingPathComponent("\(UUID().uuidString).usdz")
+                do {
+                    try PartUSDZ.write(triangles, srgb: [0.5, 0.5, 0.5], to: target)
+                    XCTAssertTrue(PartUSDZ.isUSDZ(target), name)
+                } catch {
+                    XCTAssertEqual(error as? PartUSDZ.Failure, .empty, "\(name): \(error)")
+                }
+                let layer = folder.appendingPathComponent("\(UUID().uuidString).usda")
+                if (try? PartUSDZ.usda(triangles, srgb: [.nan, .infinity, -1], to: layer)) ?? 0 > 0 {
+                    XCTAssertFalse(Self.notANumber(try String(contentsOf: layer, encoding: .utf8)), "\(name): every number written is finite")
+                }
+            }
+        }
+    }
+
     func testNothingToDrawWritesNothing() throws {
         let target = try folder().appendingPathComponent("empty.usdz")
         XCTAssertThrowsError(try PartUSDZ.write([], srgb: [1, 1, 1], to: target))
