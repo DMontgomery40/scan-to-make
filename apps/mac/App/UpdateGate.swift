@@ -72,7 +72,9 @@ enum UpdateGate {
                 unansweredSince = nil
                 return projects.contains(where: interrupts) ? .wait : .install
             case .failure(let error):
-                let answeredBadly = error is ControlRemoteError
+                // #850: a companion that says it has no projects (`unavailable`, beta 6 with no printer) has none to protect.
+                let noProjects = (error as? ControlRemoteError)?.code == "unavailable"
+                let answeredBadly = (error is ControlRemoteError && !noProjects)
                     || [.timedOut, .invalidResponse].contains(error as? ControlClientError)
                 guard answeredBadly else { unansweredSince = nil; return .install }
                 let since = unansweredSince ?? now

@@ -55,6 +55,8 @@ final class UpdateGateTests: XCTestCase {
         var waiter = UpdateGate.Waiter()
         XCTAssertEqual(waiter.next(.failure(ControlClientError.unavailable)), .install)
         XCTAssertEqual(waiter.next(.failure(ControlClientError.invalidEndpoint)), .install)
+        // #850: beta 6's companion with no printer refuses objects.list as `unavailable`: it has no projects to protect.
+        XCTAssertEqual(waiter.next(.failure(ControlRemoteError(code: "unavailable", message: "That isn’t available on your Mac right now."))), .install)
     }
 
     /// Review F5: a companion that answers badly, busy or not in time may be working, so it holds the install, but
