@@ -1003,7 +1003,7 @@ private actor HeldDownload {
         defer { try? FileManager.default.removeItem(at: folder) }
         var lying = Self.boxSTL(); withUnsafeBytes(of: UInt32.max.littleEndian) { lying.replaceSubrange(80..<84, with: $0) }
         var root = URL(fileURLWithPath: #filePath)
-        for _ in 0..<4 { root.deleteLastPathComponent() }
+        for _ in 0..<5 { root.deleteLastPathComponent() }
         let zips = root.appendingPathComponent("packages/CounterpartKit/Tests/CounterpartKitTests/Fixtures")
         let ascii = Data("solid p\nvertex 0 0 0\nvertex 10 0 0\nvertex 0 10 0\nvertex 0 0 0\nvertex 0 10 0\nvertex 0 0 10\nendsolid p\n".utf8)
         // true: a USDZ is made; false: nil; nil: either, so long as it doesn't crash.
