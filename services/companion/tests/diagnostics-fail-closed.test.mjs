@@ -274,3 +274,71 @@ test('property: the review\'s syntaxes (multipart, single-quote splits, form-url
     }
   }
 });
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Reason tags on a withheld line (after the auth-state rescue was reverted: it kept original text and leaked). A
+// withheld line names the auth states it mentions from a fixed list, never with any of its own text.
+
+const {WITHHELD_REASONS: TAGS = []} = await import('../dist/diagnostics.js');
+const MARKER = /^\[line withheld: may contain a secret(?: · mentions: ([^\]]+))?\]$/;
+const onlyMarker = line => {
+  const m = MARKER.exec(line.replace(/^\S+ (?:error|warn) /, ''));
+  return !!m && (m[1] ?? '').split(', ').filter(Boolean).every(tag => TAGS.includes(tag));
+};
+const REAL = 'Failed to authenticate: this login reached its time limit and cannot be renewed. Run `claude auth login` to sign in again, or use `claude setup-token` and set CLAUDE_CODE_OAUTH_TOKEN for unattended jobs';
+
+test('the real pass.failed body is withheld with its reasons named, in the event log, an MCP file and a note', async t => {
+  const events = `${JSON.stringify({v: 1, seq: 5641, type: 'pass.failed', title: 'A replica didn\'t finish', body: REAL})}\n`;
+  const bundle = await bundleOf(t, `2026-11-14T16:55:13.912Z error ${REAL}`, {events, notes: [REAL]});
+  const body = JSON.parse(bundle.files.find(file => file.name === 'events-tail.ndjson').content.trim()).body;
+  const file = bundle.files.find(item => item.name.endsWith('/any.log')).content;
+  for (const out of [body, file, bundle.notes.find(note => note.includes('withheld'))?.replace(/^.*?: (?=\[line withheld)/, '')]) {
+    assert.ok(out && onlyMarker(out), String(out));
+    for (const tag of ['failed to authenticate', 'login time limit', 'claude auth login']) assert.ok(out.includes(tag), `${tag}: ${out}`);
+  }
+  assert.ok(file.startsWith('2026-11-14T16:55:13.912Z error [line withheld'), file);
+});
+
+const X_PROBES = [
+  ['the password sunflower was rejected', 'sunflower'], ['password zxqvbn rejected', 'zxqvbn'], ['wrong password zxqvbn', 'zxqvbn'],
+  ['password zxqvbn is wrong', 'zxqvbn'], ['password is wrong zxqvbn', 'zxqvbn'], ['access code is wrong 48291037', '48291037'],
+  ['the access code was rejected 48291037', '48291037'], ['access code wrong 4829', '4829'], ['token expired zxqvbnmk', 'zxqvbnmk'],
+  ['zxqvbnmk token expired', 'zxqvbnmk'], ['expired zxqvbnmk token', 'zxqvbnmk'], ['TOKEN EXPIRED ZXQVBNMK', 'ZXQVBNMK'],
+  ['authentication failed: password zxqvbnmk rejected by the printer', 'zxqvbnmk'], ['invalid credentials, password zxqvbnmk', 'zxqvbnmk'],
+  ['LAN login failed, access code rejected (48291037)', '48291037'], ['cloud token refresh failed for zxqvbnmk', 'zxqvbnmk'],
+  ['token expired; password zxqvbn', 'zxqvbn'], ['password for this printer is zxqvbn and was rejected', 'zxqvbn'],
+  ['CLAUDE_CODE_OAUTH_TOKEN zxqvbnmk expired', 'zxqvbnmk'], ['CLAUDE_CODE_OAUTH_TOKEN zxqvbnmk is expired', 'zxqvbnmk'],
+  ['password：zxqvbn rejected', 'zxqvbn'], ['token “zxqvbnmk” expired', 'zxqvbnmk'], ['password `zxqvbn` rejected', 'zxqvbn'],
+  ['run claude auth login zxqvbnmk', 'zxqvbnmk'], ['invalid token eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0.c2ln', 'eyJzdWIiOiIxMjM0In0'],
+  ['token invalid eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0.c2ln', 'eyJzdWIiOiIxMjM0In0'], ['Bearer zq4829 expired', 'zq4829'],
+  ['Bearer zqalpha expired', 'zqalpha'], ['token expired, new token zqnewtoken', 'zqnewtoken'], ['new token zqnewtoken, token expired', 'zqnewtoken'],
+  ['token=zqvalue9 expired', 'zqvalue9'], ['password is hunter2x', 'hunter2x'], ['access code 48291037 rejected', '48291037'],
+  ['token "zq7quoted" expired', 'zq7quoted'], ['auth failed for user:pqzz77@host.example', 'pqzz77'], ['token expired\n  zq7continued', 'zq7continued'],
+];
+test('the focused check\'s probes stay withheld on every route', async t => {
+  const out = JSON.stringify(await bundleOf(t, X_PROBES.map(([text]) => text).join('\n'), {notes: X_PROBES.map(([text]) => text),
+    events: X_PROBES.map(([text], seq) => JSON.stringify({seq, type: 'pass.failed', body: text})).join('\n') + '\n'}));
+  for (const [text, secret] of X_PROBES) assert.ok(!out.includes(secret), `${text}: leaked ${secret}`);
+});
+
+test('property: a withheld line\'s output is only the fixed marker and phrases from the list', async t => {
+  let seed = 0x7a7;
+  const rand = n => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed % n; };
+  const pick = list => list[rand(list.length)];
+  const WORDS = ['password', 'token', 'access code', 'api key', 'session', 'secret', 'auth'];
+  const STATES = ['expired', 'rejected', 'is wrong', 'refresh failed', 'invalid', 'denied', 'time limit', 'Unauthorized 401', 'sign in again'];
+  const alphabet = 'abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const lines = [], values = [];
+  for (let i = 0; i < 200; i++) {
+    const value = Array.from({length: 4 + rand(10)}, () => alphabet[rand(alphabet.length)]).join('');
+    const parts = [pick(WORDS), pick(STATES), value, pick(['login', 'for the printer', '(', '“', '`', '：', '=']), pick(WORDS)];
+    for (let j = parts.length - 1; j > 0; j--) { const k = rand(j + 1); [parts[j], parts[k]] = [parts[k], parts[j]]; }
+    lines.push(`2026-11-15T10:00:00.000Z error ${parts.join(' ')}`); values.push(value);
+  }
+  const bundle = await bundleOf(t, lines.join('\n'));
+  const out = bundle.files.find(file => file.name.endsWith('/any.log')).content.split('\n');
+  out.forEach((line, i) => {
+    assert.ok(onlyMarker(line), `case ${i}: ${JSON.stringify(lines[i])} -> ${line}`);
+    assert.ok(!line.includes(values[i]), `case ${i} leaked ${values[i]}`);
+  });
+});
