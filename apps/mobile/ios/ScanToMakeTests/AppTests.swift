@@ -1594,7 +1594,7 @@ extension AppTests {
         mac.held?.resume()
         do { try await send.value; XCTFail("removed") } catch let failure as CompanionError { XCTAssertEqual(failure.code, "scan-removed") }
         try await remove.value
-        XCTAssertEqual(mac.heard, ["forget \(run)", "declare \(later)", "forget \(later)"], "no upload, no start")
+        XCTAssertEqual(mac.heard, ["declare \(later)", "forget \(later)"], "no upload, no start (the first Remove had nothing to forget there)")
         XCTAssertNil(MacConnection.recoveryRefusals(defaults)[hook], "a Remove is not the Mac's refusal")
         XCTAssertEqual(MacConnection.strandedScans([askingForPhotos(hook)], defaults, kept: hookKept, requested: none), [])
     }
