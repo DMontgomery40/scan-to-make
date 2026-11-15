@@ -56,6 +56,10 @@ import {PrinterSetup,findMcpFolders} from './printing/setup.js';
 import {homedir} from 'node:os';
 import {ControlFailure} from './local-control-protocol.js';
 import {NO_PRINTER,NO_SOFTWARE_FOR_CODE_ENGINE,noSoftwareToCheck} from './no-printer.js';
+// #850: the app build and payload that launched this companion (Counterpart for Mac sets them), read once and taken out of
+// the environment, so no printer MCP, worker or tool started from here inherits them. Only status.get carries them.
+const launchedBy={...(process.env.SCAN_TO_MAKE_APP_BUILD?{appBuild:process.env.SCAN_TO_MAKE_APP_BUILD}:{}),...(process.env.SCAN_TO_MAKE_APP_PAYLOAD?{appPayload:process.env.SCAN_TO_MAKE_APP_PAYLOAD}:{})};
+delete process.env.SCAN_TO_MAKE_APP_BUILD;delete process.env.SCAN_TO_MAKE_APP_PAYLOAD;
 
 // Presence is explicit opt-in. Invalid/empty configuration must fail, never fall back.
 const directory = process.env.SCAN_TO_MAKE_REMOTE_AUTH_DIR;
@@ -400,7 +404,7 @@ try {
   if (remoteAuth) control = await startLocalControl({
     // The auth directory is private even when its state/volume parent is not.
     path:process.env.SCAN_TO_MAKE_CONTROL_SOCKET ?? join(remoteAuth.directory,'control.sock'),
-    dispatch:createControlDispatcher({auth:remoteAuth,modelAccess,runtimeSettings,printerCheck,printerListed,companionVersion:await companionVersion(),...(displayName?{name:displayName}:{}),capture,
+    dispatch:createControlDispatcher({auth:remoteAuth,modelAccess,runtimeSettings,printerCheck,printerListed,companionVersion:await companionVersion(),...launchedBy,...(displayName?{name:displayName}:{}),capture,
       captureDirectory:captureDirectory ? join(captureDirectory,'captures') : undefined,printHandoff,
       ...(objects ? {objects} : {}),
       ...(eventLog ? {events: eventLog} : {}),

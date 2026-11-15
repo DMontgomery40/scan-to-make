@@ -254,7 +254,7 @@ test('server CLI owns the control socket lifecycle without exposing admin method
 // #827: a fresh Mac has no printer handoff config. Projects, settings and the Blender, Fusion and code engine rows
 // still answer (in words a person can read), over the control socket and over HTTP; nothing about printing is offered.
 /** The companion as a fresh Mac starts it: no printer handoff env (#827, #834). `project` is one ready STL project. */
-async function freshCompanion(t,{project=false}={}) {
+async function freshCompanion(t,{project=false,env={}}={}) {
   const f=await fixture(t);await f.server.close();
   const capture=join(f.root,'capture');await mkdir(capture,{mode:0o700});
   let projectId;
@@ -270,7 +270,7 @@ async function freshCompanion(t,{project=false}={}) {
   const path=join(f.auth.directory,'control.sock');
   const call=(method,params={},timeoutMs=5000)=>wire(path,{v:1,id:randomUUID(),method,params},false,timeoutMs);
   const child=spawn(process.execPath,[new URL('../dist/server-cli.js',import.meta.url).pathname],{
-    env:{PATH:process.env.PATH,HOME:f.root,SCAN_TO_MAKE_REMOTE_AUTH_DIR:f.auth.directory,SCAN_TO_MAKE_CAPTURE_DIR:capture,SCAN_TO_MAKE_GENERATION_PORT:'0'},stdio:['ignore','pipe','pipe'],
+    env:{PATH:process.env.PATH,HOME:f.root,SCAN_TO_MAKE_REMOTE_AUTH_DIR:f.auth.directory,SCAN_TO_MAKE_CAPTURE_DIR:capture,SCAN_TO_MAKE_GENERATION_PORT:'0',...env},stdio:['ignore','pipe','pipe'],
   });
   const exited=new Promise(resolve=>child.once('exit',resolve));
   t.after(async()=>{if(child.exitCode===null&&child.signalCode===null){child.kill('SIGTERM');await exited;}});
@@ -320,6 +320,26 @@ test('server CLI with no printer set up answers projects, settings and the desig
     const req=request(address+'/v1/objects',{headers:{host:f.auth.host,'x-forwarded-host':f.auth.host,'x-forwarded-proto':'https','tailscale-user-login':'owner@example.test','x-scan-device':phone.deviceId,authorization:`Bearer ${phone.token}`}},res=>{let body='';res.on('data',c=>body+=c);res.once('end',()=>resolve({status:res.statusCode,body}));});req.once('error',reject);req.end();
   });
   assert.equal(listed.status,200,listed.body);
+  await stop();
+});
+
+// #850: the Mac app compares the build that launched its companion with its own, so a companion left running from an app
+// replaced by hand is restarted. status.get (the Mac's control socket only) says which build that was; nothing else does.
+test('#850: status.get says which app build launched the companion, from its environment', async t => {
+  const f=await fixture(t);
+  const told=createControlDispatcher({auth:f.services.auth,companionVersion:'0.1.0',appBuild:'202611151139',appPayload:'/Applications/Counterpart.app/Contents/Resources/Payload'});
+  const status=await told('status.get',{});
+  assert.equal(status.appBuild,'202611151139');
+  assert.equal(status.appPayload,'/Applications/Counterpart.app/Contents/Resources/Payload');
+  const untold=await createControlDispatcher({auth:f.services.auth,companionVersion:'0.1.0'})('status.get',{});
+  assert.equal('appBuild' in untold,false,'a companion not launched by the app says nothing');
+});
+
+test('#850: the companion the app launches reports that build (server-cli reads it from its environment)', async t => {
+  const {call,stop}=await freshCompanion(t,{env:{SCAN_TO_MAKE_APP_BUILD:'202611151139',SCAN_TO_MAKE_APP_PAYLOAD:'/Applications/Counterpart.app/Contents/Resources/Payload'}});
+  const status=(await call('status.get')).result;
+  assert.equal(status.appBuild,'202611151139');
+  assert.equal(status.appPayload,'/Applications/Counterpart.app/Contents/Resources/Payload');
   await stop();
 });
 
