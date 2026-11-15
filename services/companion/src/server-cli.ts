@@ -4,6 +4,7 @@ import {ModelSizeStore} from './model-size.js';
 import {createModelSizeRunner,installedBambuProcess} from './model-size-runner.js';
 import {fusionCalls} from './fusion-calls.js';
 import {mkdir,readFile} from 'node:fs/promises';
+import {existsSync} from 'node:fs';
 import {ScanProcessingStore,createScanCleanupRunner} from './scan-processing.js';
 import {dirname,isAbsolute,join} from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -54,7 +55,7 @@ import {loadPrinterCatalog,type PrinterCatalog} from './objects/printers.js';
 import {PrinterSetup,findMcpFolders} from './printing/setup.js';
 import {homedir} from 'node:os';
 import {ControlFailure} from './local-control-protocol.js';
-import {NO_PRINTER,NO_PRINTER_FOR_CODE_ENGINE,noPrinterToCheck} from './no-printer.js';
+import {NO_PRINTER,NO_SOFTWARE_FOR_CODE_ENGINE,noSoftwareToCheck} from './no-printer.js';
 
 // Presence is explicit opt-in. Invalid/empty configuration must fail, never fall back.
 const directory = process.env.SCAN_TO_MAKE_REMOTE_AUTH_DIR;
@@ -98,8 +99,10 @@ let mcpUpdates:McpUpdater|undefined;
 let blenderAddon:BlenderAddonRepair|undefined;
 /**
  * PRD §8.10: every process started from the Mac's own profile runs the version an Update installed. While `current` is
- * only the placeholder (#834), the MCP that design passes, the code engine, Fusion, the Blender check and STL sizes run
- * through is the listed default printer's; with no printer listed there is none (they say "Add a printer").
+ * only the placeholder (#834), design passes, the code engine, Fusion, the Blender check and STL sizes run through the
+ * listed default printer's MCP; with no printer listed, through Counterpart's own copy (the placeholder) when it is
+ * installed, since none of them needs a printer; with neither, there is none (they say to download printer software).
+ * Printing needs a listed printer whatever this returns (ObjectService.printerListed).
  */
 const runningHandoff=():import('@scan-to-make/printer-handoff').PrinterHandoffConfig|undefined=>{
   if(!handoffConfig)return undefined;
@@ -107,8 +110,8 @@ const runningHandoff=():import('@scan-to-make/printer-handoff').PrinterHandoffCo
   if(placeholderEntryPoint!==undefined&&(!catalog||catalog.placeholder)){
     const id=catalog?.destinations.length?catalog.defaultDestinationId:undefined;
     const config=id===undefined?undefined:catalog!.resolve(id);
-    if(!config)return undefined;
-    return mcpUpdates?mcpUpdates.effective(id!,config):config;
+    if(config)return mcpUpdates?mcpUpdates.effective(id!,config):config;
+    if(!existsSync(placeholderEntryPoint))return undefined;
   }
   return mcpUpdates?mcpUpdates.effective('current',handoffConfig):handoffConfig;
 };
@@ -157,7 +160,7 @@ const runtimeSettings=remoteAuth&&eventLog?new RuntimeSettings({modelAccess,emit
 // #827: with no printer yet the row is there and says to add one (it comes with the printer MCP); nothing is started.
 const cadSettings=eventLog?new CadSettings({calls:cadCalls(()=>runningHandoff()!),emit:async draft=>{await eventLog.append(draft);},
   lock:waitMs=>acquireBlenderLock(CODE_LOCK_PATH,{signal:AbortSignal.timeout(waitMs)}),
-  unavailable:()=>runningHandoff()===undefined?NO_PRINTER_FOR_CODE_ENGINE:undefined}):undefined;
+  unavailable:()=>runningHandoff()===undefined?NO_SOFTWARE_FOR_CODE_ENGINE:undefined}):undefined;
 const liveActivityTokens=remoteAuth?new LiveActivityTokenStore(join(dataRoot,'live-activity-tokens.json')):undefined;
 const presence=remoteAuth?new DevicePresence(join(remoteAuth.directory,'device-presence.json')):undefined;
 // Audit M4: legacy device rows (paired before stable identity) unused for 14 days are removed; checked at start and every 6 h.
@@ -292,7 +295,7 @@ if(captureDirectory){
     lock:()=>acquireBlenderLock(undefined,{signal:AbortSignal.timeout(10_000)}),
     setup:async update=>{
       const config=runningHandoff();
-      if(!config)throw new Error(noPrinterToCheck('Blender'));
+      if(!config)throw new Error(noSoftwareToCheck('Blender'));
       const client=new PrinterMcpClient(config);
       const signal=AbortSignal.timeout(update?180_000:90_000);
       try{
@@ -307,7 +310,7 @@ if(captureDirectory){
 }
 // fusion_mcp_setup and fusion_mcp_status on the printer MCP as it runs (with its Update override); the Mac renders the answers.
 // #827: with no printer yet, Fusion's row says to add one: the printer MCP is what finds and sets up Fusion.
-const noFusion=async():Promise<never>=>{throw new ControlFailure('unavailable',noPrinterToCheck('Fusion'));};
+const noFusion=async():Promise<never>=>{throw new ControlFailure('unavailable',noSoftwareToCheck('Fusion'));};
 const fusion=fusionCalls(()=>runningHandoff()!);
 const {fusionSetup,fusionStatus}=remoteAuth?{fusionSetup:(install:boolean)=>runningHandoff()?fusion.fusionSetup(install):noFusion(),
   fusionStatus:()=>runningHandoff()?fusion.fusionStatus():noFusion()}:{fusionSetup:undefined,fusionStatus:undefined};

@@ -42,7 +42,7 @@ import type {TouchupInput} from '../touchup/touchup.js';
 import {carriedSeats, scanBoundsFromObj, seatsProblem, stlBounds, stlFileBounds, type Bounds, type Seat} from './seats.js';
 import {createCaptureConverter} from '../capture-converter.js';
 import {ProjectPictures, VersionPictures, leadPicture, type DrawPicture} from './pictures.js';
-import {NO_PRINTER, NO_PRINTER_FOR_DESIGN} from '../no-printer.js';
+import {NO_PRINTER, NO_SOFTWARE_FOR_DESIGN} from '../no-printer.js';
 import {publicTouchupText, limitWords, type TouchupActivity, type TouchupResult} from '../touchup/runner.js';
 import {ObjectNotFoundError, ObjectStore, restoreLocate, type LocateSnapshot, type ObjectPrintConfirmation, type StmObject} from './store.js';
 import {fitRequest, workerRequest} from './fit.js';
@@ -3823,7 +3823,7 @@ export class ObjectService {
   printerListed(): boolean { const catalog = this.#deps.printerCatalog; return catalog ? catalog.destinations.length > 0 : !!this.#deps.print; }
   #handoff(): PrinterHandoffConfig {
     const handoff = this.#deps.runningHandoff?.() ?? this.#deps.handoff;
-    if (!handoff) throw new InvalidStateError(NO_PRINTER_FOR_DESIGN);
+    if (!handoff) throw new InvalidStateError(NO_SOFTWARE_FOR_DESIGN);
     return handoff;
   }
   #publicText(text: string): string { return publicTouchupText(text, {...process.env, ...(this.#deps.runningHandoff?.() ?? this.#deps.handoff)?.process.env}); }

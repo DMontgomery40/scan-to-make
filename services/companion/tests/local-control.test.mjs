@@ -302,8 +302,9 @@ test('server CLI with no printer set up answers projects, settings and the desig
   const status=(await call('status.get')).result.capabilities;
   // #834: printing is wired from the start (the built-in placeholder); clients read whether a printer is listed.
   assert.equal(status.printerHandoff,true);assert.equal(status.printSettings,true);assert.equal(status.printControl,true);
-  // The design tools are checked through a printer's MCP: with none yet, each row says so in plain words.
-  const noPrinter=/Add a printer in Settings › Printers/;
+  // The design tools run through printer software (a printer MCP), not a printer: with none installed, each row says to
+  // download it (Add printer doesn't), in plain words.
+  const noPrinter=/none is installed yet\. Download it in Settings › Printers/;
   const blender=(await call('blender.check')).result?.blender;
   assert.ok(blender,'blender.check answers');
   const settled=blender.state==='checking'?await (async()=>{for(let i=0;i<100;i++){const now=(await call('blender.status')).result.blender;if(now.state!=='checking')return now;await new Promise(r=>setTimeout(r,20));}})():blender;
@@ -348,7 +349,14 @@ test('a fresh companion prints to the first printer added, with no restart', asy
     const answer=await post(device,path,type,body);
     assert.equal(answer.status,409,path+' '+JSON.stringify(answer));assert.deepEqual(answer.body.error,{code:'no-printer',message:NO_PRINTER},path);
   }
-  await assert.rejects(readFile(join(mcp,'dist','calls.ndjson'),'utf8'),error=>error.code==='ENOENT','the placeholder MCP saw no call');
+  // Nothing printer-facing reached it (Settings may read its setup fields in the background).
+  const before=(await readFile(join(mcp,'dist','calls.ndjson'),'utf8').catch(()=>'')).trim().split('\n').filter(Boolean).map(line=>JSON.parse(line).tool);
+  assert.deepEqual(before.filter(tool=>tool!=='counterpart_setup_fields'),[],'the placeholder MCP saw no printer call');
+  // Designing needs printer software, not a printer: the code engine row reaches the app's own copy (the placeholder)
+  // with no printer added, and printing still asks for one.
+  const cadBefore=(await call('cad.status',{},30000)).result?.cad;
+  assert.equal(cadBefore?.state,'ready',JSON.stringify(cadBefore)+stderr());
+  assert.equal((await call('objects.estimate',{id:projectId})).error?.message,NO_PRINTER);
   const added=await call('printers.add',{printer:{backend:'bambu-printer-mcp',printerType:'bambu',host:'192.0.2.10',serial:'01P00A000000001',model:'p1s',secret:'12345678'}},30000);
   assert.ok(added.result?.destinationId,JSON.stringify(added)+stderr());
   const listed=(await call('objects.printers')).result.destinations;
