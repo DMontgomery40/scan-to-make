@@ -1960,7 +1960,7 @@ export class ObjectService {
     if (plateNeedsPrinterCheck(object) && !options.checked) throw new InvalidStateError("The printer may already be printing this. Check the printer, then print again if it isn't.");
     if (options.filament && options.colour) throw new InvalidStateError('Choose one colour.');
     const configured = this.#deps.print;
-    if (!configured || !this.#printerListed()) throw new InvalidStateError(NO_PRINTER);
+    if (!configured || !this.printerListed()) throw new InvalidStateError(NO_PRINTER);
     const catalog = this.#deps.printerCatalog;
     const destinationId = this.#destinationId(object);
     const destination = catalog?.destinations.find(item => item.id === destinationId);
@@ -2652,7 +2652,7 @@ export class ObjectService {
     if (!object.current) throw new InvalidStateError('There is no model to print yet.');
     this.#publishedSettings(object, options);
     if (options.filament && options.colour) throw new InvalidStateError('Choose one colour.');
-    if (!this.#deps.print || !this.#printerListed()) throw new InvalidStateError(NO_PRINTER);
+    if (!this.#deps.print || !this.printerListed()) throw new InvalidStateError(NO_PRINTER);
     const catalog = this.#deps.printerCatalog;
     const destinationId = requested ? catalog?.canonical(requested) : this.#destinationId(object);
     if (requested && !destinationId) throw new InvalidStateError('That printer is no longer available. Choose another printer.');
@@ -3816,8 +3816,11 @@ export class ObjectService {
     return [...previous, ...clean].slice(-200);
   }
 
-  /** #827/#834: a printer is listed. With only the host's placeholder MCP config, the catalog lists none. */
-  #printerListed(): boolean { const catalog = this.#deps.printerCatalog; return catalog ? catalog.destinations.length > 0 : !!this.#deps.print; }
+  /**
+   * #827/#834: a printer is listed. With only the host's placeholder MCP config the catalog lists none, and everything
+   * that would reach a printer's MCP (print, estimate, printer.check, the phone handoff route, `/v1/mcp`) says NO_PRINTER.
+   */
+  printerListed(): boolean { const catalog = this.#deps.printerCatalog; return catalog ? catalog.destinations.length > 0 : !!this.#deps.print; }
   #handoff(): PrinterHandoffConfig {
     const handoff = this.#deps.runningHandoff?.() ?? this.#deps.handoff;
     if (!handoff) throw new InvalidStateError(NO_PRINTER_FOR_DESIGN);

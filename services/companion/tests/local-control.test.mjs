@@ -324,19 +324,43 @@ test('server CLI with no printer set up answers projects, settings and the desig
 
 // #834: a fresh Mac goes from Add printer to an estimate in the same companion, with no restart.
 test('a fresh companion prints to the first printer added, with no restart', async t => {
-  const {f,call,projectId,stop,stderr}=await freshCompanion(t,{project:true});
+  const {f,call,address,projectId,stop,stderr}=await freshCompanion(t,{project:true});
+  // The app's own copy is already where the placeholder points: nothing may reach it before a printer is listed.
+  const mcp=await installAppMcp(f.root,'bambu-printer-mcp','1.1.94','setup-fields-bambu-printer-mcp-1.1.82.json');
+  const NO_PRINTER='Add a printer in Settings › Printers first.';
   assert.deepEqual((await call('objects.printers')).result?.destinations,[]);
   const refused=await call('objects.estimate',{id:projectId});
-  assert.equal(refused.error?.code,'conflict');assert.equal(refused.error.message,'Add a printer in Settings › Printers first.');
-  const mcp=await installAppMcp(f.root,'bambu-printer-mcp','1.1.94','setup-fields-bambu-printer-mcp-1.1.82.json');
+  assert.equal(refused.error?.code,'conflict');assert.equal(refused.error.message,NO_PRINTER);
+  const checkRefused=await call('printer.check',{start:true});
+  assert.equal(checkRefused.error?.code,'conflict');assert.equal(checkRefused.error.message,NO_PRINTER);
+  // The phone's older handoff route and /v1/mcp say the same, over HTTP.
+  const {request}=await import('node:http');
+  const invitation=(await call('pairing.create')).result;
+  const phone=await f.auth.exchange('owner@example.test',{code:invitation.code,deviceName:'Local fixture'});
+  // A remote MCP client (`pair-mcp`: read is always granted).
+  const client=await f.auth.exchange('owner@example.test',{code:(await f.auth.createPairing('owner@example.test',['mcp:read'])).code,deviceName:'MCP client'});
+  const post=(device,path,type,body)=>new Promise((resolve,reject)=>{
+    const req=request(address+path,{method:'POST',headers:{host:f.auth.host,'x-forwarded-host':f.auth.host,'x-forwarded-proto':'https','tailscale-user-login':'owner@example.test','x-scan-device':device.deviceId,
+      authorization:`Bearer ${device.token}`,'content-type':type,'content-length':Buffer.byteLength(body)}},res=>{let text='';res.on('data',c=>text+=c);res.once('end',()=>resolve({status:res.statusCode,body:JSON.parse(text||'{}')}));});
+    req.once('error',reject);req.end(body);
+  });
+  for(const [device,path,type,body] of [[phone,'/v1/printer-handoff/bundles','model/stl','solid m\nendsolid m\n'],[client,'/v1/mcp','application/json',JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/list'})]]){
+    const answer=await post(device,path,type,body);
+    assert.equal(answer.status,409,path+' '+JSON.stringify(answer));assert.deepEqual(answer.body.error,{code:'no-printer',message:NO_PRINTER},path);
+  }
+  await assert.rejects(readFile(join(mcp,'dist','calls.ndjson'),'utf8'),error=>error.code==='ENOENT','the placeholder MCP saw no call');
   const added=await call('printers.add',{printer:{backend:'bambu-printer-mcp',printerType:'bambu',host:'192.0.2.10',serial:'01P00A000000001',model:'p1s',secret:'12345678'}},30000);
   assert.ok(added.result?.destinationId,JSON.stringify(added)+stderr());
   const listed=(await call('objects.printers')).result.destinations;
   assert.deepEqual(listed.map(item=>item.id),[added.result.destinationId]);
   const estimate=await call('objects.estimate',{id:projectId},60000);
   assert.equal(estimate.result?.seconds,3720,JSON.stringify(estimate)+stderr());
+  // Once a printer is listed, the printer check reaches it as before.
+  assert.ok((await call('printer.check',{start:true})).result,'printer.check starts');
+  for(let i=0;i<200&&(await call('printer.check')).result?.state==='checking';i++)await new Promise(r=>setTimeout(r,50));
   const tools=(await readFile(join(mcp,'dist','calls.ndjson'),'utf8')).trim().split('\n').map(line=>JSON.parse(line).tool);
   assert.ok(tools.includes('slice_stl')&&tools.includes('inspect_print_file'),tools.join());
+  assert.ok(tools.includes('get_printer_status'),tools.join());
   await stop();
 });
 

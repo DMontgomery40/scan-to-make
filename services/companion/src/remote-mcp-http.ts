@@ -17,6 +17,8 @@ export interface RemoteMcpServices {
   bundleRoot: string;
   /** PRD §8.10 admission for a destination; throws while its MCP updates. */
   admit?: (destinationId: string) => () => void;
+  /** #827: why no printer MCP may be reached now (no printer listed yet), in words for the person; checked per request. */
+  refuse?: () => string | undefined;
   lockTimeoutMs?: number;
   /** How long a remote question waits for an answer before `cancel` (default 0; see RemoteMcpOptions). */
   questionMs?: number;
@@ -46,7 +48,7 @@ const path = /^\/v1\/mcp(?:\/([A-Za-z0-9][A-Za-z0-9._-]{0,63}))?$/;
 const classesOf = (scopes: readonly string[]) =>
   new Set<RemoteClass>(REMOTE_CLASSES.filter(cls => scopes.includes(`mcp:${cls}` satisfies string as RemoteScope)));
 
-class Failure extends Error { constructor(readonly status: number, readonly code: string) { super(code); } }
+class Failure extends Error { constructor(readonly status: number, readonly code: string, message?: string) { super(message ?? code); } }
 
 /** Reads at most 1 MiB; past that it stops keeping or counting anything. Exported for its test. */
 export function readBody(request: IncomingMessage): Promise<Buffer> {
@@ -103,6 +105,8 @@ export async function handleRemoteMcp(
     if (!caller.scopes.includes('mcp:read')) throw new RemoteAuthFailure('forbidden');
     if (request.method !== 'POST') throw new Failure(405, 'method-not-allowed');
     if (!/^application\/json(?:\s*;.*)?$/i.test(request.headers['content-type'] ?? '')) throw new Failure(415, 'unsupported-media-type');
+    const why = services.refuse?.();
+    if (why) throw new Failure(409, 'no-printer', why);
     const destinationId = match[1] ?? 'current';
     const destination = services.destinations().get(destinationId);
     if (!destination) throw new Failure(404, 'unknown-printer');

@@ -54,7 +54,7 @@ import {loadPrinterCatalog,type PrinterCatalog} from './objects/printers.js';
 import {PrinterSetup,findMcpFolders} from './printing/setup.js';
 import {homedir} from 'node:os';
 import {ControlFailure} from './local-control-protocol.js';
-import {NO_PRINTER_FOR_CODE_ENGINE,noPrinterToCheck} from './no-printer.js';
+import {NO_PRINTER,NO_PRINTER_FOR_CODE_ENGINE,noPrinterToCheck} from './no-printer.js';
 
 // Presence is explicit opt-in. Invalid/empty configuration must fail, never fall back.
 const directory = process.env.SCAN_TO_MAKE_REMOTE_AUTH_DIR;
@@ -121,6 +121,10 @@ const printHandoff=handoffConfig===undefined?undefined:createPrintHandoffService
 // PRD §8.10: a print and an update of its printer's MCP never overlap (the phone's handoff route prints on `current`).
 const printGate=new PrintGate();
 if(printHandoff)printHandoff.admit=()=>printGate.hold('current');
+// #827: with no printer listed, the phone's handoff route and `/v1/mcp` say so instead of reaching the placeholder MCP
+// (the same live check ObjectService's print and estimate use).
+const noPrinterListed=()=>objects&&!objects.printerListed()?NO_PRINTER:undefined;
+if(printHandoff)printHandoff.refuse=noPrinterListed;
 // docs/design/remote-mcp.md: `/v1/mcp` reaches every configured destination through its own shared session and relay.
 // It reads the live destination map below (Add, Remove and Complete Settings change it in place).
 if(printHandoff)printHandoff.remoteRelays=()=>[...(printerDestinations?.values()??[])].map(services=>services.relay);
@@ -367,6 +371,7 @@ const server = await startCompanionServer({
     bundleRoot: handoffDirectory!,
     // The gate is held for the destination whose session actually serves the call (a duplicate's winner, as above).
     admit: (id: string) => printGate.hold(printerCatalog?.canonical(id) ?? id),
+    refuse: noPrinterListed,
     // Each id is served by its live winner, read on every request like the gate's key above.
     destinations: () => remoteDestinationsFor(printerDestinations ?? new Map(), id => printerCatalog?.canonical(id), printHandoff),
   }} : {}),

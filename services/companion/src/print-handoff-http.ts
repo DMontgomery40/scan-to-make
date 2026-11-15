@@ -22,7 +22,7 @@ const MAX_JSON_BYTES = 16384;
 const HANDOFF_SCOPE: RemoteScope = 'printer-handoff:use';
 
 class Failure extends Error {
-  constructor(readonly status: number, readonly code: string) { super(code); }
+  constructor(readonly status: number, readonly code: string, message?: string) { super(message ?? code); }
 }
 
 const answerSchema: z.ZodType<ElicitationAnswer> = z.union([
@@ -89,6 +89,8 @@ export interface PrintHandoffServices {
   selection?: PrinterHandoffConfig['selection'];
   /** PRD §8.10: holds the printer for a print, so its MCP isn't updated under it; throws while it updates. */
   admit?: () => () => void;
+  /** #827: why nothing may be sent to a printer now (no printer listed yet), in words for the person; checked per request. */
+  refuse?: () => string | undefined;
   /** The other destinations' relays: their remote (`/v1/mcp`) questions are listed and answered here too. */
   remoteRelays?: () => ElicitationRelay[];
   /**
@@ -276,6 +278,7 @@ export function createPrintHandoffRoutes(services: PrintHandoffServices) {
           await send(response, JSON.stringify({bundles: bundles.map(phoneManifest)}));
           return;
         }
+        if (request.method === 'POST') { const why = services.refuse?.(); if (why) throw new Failure(409, 'no-printer', why); }
         if (!bundleId && request.method === 'POST') {
           if ((header('content-type') ?? '') !== 'model/stl'
             || !['identity', undefined].includes(header('content-encoding'))) {
@@ -353,7 +356,7 @@ export function createPrintHandoffRoutes(services: PrintHandoffServices) {
             : new Failure(422, 'handoff-unavailable');
         if (!response.destroyed && !response.headersSent) {
           response.statusCode = failure.status;
-          await send(response, JSON.stringify({error: {code: failure.code, message: failure.code}}));
+          await send(response, JSON.stringify({error: {code: failure.code, message: failure.message}}));
         }
       } finally {
         response.off('close', disconnected);
