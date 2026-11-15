@@ -115,6 +115,84 @@ final class UpdateStagingTests: XCTestCase {
     }
 }
 
+/// #828, review R1/R2: quitting with an update waiting, its effects faked.
+@MainActor final class UpdateQuitTests: XCTestCase {
+    final class Fake {
+        var decision = UpdateGate.Decision.install
+        var unregister = UpdateQuit.Unregister.done
+        var asks = 0, terminations = 0, windows = 0, closes = 0
+        var recorded: [String] = []
+        var cancel: (() -> Void)?
+        var idle: CheckedContinuation<Void, Never>?
+        var idleAtOnce = true
+    }
+    private func quit(_ fake: Fake) -> UpdateQuit {
+        UpdateQuit(effects: .init(
+            ask: { fake.asks += 1; return fake.decision },
+            unregister: { fake.unregister },
+            waitForJobGone: {},
+            record: { fake.recorded.append($0) },
+            waitUntilIdle: {
+                if fake.idleAtOnce { return }
+                await withCheckedContinuation { fake.idle = $0 }
+            },
+            showWaiting: { cancel in fake.windows += 1; fake.cancel = cancel },
+            closeWaiting: { fake.closes += 1 },
+            terminate: { fake.terminations += 1 }))
+    }
+
+    func testAnIdleCompanionIsStoppedAndTheAppQuits() async {
+        let fake = Fake()
+        let shouldQuit = await quit(fake).shouldTerminate()
+        XCTAssertTrue(shouldQuit)
+        XCTAssertEqual(fake.recorded, ["stopped"])
+        XCTAssertEqual(fake.terminations, 0)
+    }
+
+    /// R1: launchd refusing the unregister quits anyway, once, the companion idle; the next launch restarts it.
+    func testARefusedUnregisterQuitsOnceWithoutALoop() async {
+        let fake = Fake()
+        fake.unregister = .refused
+        let shouldQuit = await quit(fake).shouldTerminate()
+        XCTAssertTrue(shouldQuit, "the companion is idle: quit, never refuse and re-quit")
+        XCTAssertEqual(fake.recorded, ["outdated"], "the next launch restarts the agent from the new app")
+        XCTAssertEqual(fake.terminations, 0, "no quit of its own")
+        XCTAssertEqual(fake.windows, 0)
+    }
+
+    /// F1, R1: a busy quit is refused once and quits by itself once idle; that quit doesn't ask again (no loop).
+    func testABusyQuitIsRefusedThenQuitsOnceWhenIdle() async {
+        let fake = Fake()
+        fake.decision = .wait
+        let quit = quit(fake)
+        let first = await quit.shouldTerminate()
+        XCTAssertFalse(first)
+        XCTAssertEqual(fake.windows, 1)
+        await quit.lastAutoQuit?.value
+        XCTAssertEqual(fake.terminations, 1, "quits by itself once the work is done")
+        let second = await quit.shouldTerminate()
+        XCTAssertTrue(second, "its own quit isn't asked about again")
+        XCTAssertEqual(fake.asks, 1)
+        XCTAssertEqual(fake.terminations, 1)
+    }
+
+    /// R2: Don't Quit calls off the pending quit; a second refusal closes the first window before showing one.
+    func testDontQuitCallsOffThePendingQuit() async {
+        let fake = Fake()
+        fake.decision = .wait
+        fake.idleAtOnce = false
+        let quit = quit(fake)
+        _ = await quit.shouldTerminate()
+        _ = await quit.shouldTerminate()
+        XCTAssertEqual(fake.windows, 2)
+        XCTAssertGreaterThanOrEqual(fake.closes, 1, "the old window goes before a new one")
+        fake.cancel?()
+        fake.idle?.resume()
+        await quit.lastAutoQuit?.value
+        XCTAssertEqual(fake.terminations, 0, "called off")
+    }
+}
+
 /// #829: a copy run from App Translocation is recognised, and only that one.
 final class TranslocationTests: XCTestCase {
     func testATranslocatedCopyIsDetected() {

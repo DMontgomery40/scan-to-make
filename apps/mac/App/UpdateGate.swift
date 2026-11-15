@@ -83,6 +83,78 @@ enum UpdateGate {
     }
 }
 
+/// #828: quitting with a downloaded update waiting, which Sparkle installs as soon as the app has quit. Its effects are
+/// injected (`Updates` gives the real ones), so the decisions are tested.
+/// - Idle: the agent is unregistered (stopped), and the next launch registers it again (`stopped`).
+/// - Working, or no answer within the ask's 4 s (review F1): the quit is refused with the waiting sentence, and the app
+///   quits by itself once the work is done. That quit isn't asked about again, so it never loops (review R1). The
+///   window's Don't Quit calls it off (review R2); a busy answer is never capped here, as a pass may run 40 minutes.
+/// - launchd refusing the unregister (review R1): quit anyway, the companion idle, and the next launch restarts the
+///   agent from the new app (`outdated`).
+@MainActor final class UpdateQuit {
+    enum Unregister { case done, timedOut, refused }
+    struct Effects {
+        var ask: () async -> UpdateGate.Decision
+        var unregister: () async -> Unregister
+        var waitForJobGone: () async -> Void
+        var record: (String) -> Void
+        /// Returns once the companion is idle, or when the task is cancelled.
+        var waitUntilIdle: () async -> Void
+        /// Shows the waiting sentence with OK and Don't Quit, which calls the given closure.
+        var showWaiting: (@escaping () -> Void) -> Void
+        var closeWaiting: () -> Void
+        var terminate: () -> Void
+    }
+    private let effects: Effects
+    private var autoQuit: Task<Void, Never>?
+    /// The last auto-quit, for tests to wait on.
+    private(set) var lastAutoQuit: Task<Void, Never>?
+    private var quittingByItself = false
+
+    init(effects: Effects) { self.effects = effects }
+
+    /// Whether the app may quit now.
+    func shouldTerminate() async -> Bool {
+        if quittingByItself {
+            quittingByItself = false
+        } else if await effects.ask() == .wait {
+            refuse()
+            return false
+        }
+        switch await effects.unregister() {
+        case .done, .timedOut:
+            effects.record("stopped")
+            await effects.waitForJobGone()
+        case .refused:
+            effects.record("outdated")
+        }
+        return true
+    }
+
+    private func refuse() {
+        effects.closeWaiting()
+        effects.showWaiting { [weak self] in self?.callOff() }
+        guard autoQuit == nil else { return }
+        let task = Task { @MainActor [weak self] in
+            await self?.effects.waitUntilIdle()
+            guard let self, self.autoQuit != nil, !Task.isCancelled else { return }
+            self.autoQuit = nil
+            self.effects.closeWaiting()
+            self.quittingByItself = true
+            self.effects.terminate()
+        }
+        autoQuit = task
+        lastAutoQuit = task
+    }
+
+    /// Don't Quit: the app stays open; the update installs at a later quit.
+    func callOff() {
+        autoQuit?.cancel()
+        autoQuit = nil
+        effects.closeWaiting()
+    }
+}
+
 /// #829: macOS runs an app opened straight from a quarantined download from a read-only copy
 /// (`/private/var/folders/…/AppTranslocation/…`). From there the companion can't be registered, and Sparkle refuses
 /// to update. Sparkle's own test is the same path check (`SUHost.isRunningTranslocated`).

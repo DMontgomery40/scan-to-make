@@ -241,18 +241,14 @@ struct CounterpartCommands: Commands {
         if OpenedFiles.shared.receive(urls.filter(\.isFileURL)) { AppRouter.shared.open(.main) }
     }
 
-    /// #828: with a downloaded update waiting to install on quit, stop the companion agent first (`Updates.prepareToQuit`).
+    /// #828: with a downloaded update waiting to install on quit, stop the companion agent first (`UpdateQuit`).
     /// Review F1: Sparkle 2.9.3 has no way to put off an install-on-quit for one quit, so a quit while the companion is
     /// working is refused with the waiting sentence, and the app quits by itself once the work is done (the update
     /// installs then). Logging out, restarting or shutting down is never held up: those end the agent too, and launchd
     /// starts it from the new app at the next login.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard updates.staged, !Self.sessionEnding else { return .terminateNow }
-        Task { @MainActor in
-            let stopped = await updates.prepareToQuit()
-            sender.reply(toApplicationShouldTerminate:stopped)
-            if !stopped { updates.quitWhenIdle() }
-        }
+        Task { @MainActor in sender.reply(toApplicationShouldTerminate:await updates.quit.shouldTerminate()) }
         return .terminateLater
     }
 
@@ -292,13 +288,14 @@ struct CounterpartCommands: Commands {
 /// Installing replaces Counterpart.app, which the companion agent runs from, so the agent is stopped first and started
 /// again after (62dccb41 refused every check while the agent was enabled, "until MAC-4 exposes busy/idle state", so no
 /// working install could update). Install and Relaunch waits, with a plain sentence, until no pass is running and no
-/// print is being sent (`UpdateGate`); Sparkle then quits the app, `prepareToQuit` stops the agent, Sparkle replaces
+/// print is being sent (`UpdateGate`); Sparkle then quits the app, `UpdateQuit` stops the agent, Sparkle replaces
 /// the app and relaunches it, and the relaunched app registers the agent again (`resumeAgentAfterUpdate`).
 /// A downloaded update the person dismissed still installs when the app quits; the same quit path stops the agent, and
 /// refuses a quit while the companion is working (then quits by itself once it is done).
 @MainActor final class Updates: NSObject, ObservableObject, SPUUpdaterDelegate {
     static let shared = Updates()
-    /// What the next launch does about the agent: `stopped` (unregistered for an update: register it again).
+    /// What the next launch does about the agent: `stopped` (unregistered for an update: register it again) or
+    /// `outdated` (launchd refused to stop it for the update: restart it once idle, review R1).
     static let agentKey = "agentAfterUpdate"
     private var controller: SPUStandardUpdaterController?
     private var observation: NSKeyValueObservation?
@@ -367,33 +364,28 @@ struct CounterpartCommands: Commands {
     private func waitUntilIdle(announce: Bool) async {
         var told = false
         var waiter = UpdateGate.Waiter()
-        while waiter.next(await Self.projects()) == .wait {
+        while !Task.isCancelled, waiter.next(await Self.projects()) == .wait {
             if announce && !told { told = true; showWaiting() }
             try? await Task.sleep(for:.seconds(15))
         }
-        closeWaiting()
-    }
-
-    private var quitting = false
-    /// A quit refused because the companion is working (review F1): say why, and quit once it is done.
-    func quitWhenIdle() {
-        showWaiting()
-        guard !quitting else { return }
-        quitting = true
-        Task { @MainActor in
-            await waitUntilIdle(announce:false)
-            quitting = false
-            NSApp.terminate(nil)
-        }
+        if announce { closeWaiting() }
     }
 
     /// The sentence in its own small window, not a modal alert: the wait goes on behind it and closes it when done.
-    private func showWaiting() {
+    /// With `dontQuit`, a refused quit's window: OK leaves the quit pending, Don't Quit calls it off (review R2).
+    private func showWaiting(dontQuit: (() -> Void)? = nil) {
+        closeWaiting() // review R1: never stacked
         let alert = NSAlert()
         alert.messageText = UpdateGate.waitingSentence
         alert.addButton(withTitle:"OK")
         alert.buttons.first?.target = self
         alert.buttons.first?.action = #selector(closeWaiting)
+        if let dontQuit {
+            alert.addButton(withTitle:"Don’t Quit")
+            alert.buttons.last?.target = self
+            alert.buttons.last?.action = #selector(callOffQuit)
+            self.dontQuit = dontQuit
+        }
         alert.layout()
         waitingAlert = alert
         NSApp.activate()
@@ -404,38 +396,50 @@ struct CounterpartCommands: Commands {
         waitingAlert?.window.orderOut(nil)
         waitingAlert = nil
     }
+    private var dontQuit: (() -> Void)?
+    @objc private func callOffQuit() { let callOff = dontQuit; dontQuit = nil; callOff?() }
 
-    /// From `applicationShouldTerminate` when `staged`: Sparkle replaces the app as soon as it has quit. With nothing to
-    /// cut short, the agent is unregistered (which stops it), the next launch registers it again, and this returns true.
-    /// While it is working (or might be: no answer within 4 s) it returns false and the quit is refused (review F1):
-    /// never stop a pass or a print being sent, and never replace the app under one.
-    func prepareToQuit() async -> Bool {
-        let installation = Installation(bundle:.main)
-        guard installation.service.status == .enabled else { return true }
-        let decision = await withTaskGroup(of:UpdateGate.Decision.self) { group in
+    /// The quit path with its real effects (`UpdateQuit`).
+    private(set) lazy var quit = UpdateQuit(effects:.init(
+        ask: { await Self.askOnce() },
+        unregister: { await Self.unregisterAgent() },
+        waitForJobGone: { await Self.waitForJobGone() },
+        record: { UserDefaults.standard.set($0, forKey:Self.agentKey) },
+        waitUntilIdle: { [weak self] in await self?.waitUntilIdle(announce:false) },
+        showWaiting: { [weak self] callOff in self?.showWaiting(dontQuit:callOff) },
+        closeWaiting: { [weak self] in self?.closeWaiting() },
+        terminate: { NSApp.terminate(nil) }))
+
+    /// One ask, answered within 4 s or taken as working (review F1).
+    private static func askOnce() async -> UpdateGate.Decision {
+        await withTaskGroup(of:UpdateGate.Decision.self) { group in
             group.addTask { UpdateGate.decide(await Self.projects(timeout:3)) }
             group.addTask { try? await Task.sleep(for:.seconds(4)); return .wait }
             let first = await group.next() ?? .wait
             group.cancelAll()
             return first
         }
-        guard decision == .install else { return false }
-        // Review F5: unregistering is bounded too. Past 10 s the request stands; the launchctl wait below still applies.
+    }
+
+    /// Unregistering stops the agent; bounded at 10 s (review F5), past which the request stands.
+    private static func unregisterAgent() async -> UpdateQuit.Unregister {
+        let installation = Installation(bundle:.main)
+        guard installation.service.status == .enabled else { return .done }
         let plist = installation.label + ".plist"
-        let unregistered = await withTaskGroup(of:Bool?.self) { group in
+        return await withTaskGroup(of:UpdateQuit.Unregister.self) { group in
             group.addTask {
-                do { try await SMAppService.agent(plistName:plist).unregister(); return true } catch { return false }
+                do { try await SMAppService.agent(plistName:plist).unregister(); return .done } catch { return .refused }
             }
-            group.addTask { try? await Task.sleep(for:.seconds(10)); return nil }
-            let first = await group.next() ?? nil
+            group.addTask { try? await Task.sleep(for:.seconds(10)); return .timedOut }
+            let first = await group.next() ?? .timedOut
             group.cancelAll()
             return first
         }
-        // A refused unregister leaves the agent running: don't replace the app under it.
-        guard unregistered != false else { return false }
-        UserDefaults.standard.set("stopped", forKey:Self.agentKey)
-        // Unregistering boots the job out; wait (briefly) until launchd no longer has it, so Node has exited.
-        let target = "gui/\(getuid())/\(installation.label)"
+    }
+
+    /// Unregistering boots the job out; wait (briefly) until launchd no longer has it, so Node has exited.
+    private static func waitForJobGone() async {
+        let target = "gui/\(getuid())/\(Installation(bundle:.main).label)"
         for _ in 0..<20 {
             let present = await Task.detached {
                 (try? command(URL(fileURLWithPath:"/bin/launchctl"), ["print", target])) != nil
@@ -443,7 +447,6 @@ struct CounterpartCommands: Commands {
             if !present { break }
             try? await Task.sleep(for:.milliseconds(500))
         }
-        return true
     }
 
     /// At launch, after an update: register the agent stopped for it, or restart one an update replaced while it worked.
@@ -454,6 +457,14 @@ struct CounterpartCommands: Commands {
             // A failure (approval needed) leaves the key, so the next launch tries again; pairing says what to allow.
             guard (try? RegisteredAgent(service:installation.service).register()) != nil else { return }
             UserDefaults.standard.removeObject(forKey:Self.agentKey)
+        case "outdated"?:
+            // Review R1: launchd refused to stop it for the update, so it may still run the old app's code.
+            Task { @MainActor in
+                await waitUntilIdle(announce:false)
+                let target = "gui/\(getuid())/\(installation.label)"
+                _ = try? await Task.detached { try command(URL(fileURLWithPath:"/bin/launchctl"), ["kickstart", "-k", target]) }.value
+                UserDefaults.standard.removeObject(forKey:Self.agentKey)
+            }
         default: return
         }
     }
