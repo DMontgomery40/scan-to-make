@@ -242,28 +242,40 @@ struct ProjectGalleryView: View {
     @ViewBuilder private var controls: some View {
         if let entry {
             GlassEffectContainer(spacing: 10) {
-                HStack(spacing: 10) {
-                    if let ar = arChip(entry) { arButton(ar) }
-                    if entry.kind == .scan, !entry.photos.isEmpty {
-                        Button { showingPhotos = true } label: { Label(entry.photos.count == 1 ? "1 photo" : "\(entry.photos.count) photos", systemImage: "photo.on.rectangle") }
-                            .stageButton().accessibilityIdentifier("gallery-photos")
-                    }
-                    if entry.kind == .part, let locate, project.canLocate {
-                        Button(action: locate) { Label("See it together", systemImage: "cube.transparent") }
-                            .stageButton().disabled(working).accessibilityIdentifier("gallery-locate")
-                            .accessibilityHint("Your Mac works out where the scanned object sits in this part, without changing it")
-                    }
-                    Spacer(minLength: 0)
-                    if let size = entry.sizeText(measured[entry.id]) {
-                        Text(size).font(.caption.monospacedDigit().weight(.semibold)).lineLimit(1).minimumScaleFactor(0.8)
-                            .padding(.horizontal, 12).padding(.vertical, 8).stageChip()
-                            .accessibilityLabel("\(entry.measures) size \(size)").accessibilityIdentifier("gallery-size")
-                    }
+                // #844: at accessibility sizes the AR chip beside "Part · 166.2 × 157.4 × 48.4 mm" was wider than the
+                // phone. The row is used when it fits the stage; otherwise each control takes a line of its own.
+                ViewThatFits(in: .horizontal) {
+                    controlRow(entry, stacked: false)
+                    controlRow(entry, stacked: true)
                 }
                 .labelStyle(.titleAndIcon).font(.caption.weight(.semibold))
             }
             .padding(14)
             .sheet(isPresented: $showingPhotos) { ScanPhotos(project: project, photos: entry.photos) }
+        }
+    }
+
+    /// The stage's controls in a row, or (`stacked`) one per line, leading, for accessibility text sizes (#844).
+    @ViewBuilder private func controlRow(_ entry: ProjectGallery.Entry, stacked: Bool) -> some View {
+        (stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8)) : AnyLayout(HStackLayout(spacing: 10))) {
+            if let ar = arChip(entry) { arButton(ar) }
+            if entry.kind == .scan, !entry.photos.isEmpty {
+                Button { showingPhotos = true } label: { Label(entry.photos.count == 1 ? "1 photo" : "\(entry.photos.count) photos", systemImage: "photo.on.rectangle") }
+                    .stageButton().accessibilityIdentifier("gallery-photos")
+            }
+            if entry.kind == .part, let locate, project.canLocate {
+                Button(action: locate) { Label("See it together", systemImage: "cube.transparent") }
+                    .stageButton().disabled(working).accessibilityIdentifier("gallery-locate")
+                    .accessibilityHint("Your Mac works out where the scanned object sits in this part, without changing it")
+            }
+            if !stacked { Spacer(minLength: 0) }
+            if let size = entry.sizeText(measured[entry.id]) {
+                // In a column a long size goes on to a second line rather than past the stage's edge (#844).
+                Text(size).font(.caption.monospacedDigit().weight(.semibold)).lineLimit(stacked ? 2 : 1).minimumScaleFactor(0.8)
+                    .fixedSize(horizontal: false, vertical: stacked)
+                    .padding(.horizontal, 12).padding(.vertical, 8).stageChip()
+                    .accessibilityLabel("\(entry.measures) size \(size)").accessibilityIdentifier("gallery-size")
+            }
         }
     }
 

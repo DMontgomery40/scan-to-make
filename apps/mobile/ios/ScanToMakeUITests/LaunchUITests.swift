@@ -1730,9 +1730,14 @@ final class LayoutParityUITests: XCTestCase {
                 found.append("\(element.elementType.rawValue) \(element.identifier.isEmpty ? "-" : element.identifier) “\(element.label.prefix(40))” x \(Int(frame.minX))…\(Int(frame.maxX)) of \(Int(window.width))")
             }
             let sideways = element.elementType == .scrollView && frame.height < window.height / 3
-            if !sideways { element.children.forEach(walk) }
+            if !sideways { element.children.forEach(walkUnlessIndicator) }
         }
-        walk(try app.snapshot())
+        func walkUnlessIndicator(_ element: XCUIElementSnapshot) {
+            // A scroll view's indicators sit a few points past its edge by design; they and theirs are not the page.
+            if element.label.localizedCaseInsensitiveContains("scroll bar") { return }
+            walk(element)
+        }
+        walkUnlessIndicator(try app.snapshot())
         return found
     }
 
