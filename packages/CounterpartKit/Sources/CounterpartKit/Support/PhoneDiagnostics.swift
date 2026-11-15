@@ -16,7 +16,7 @@ import Foundation
 public enum DiagnosticsRedaction {
     // `auth`, `key`, `pin` and `otp` only as a word of their own (`AUTH_TOKEN`, `session_key`, `PAIRING_PIN`, `pinCode`), so
     // "Failed to authenticate", "keyboard", "colourMapping", "shipping" and "pinnedBaseURL" keep their letters.
-    static let secretWord = #"(?:password|passwd|passphrase|passcode|pwd|secret|token|api[_-]?key|apikey|access[_-]?code|accesscode|authorization|auth(?:[_-]?key)?(?![a-z])|key(?![a-z])|pin(?:[_-]?code)?(?![a-z])|pairing[_-]?code|otp(?![a-z])|session|cookie|credential|signature|ticket|login|email|user[_-]?info)"#
+    static let secretWord = #"(?:password|passwd|passphrase|passcode|pwd|secret|token|api[_-]?key|apikey|access[_-]?code|accesscode|authorization|auth(?:[_-]?key)?(?![a-z])|key(?![a-z])|pin(?:[_-]?code)?(?![a-z])|pairing[_-]?code|lan[_-]?code|otp(?![a-z])|sha256|session|cookie|credential|signature|ticket|login|email|user[_-]?info)"#
     static let secretKey = "[A-Za-z0-9_.-]*" + secretWord + "[A-Za-z0-9_.-]*"
     /// A value that is safe as a whole: a marker, empty, true, false or null, followed by the value's end.
     static let safe = #"(?!(?:"(?:\[set\]|\[redacted[^"\]]*\])?"|\[set\]|\[redacted[^\]\s"]*\]|true|false|null)(?=[\s,;&}\]"']|$))"#
@@ -37,6 +37,8 @@ public enum DiagnosticsRedaction {
         // A bearer credential anywhere, in any case; `Basic`/`Digest`/`Token` as written in headers.
         rule(#"\b(bearer)\s+[A-Za-z0-9._~+/=-]{6,}"#, "$1 [redacted]", .caseInsensitive),
         rule(#"\b(Basic|Digest|Token)\s+[A-Za-z0-9._~+/=-]{6,}"#, "$1 [redacted]"),
+        // A PIN or pairing code in prose: "The pairing code is 482913", "Enter PIN 482913".
+        rule(#"\b((?:pairing\s+code|access\s+code|lan\s+code|passcode|pin)(?:\s+(?:is|was))?[\s:=#]+)\d{4,8}\b"#, "$1[redacted]", .caseInsensitive),
         // Escaped JSON inside a string: \"accessCode\":\"1234\".
         rule(#"(\\""# + secretKey + #"\\"\s*:\s*)\\"(?:[^"\\]|\\[^"])*\\""#, #"$1\\"[redacted]\\""#, .caseInsensitive),
         // JSON: "accessCode": "1234" (a number or bare word too).
@@ -54,6 +56,8 @@ public enum DiagnosticsRedaction {
         rule(#"\bA(?:KIA|SIA)[0-9A-Z]{16}\b"#, "[redacted key]"),
         rule(#"\bAIza[0-9A-Za-z_-]{35}"#, "[redacted key]"),
         rule(#"\bxox[abprs]-[A-Za-z0-9-]{10,}"#, "[redacted token]"),
+        // DER (a certificate or key in base64 without its PEM lines).
+        rule(#"\bMII[A-Za-z0-9+/]{20,}={0,2}"#, "[redacted DER]"),
         // Email addresses (an Apple Account, a printer account), also percent-encoded.
         rule(#"[A-Za-z0-9._%+-]+(?:@|%40)[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}"#, "[redacted email]"),
         // A pairing link carries its code and pin, also percent-encoded.
@@ -71,6 +75,8 @@ public enum DiagnosticsRedaction {
         // A person's home folder on a Mac or Linux (the Simulator's paths hold the Mac's user name).
         // A name may have spaces ("/Users/Taylor Person/…"): everything up to the next slash goes.
         rule(#"(\\?/(?:Users|home)\\?/)(?!\[redacted)[^/\\\n"',;]+"#, "$1[redacted]"),
+        rule(#"([A-Za-z]:\\{1,2}Users\\{1,2})[^\\/\n"',;]+"#, "$1[redacted]"),
+        rule(#"(?<![A-Za-z0-9])~[A-Za-z][A-Za-z0-9._-]*(?=/)"#, "~[redacted]"),
         // IPv4 addresses in free text: the pairing state says only what kind of address the phone uses.
         rule(#"\b(?:\d{1,3}\.){3}\d{1,3}\b"#, "[redacted address]"),
     ]
@@ -97,6 +103,18 @@ public enum DiagnosticsRedaction {
         return forms
     }
 
+    static let wordEscape = try! NSRegularExpression(pattern: #"\\u00([3-7][0-9A-Fa-f])"#)
+    static func unescapeWordCharacters(_ text: String) -> String {
+        guard text.contains(#"\u00"#) else { return text }
+        var out = "", last = text.startIndex
+        for match in wordEscape.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
+            guard let whole = Range(match.range, in: text), let hex = Range(match.range(at: 1), in: text),
+                  let scalar = UInt8(text[hex], radix: 16).map(Unicode.Scalar.init), scalar.properties.isAlphabetic || ("0"..."9").contains(Character(scalar)) || scalar == "_" else { continue }
+            out += text[last..<whole.lowerBound] + String(Character(scalar)); last = whole.upperBound
+        }
+        return out + text[last...]
+    }
+
     /// `text` with every secret removed; `secrets` (known values) go first, then the home folder reads `~`.
     public static func redact(_ text: String, secrets: [String] = [], home: String? = NSHomeDirectory()) -> String {
         var out = text
@@ -107,6 +125,8 @@ public enum DiagnosticsRedaction {
                 out = out.replacingOccurrences(of: form, with: "~").replacingOccurrences(of: form.replacingOccurrences(of: "/", with: #"\/"#), with: "~")
             }
         }
+        // `\u0070assword` is `password`: letters and digits written as JSON escapes are read as themselves first.
+        out = unescapeWordCharacters(out)
         for (regex, template) in rules {
             out = regex.stringByReplacingMatches(in: out, range: NSRange(out.startIndex..., in: out), withTemplate: template)
         }

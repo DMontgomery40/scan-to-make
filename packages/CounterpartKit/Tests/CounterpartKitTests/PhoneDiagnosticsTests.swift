@@ -248,6 +248,116 @@ final class PhoneDiagnosticsTests: XCTestCase {
         }
     }
 
+    /// The lead's three regressions (Nov 14), each seen in a sibling redactor: a key=value rule taking "Bearer" as the value
+    /// before the scheme rule; a plural-stripping step that turned "access" into "acces"; a harmless `https:` match that
+    /// swallowed the rest of the URL, query and all.
+    func testTheThreeSiblingRegressionsAreCaught() {
+        let r = { DiagnosticsRedaction.redact($0, home: nil) }
+        for header in ["Authorization: Bearer s3cr3tBearerValue99", "authorization: bearer s3cr3tBearerValue99",
+                       "Proxy-Authorization: Bearer s3cr3tBearerValue99", #"{"Authorization":"Bearer s3cr3tBearerValue99"}"#] {
+            let out = r(header)
+            XCTAssertFalse(out.contains("s3cr3tBearerValue99"), "\(header) → \(out)")
+            XCTAssertFalse(out.contains("[redacted] s3cr3t"), out)
+        }
+        for code in ["access-code: 31415926", "access_code=31415926", "ACCESS-CODE=31415926", "accessCodes: 31415926",
+                     "BAMBU_ACCESS_CODE=31415926", #"{"access-code":"31415926"}"#] {
+            XCTAssertFalse(r(code).contains("31415926"), "\(code) → \(r(code))")
+        }
+        for url in ["GET https://api.example.com/x?access_token=tokABC123456&y=1", "https://ex.com/cb#id_token=tokXYZ987654",
+                    "see https: then https://ex.com/a?b=1&access_token=tokABC123456", #"{"url":"https:\/\/ex.com\/x?access_token=tokABC123456"}"#] {
+            let out = r(url)
+            XCTAssertFalse(out.contains("tokABC123456") || out.contains("tokXYZ987654"), "\(url) → \(out)")
+        }
+        XCTAssertTrue(r("GET https://api.example.com/x?access_token=tokABC123456&y=1").contains("api.example.com/x?access_token="), "the URL's start stays")
+    }
+
+    /// #814's planted-secret cases (Android `DiagnosticsTests.everyPlantedSecretIsRemoved`), ported as probes: each secret
+    /// must not survive the phone's rules either.
+    func testAndroidsPlantedSecretsAreRemovedToo() {
+        let pin = String(repeating: "ab", count: 32)
+        let pinBytes = Data(repeating: 0xab, count: 32)
+        let token = "Zq3vK9xT2mWb7NcR4pLs8YdF1hGj6UeA0oIk5BnVt_w"
+        let cases: [(String, String)] = [
+            ("authorization: bearer abcDEF123456ghiJKL789", "abcDEF123456ghiJKL789"),
+            ("Authorization: Bearer abcDEF123456ghiJKL789", "abcDEF123456ghiJKL789"),
+            ("AUTHORIZATION: BASIC dXNlcjpwYXNzd29yZA==", "dXNlcjpwYXNzd29yZA=="),
+            ("Proxy-Authorization: basic dXNlcjpwYXNzd29yZA==", "dXNlcjpwYXNzd29yZA=="),
+            ("authorization: digest abcdef0123456789", "abcdef0123456789"),
+            ("authorization=Basic dXNlcjpwYXNz", "dXNlcjpwYXNz"),
+            ("sent with bearer abc-def_123456 to it", "abc-def_123456"),
+            ("set-cookie: sid=lowcookie123; HttpOnly", "lowcookie123"),
+            ("{\"headers\":{\"authorization\":\"Bearer abcdefghijkl\"}}", "abcdefghijkl"),
+            ("SCAN_TO_MAKE_MODEL_KEY=hf_9f8e7d6c5b4a39281706f5e4d3c2b1a0", "9f8e7d6c5b4a39281706f5e4d3c2b1a0"),
+            ("{\"SCAN_TO_MAKE_LAN_TLS_KEY\":\"/k/p.key\",\"SCAN_TO_MAKE_AI_KEY\":\"plainhex0123456789abcdef0123\"}", "plainhex0123456789abcdef0123"),
+            ("{\"session_key\":\"s3ss10nV4lue98765\"}", "s3ss10nV4lue98765"),
+            ("session_key=s3ss10nV4lue98765", "s3ss10nV4lue98765"),
+            ("encryption_key: deadbeefcafe0123456789", "deadbeefcafe0123456789"),
+            ("passphrase=hunter2-horse-battery", "hunter2-horse-battery"),
+            ("PAIRING_PIN=482910", "482910"),
+            ("{\"pin\":\"482913\"}", "482913"),
+            ("{\"pairingCode\":482913}", "482913"),
+            ("pin: 482913", "482913"),
+            ("The pairing code is 482913", "482913"),
+            ("Enter PIN 482913 on the Mac", "482913"),
+            ("{\"otp\":\"731204\"}", "731204"),
+            ("{\"sessionId\":\"7f3a9c1e88b24d6fa015\"}", "7f3a9c1e88b24d6fa015"),
+            ("{\"cookie\":\"sid=zzz999yyy888\"}", "zzz999yyy888"),
+            ("access-code: 31415926", "31415926"),
+            ("lan_code=87654321", "87654321"),
+            ("client_secret=cs_9876543210abcdef", "cs_9876543210abcdef"),
+            ("refresh token: rt_abcdef0123456789", "rt_abcdef0123456789"),
+            ("X-Api-Key: headervalue123456", "headervalue123456"),
+            ("{\"privateKey\":\"MIIEvQIBADANBgkq\"}", "MIIEvQIBADANBgkq"),
+            ("{\"credentials\":{\"user\":\"x\"},\"bambuCredential\":\"cred-value-77\"}", "cred-value-77"),
+            ("MY_SECRET=topsecret77 DB_PASSWORD='correct horse battery'", "correct horse"),
+            ("{\"password\":\"correct horse battery\"}", "correct horse"),
+            ("{\"\\u0070assword\":\"unicodesecret1\"}", "unicodesecret1"),
+            ("say \\\"refresh_token\\\":\\\"abc.def.ghi\\\"", "abc.def.ghi"),
+            ("--api-key sk_live_0123456789abcdefgh", "sk_live_0123456789abcdefgh"),
+            ("--token=tok0123456789", "tok0123456789"),
+            ("GET https://api.example.com/x?access_token=tokABC123456&y=1", "tokABC123456"),
+            ("https://ex.com/cb#id_token=tokXYZ987654", "tokXYZ987654"),
+            ("https://me:pw0rd99@printer.local/", "pw0rd99"),
+            ("token=[set]hunter2value", "hunter2value"),
+            ("password=true-secret-value", "true-secret-value"),
+            ("api_key=null-123456789", "null-123456789"),
+            ("secret=false_value99", "false_value99"),
+            ("{\"password\":\"true-secret\"}", "true-secret"),
+            ("{\"token\":\"[set]hunter2\"}", "hunter2"),
+            ("cloned with ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6", "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6"),
+            ("github_pat_11ABCDEFG0123456789_abcdefghijklmnopqrstuvwxyz", "11ABCDEFG0123456789_abcdefghij"),
+            ("aws id AKIAIOSFODNN7EXAMPLE ok", "IOSFODNN7EXAMPLE"),
+            ("key AIzaSyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r done", "SyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r"),
+            ("k sk-ant-api03-abcdefghijklmnopqrstuvwx", "abcdefghijklmnopqrstuvwx"),
+            ("t eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.signaturepart99", "eyJzdWIiOiIxIn0"),
+            ("-----BEGIN CERTIFICATE-----\nMIIBszCCAVmgAwIBAgIUZZZ\n-----END CERTIFICATE-----", "MIIBszCCAVmgAwIBAgIUZZZ"),
+            ("-----BEGIN EC PRIVATE KEY-----\nMHQCAQEEIAbc123\n-----END EC PRIVATE KEY-----", "MHQCAQEEIAbc123"),
+            ("-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXk=\n-----END OPENSSH PRIVATE KEY-----", "b3BlbnNzaC1rZXk="),
+            ("{\"pem\":\"-----BEGIN CERTIFICATE-----\\nMIIBszCCAVmgAwIBAgIUYYY\\n-----END CERTIFICATE-----\"}", "MIIBszCCAVmgAwIBAgIUYYY"),
+            ("der MIIBszCCAVmgAwIBAgIUZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ== end", "MIIBszCCAVmgAwIBAgIUZZZZ"),
+            ("a.b+tag@sub.example.co.uk", "a.b+tag@sub.example.co.uk"),
+            ("mail someone@example.com now", "someone@example.com"),
+            ("/Users/someoneelse/Library/x", "someoneelse"),
+            ("/home/otherperson/y", "otherperson"),
+            ("C:\\Users\\DavidM\\z", "DavidM"),
+            ("{\\\"path\\\":\\\"\\/Users\\/davidm\\/Library\\\"}", "davidm"),
+            ("log at ~davidm/Library/Logs", "davidm"),
+            ("scantomake://pair?v=2&code=482913&pk=abc", "482913"),
+            (pin, pin), (pin.uppercased(), pin.uppercased()),
+            (Array(repeating: "ab", count: 32).joined(separator: ":"), Array(repeating: "ab", count: 32).joined(separator: ":")),
+            (pinBytes.base64EncodedString(), pinBytes.base64EncodedString()),
+            ("token \(token)", token),
+        ]
+        let leaks = cases.filter { DiagnosticsRedaction.redact($0.0, home: nil).contains($0.1) }
+            .map { "\($0.0) → \(DiagnosticsRedaction.redact($0.0, home: nil))" }
+        XCTAssertTrue(leaks.isEmpty, "Leaked:\n" + leaks.joined(separator: "\n"))
+        for kept in ["Failed to authenticate: retry", "pinned: yes, colour-mapping: auto", "keyboard: us", "code: unreachable",
+                     #"{"code":"timeout","route":"/v1/objects/x/passes/2/activity","status":409}"#, "Device: Google Pixel 8",
+                     "TOKEN=[set] password=false KEY=", "Tailscale address (IPv4)"] {
+            XCTAssertEqual(DiagnosticsRedaction.redact(kept, home: nil), kept)
+        }
+    }
+
     func testMarkersAndOrdinaryWordsStay() {
         let r = { DiagnosticsRedaction.redact($0, home: "/var/mobile/Containers/Data/Application/AAAA") }
         XCTAssertEqual(r(#"{"BAMBU_PRINTER_ACCESS_CODE":"[set]","token":"","auth":true,"key":null}"#),
