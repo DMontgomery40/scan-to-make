@@ -187,7 +187,7 @@ What to Test for the next build (steps 4 and 5 changed by #799; not yet saved in
 >    event log and the printer software’s own diagnostics; nothing is sent. Email it to the
 >    developer’s feedback address in TestFlight’s App Details, with the same time and
 >    project name. Review it before sharing; it keeps printer serial numbers and network
->    addresses, and removes access codes, keys, tokens and email addresses.
+>    addresses, and removes the access codes, keys, tokens and email addresses it recognises; look before you send.
 
 Review notes addition:
 
