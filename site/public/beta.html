@@ -31,16 +31,20 @@
 <h2 id="downloads-title">Download</h2>
 <p class="intro">Counterpart is in beta on every platform.</p>
 <div class="downloads">
-<article class="glass"><h3>Mac</h3><p class="spec">Apple silicon · macOS 27 or newer</p><p>Signed and notarized. It updates itself.</p><p class="get"><a class="button" href="https://github.com/DMontgomery40/scan-to-make/releases/download/v2.0-beta.6/Counterpart-202611061933.zip">Download for Mac</a></p></article>
-<article class="glass"><h3>Android</h3><p class="spec">Android 8 or newer</p><p>Allow your browser to install the app when Android asks.</p><p class="get"><a class="button" href="https://github.com/DMontgomery40/scan-to-make/releases/download/v2.0-beta.6/Counterpart-android.apk">Download for Android</a></p></article>
-<article class="glass"><h3>Linux</h3><p class="spec">Ubuntu 26.04 · x86_64</p><p>Open the .deb to install it, or use the AppImage.</p><p class="get"><a class="button" href="https://github.com/DMontgomery40/scan-to-make/releases/download/v2.0-beta.6/Counterpart-linux-amd64.deb">Download .deb</a></p><p class="alt"><a href="https://github.com/DMontgomery40/scan-to-make/releases/download/v2.0-beta.6/Counterpart-linux-x86_64.AppImage">Download AppImage</a></p></article>
+<article class="glass"><h3>Mac</h3><p class="spec">Apple silicon · macOS 27 or newer</p><p>Signed and notarized. It updates itself.</p><p class="get"><a class="button" href="https://github.com/DMontgomery40/scan-to-make/releases/download/v2.0-beta.7/Counterpart-202611151935.zip">Download for Mac</a></p></article>
+<article class="glass"><h3>Android</h3><p class="spec">Android 8 or newer</p><p>Allow your browser to install the app when Android asks.</p><p class="get"><a class="button" href="https://github.com/DMontgomery40/scan-to-make/releases/download/v2.0-beta.7/Counterpart-android.apk">Download for Android</a></p></article>
+<article class="glass"><h3>Linux</h3><p class="spec">Ubuntu 26.04 · x86_64</p><p>Open the .deb to install it, or use the AppImage.</p><p class="get"><a class="button" href="https://github.com/DMontgomery40/scan-to-make/releases/download/v2.0-beta.7/Counterpart-linux-amd64.deb">Download .deb</a></p><p class="alt"><a href="https://github.com/DMontgomery40/scan-to-make/releases/download/v2.0-beta.7/Counterpart-linux-x86_64.AppImage">Download AppImage</a></p></article>
 <article class="glass"><h3>iPhone and iPad</h3><p class="spec">iOS 27 or iPadOS 27 or newer</p><p>Through Apple TestFlight.</p><p class="get"><a class="button" href="https://testflight.apple.com/join/S4tExVzp">Join the TestFlight beta</a></p></article>
 </div>
-<div class="after-downloads"><p><a href="https://github.com/DMontgomery40/scan-to-make/releases/tag/v2.0-beta.6">Release notes and checksums</a></p></div>
+<div class="after-downloads"><p><a href="https://github.com/DMontgomery40/scan-to-make/releases/tag/v2.0-beta.7">Release notes and checksums</a></p></div>
 </section>
 
 <section id="install" aria-labelledby="install-title">
 <h2 id="install-title">Mac</h2>
+<aside class="glass" aria-labelledby="beta6-title" style="padding: 1rem 1.25rem; margin: 1rem 0">
+<h3 id="beta6-title" style="margin-top: 0">Coming from beta 6</h3>
+<p>Quit Counterpart, drag the new app into Applications and choose <strong>Replace</strong>. Your projects and settings stay. From beta 7, it updates itself through <strong>Check for Updates</strong> in the Counterpart menu.</p>
+</aside>
 <ol id="mac-release">
 <li>Move Counterpart to Applications and open it. Allow Local Network access so it can reach your phone and printer.</li>
 <li>In Settings › Printers, add your printer. Counterpart installs the printer software it needs. Install the slicer that software uses — the app that prepares files for the printer, such as Bambu Studio.</li>
@@ -53,6 +57,9 @@
 
 <section id="linux" aria-labelledby="linux-title">
 <h2 id="linux-title">Linux</h2>
+<p><strong>Linux: using a scan needs Python's USD library</strong> until a later Linux build includes it. Run once:
+<code>python3 -m pip install --user --break-system-packages usd-core</code>
+It installs only into your home folder (about 210 MB). The flag's name is Ubuntu's guard against changing the system Python, which this doesn't do.</p>
 <ol>
 <li>Open the .deb to install Counterpart, or make the AppImage executable and open it.</li>
 <li>Open Counterpart and let it finish setting up.</li>
