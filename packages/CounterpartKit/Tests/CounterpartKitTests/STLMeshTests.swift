@@ -40,17 +40,17 @@ final class STLMeshTests: XCTestCase {
             ("a header and no triangles", Self.binary([]), 0),
             ("a header saying 4 billion", Self.binary([Self.one], header: .max), 1),
             ("a header saying more than it holds", Self.binary([Self.one, Self.two], header: 9), 2),
-            ("a header saying fewer than it holds", Self.binary([Self.one, Self.two], header: 1), 1),
+            ("a header saying fewer than it holds", Self.binary([Self.one, Self.two], header: 1), 0),
             ("a cut-off last triangle", Self.binary([Self.one, Self.two]).dropLast(7), 1),
             ("trailing bytes", Self.binary([Self.one], trailing: 13), 1),
-            ("a 3MF under an STL's name", threeMF, -1),
+            ("a 3MF under an STL's name", threeMF, 0),
             ("\"solid\" and nothing else", Data("solid".utf8), 0),
             ("ASCII with words where numbers go", Data("solid x\nvertex a b c\nvertex 1 2\nvertex 1 2 3 4\nendsolid".utf8), 0),
             ("ASCII with two corners", Data("solid x\nvertex 0 0 0\nvertex 1 0 0\nendsolid".utf8), 0),
             ("ASCII with nan and inf", Data("solid x\nvertex nan 0 0\nvertex 1 0 0\nvertex 0 1 0\nvertex inf 0 0\nvertex 1 0 0\nvertex 0 1 0\nendsolid".utf8), 0),
             ("a NaN corner", Self.binary([(SIMD3(.nan, 0, 0), SIMD3(1, 0, 0), SIMD3(0, 1, 0)), Self.one]), 1),
             ("an infinite corner", Self.binary([(SIMD3(.infinity, 0, 0), SIMD3(1, 0, 0), SIMD3(0, 1, 0))]), 0),
-            ("random bytes", Data((0..<5_000).map { UInt8(truncatingIfNeeded: $0 &* 2_654_435_761 >> 7) }), -1),
+            ("random bytes", Data((0..<5_000).map { UInt8(truncatingIfNeeded: $0 &* 2_654_435_761 >> 7) }), 0),
         ]
         for (name, data, expected) in cases {
             let triangles = STLMesh.triangles(data)
@@ -68,6 +68,27 @@ final class STLMeshTests: XCTestCase {
             }
             #endif
         }
+    }
+
+    /// Review R1 on #843: a real 3MF (a deflated zip of a sphere's model XML) and a stored-entry zip, under an STL's name,
+    /// are no triangles and no AR file: before, the reader salvaged thousands of invented triangles from their bytes.
+    func testAZipIsNeverReadAsAnSTL() throws {
+        for name in ["stl-reader-deflated.3mf", "stl-reader-stored.zip"] {
+            let data = try fixture(name)
+            XCTAssertEqual(Array(data.prefix(4)), [0x50, 0x4B, 0x03, 0x04], "\(name) is a real zip")
+            XCTAssertEqual(STLMesh.triangles(data).count, 0, name)
+            #if canImport(ModelIO)
+            if #available(iOS 18, macOS 15, *) {
+                let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                defer { try? FileManager.default.removeItem(at: folder) }
+                XCTAssertThrowsError(try PartUSDZ.write(STLMesh.triangles(data), srgb: [1, 1, 1], to: folder.appendingPathComponent("x.usdz")), name)
+            }
+            #endif
+        }
+        // A real binary STL cut short is still read (a download stopped partway), and never a zip whose header lies.
+        let cut = Self.binary([Self.one, Self.two]).dropLast(7)
+        XCTAssertEqual(STLMesh.triangles(Data(cut)).count, 1)
     }
 
     /// The normal the stage and the AR file share: none for a point, a line or a corner that isn't a number.
