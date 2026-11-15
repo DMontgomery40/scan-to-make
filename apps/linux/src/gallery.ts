@@ -90,7 +90,8 @@ export function partMesh(p: Project): string | undefined {
  * What the stage's AR opens for an entry, as a project path (CounterpartKit `ProjectGallery.Entry.ar`, #840): the one
  * rule every client derives from the project's own state. A part that turns in 3D offers the STL its stage turns, a scan
  * its own USDZ; Together, a plate, a part shown as a picture and a handheld STL scan offer none. Linux shows no AR
- * control (PRD §6.1); the value is the same as on the iPhone, from the shared cases.
+ * control (PRD §6.1). For the shared cases the value is the iPhone's; the iPhone alone also reads a scan's file sizes and
+ * names the phone's preview under a too-large rebuild, which Linux, with no AR control, has no use for.
  */
 export function ar(entry: GalleryEntry): string | undefined {
   if (!("model" in entry.drawing)) return undefined;

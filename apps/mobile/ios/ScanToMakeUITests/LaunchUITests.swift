@@ -1753,6 +1753,9 @@ final class LayoutParityUITests: XCTestCase {
     /// At accessibility text sizes nothing on any project page may reach past the screen's edges, on the iPhone and the
     /// iPad: the result with its stage (part and scan), a project still working, one asking a question, a draft design,
     /// a ready one and a print in progress, each on its first screen and scrolled once.
+    /// Its limits (review of #849, F4): only named elements are measured, so an unnamed capsule or image past the edge
+    /// isn't; nothing below the second screen is measured; and inside a short scroll view an element fails only when it
+    /// is wider than the whole window. None of these hides the #844 class (a named element widening the page).
     func testNothingOnAProjectPageIsWiderThanTheScreenAtTheLargestTextSize() throws {
         executionTimeAllowance = 300  // seven launches at the largest text size
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

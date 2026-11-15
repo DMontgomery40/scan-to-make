@@ -1116,7 +1116,8 @@ struct ProjectView: View {
                             } else {
                                 // Its own row at accessibility sizes: the whole name, on two lines if it must, never cut.
                                 Label(name, systemImage: "printer.fill").fontWeight(.semibold).lineLimit(stacked ? 3 : 1)
-                                    .fixedSize(horizontal: !stacked, vertical: true).padding(.horizontal, 8).frame(minHeight: 36)
+                                    .fixedSize(horizontal: !stacked, vertical: true).padding(.horizontal, 8)
+                                    .frame(height: stacked ? nil : 36).frame(minHeight: stacked ? 36 : nil)
                                     .frame(maxWidth: stacked ? .infinity : nil)
                             }
                         }
