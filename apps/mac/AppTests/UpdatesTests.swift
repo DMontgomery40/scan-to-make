@@ -331,7 +331,7 @@ final class UpdateStagingTests: XCTestCase {
         let fake = Fake()
         fake.kickstart = "exit 1: Operation not permitted"
         fake.decisions = [.install, .wait]
-        fake.answers = [Self.running(nil, nil), Self.running(nil, nil), Self.running("202611151700")]
+        fake.answers = [Self.running(nil, nil), Self.running(nil, nil), Self.running(nil, nil), Self.running("202611151700")]
         _ = await check(fake).run()
         XCTAssertEqual(fake.events.filter { $0 != "status" }, ["restart kickstart", "wait", "restart terminate"])
     }
@@ -351,6 +351,19 @@ final class UpdateStagingTests: XCTestCase {
     func testARefusingCompanionFromAnotherCopyIsNotRestarted() async {
         let fake = Fake()
         fake.answers = [.failure(Self.refused)]
+        let theirs = NSHomeDirectory() + "/Applications/Counterpart.app/Contents/MacOS/Counterpart"
+        fake.agents = [.init(pid: 900, started: Self.installed.addingTimeInterval(-3600), executable: theirs, executableExists: true)]
+        let outcome = await check(fake).run()
+        XCTAssertEqual(outcome, .otherCopy)
+        XCTAssertEqual(fake.restarts, 0)
+        XCTAssertEqual(fake.said, ["Another copy of Counterpart, in ~/Applications, runs in the background. Open that one, or remove the extra copy."])
+    }
+
+    /// Re-check of #854, R1: another copy's companion from before #850 that answers (no build, no payload) is named, never
+    /// restarted: its executable is another installed copy's, whatever appBuild says.
+    func testAnAnsweringCompanionFromAnotherCopyIsNotRestarted() async {
+        let fake = Fake()
+        fake.answers = [Self.running(nil, nil)]
         let theirs = NSHomeDirectory() + "/Applications/Counterpart.app/Contents/MacOS/Counterpart"
         fake.agents = [.init(pid: 900, started: Self.installed.addingTimeInterval(-3600), executable: theirs, executableExists: true)]
         let outcome = await check(fake).run()
@@ -414,7 +427,7 @@ final class UpdateStagingTests: XCTestCase {
     func testAKickstartThatFailsEndsTheAgentInstead() async {
         let fake = Fake()
         fake.kickstart = "exit 1: Operation not permitted"
-        fake.answers = [Self.running(nil, nil), Self.running(nil, nil), Self.running("202611151700")]
+        fake.answers = [Self.running(nil, nil), Self.running(nil, nil), Self.running(nil, nil), Self.running("202611151700")]
         let outcome = await check(fake).run()
         XCTAssertEqual(outcome, .restarted)
         XCTAssertEqual(fake.events.filter { $0 != "status" }, ["restart kickstart", "restart terminate"])
@@ -426,7 +439,7 @@ final class UpdateStagingTests: XCTestCase {
         let fake = Fake()
         // Still the old build answering at the tenth ask and just before the SIGTERM.
         var answers = [Self.running(nil, nil)]
-        answers += Array(repeating: Self.running(nil, nil), count: CompanionBuildCheck.kickstartAttempts + 1)
+        answers += Array(repeating: Self.running(nil, nil), count: CompanionBuildCheck.kickstartAttempts + 2)
         answers.append(Self.running("202611151700"))
         fake.answers = answers
         let outcome = await check(fake).run()
