@@ -215,7 +215,7 @@ GUI domain. Do not delete auth/TLS or rerun `init-lan`. Server diagnostics appen
 to the existing private `logs/companion*.log`; pairing output never goes there.
 
 Local Network acceptance requires a real login-session launch and a LAN operation,
-with a prompt naming **Scan to Make**, and deny/allow checks. SSH-started tools
+with a prompt naming **Counterpart** (the bundle's display name), and deny/allow checks. SSH-started tools
 are exempt and cannot establish this. See [Apple TN3179](https://developer.apple.com/documentation/technotes/tn3179-understanding-local-network-privacy).
 
 The foreground app makes one bounded SSDP discovery attempt per launch after a
@@ -257,9 +257,60 @@ Developer ID signing are available. Development builds never attempt notarizatio
 See [external beta distribution](../../docs/distribution.md) for the full phone/Mac
 release procedure, production relay settings and remaining fresh-install prerequisites.
 
-Configured release builds start Sparkle checks only when the app agent is not
-enabled and no legacy installation remains. Downloads are not automatic. This
-conservative gate avoids replacing the running companion; the later local-control
-busy/idle contract can allow updates while the agent is idle. Development builds
-do not start Sparkle. Feed publication, notarization and upgrade acceptance remain
-release validation steps.
+The app's version is **2.0** (`MARKETING_VERSION`, `CFBundleShortVersionString`); every beta before #828
+reported 0.1.0. Sparkle compares `CFBundleVersion` (`sparkle:version`, the `yyyymmddhhmm` build number), so the
+short version is only what people read and changing it changes no comparison.
+
+Configured release builds start Sparkle with scheduled checks, and the app menu has **Check for Updates…**
+(Sparkle's standard item; absent from development builds, which don't start Sparkle). Downloads are not automatic.
+Every check is allowed, with the companion agent running or not (#828: until then a check was refused whenever the
+agent was enabled, so no working install could update itself). Installing replaces `Counterpart.app`, which the agent
+runs from, so (`Updates` in `App/Main.swift`, the rule in `App/UpdateGate.swift`):
+
+1. **Install and Relaunch waits** while stopping the companion would cut work short: a pass running, a print being
+   prepared or sent (not yet on the printer), the printer's question waiting, or a phone sending a project's files. It
+   says "Counterpart will update as soon as the print or cleanup it’s working on is finished." and asks again every
+   15 s. A print the printer already has doesn't hold it: the printer prints on, and the companion's print monitor
+   resumes after a restart. A companion that doesn't answer has nothing to protect.
+2. Sparkle quits the app. With an update waiting (`staged`), `applicationShouldTerminate` **unregisters the agent**
+   (which stops it), waits until launchd no longer has the job, and records `agentAfterUpdate = stopped`.
+3. Sparkle replaces the app and relaunches it; the relaunched app **registers the agent again** before anything else
+   reaches it.
+
+A downloaded update the person dismissed still installs when the app quits (Sparkle's behaviour); the same quit path
+stops the agent, and it starts again the next time Counterpart opens (at login, by default). If that quit finds work
+in progress, the agent is left running (never stop a pass or a print being sent) and `agentAfterUpdate = outdated`
+makes the next launch restart it once idle (`launchctl kickstart -k`).
+
+A copy opened straight from Downloads runs App-Translocated (`…/AppTranslocation/…`): it can't register the
+companion or the login item, and Sparkle can't update it. At launch such a copy only says "Move Counterpart to
+Applications, then open it again." with **Show in Finder** (the person's own copy, from
+`SecTranslocateCreateOriginalPathForURL`, else Downloads) and quits. It never moves itself: a copy moved by anything
+but Finder keeps its quarantine flag and is translocated again.
+
+**Proving an update A → B without touching the live feed.** The updater must be the new code, so build A from a
+`main` that has #828 and point it at a staging appcast that lists the real candidate B:
+
+1. Build B, the real candidate, as usual (`scripts/release.sh` with the live `SPARKLE_FEED_URL`), and keep its
+   `feed/Counterpart-<B>.zip`.
+2. Build a throwaway A from the same trunk with a **lower** build number and the staging feed, in its own folder:
+   `BUILD_NUMBER=<B minus one minute> SPARKLE_FEED_URL=https://counterpart.dtmont.com/appcast-staging.xml
+   RELEASE_DIR=<scratch>/release-A apps/mac/scripts/release.sh` (same Developer ID, notary profile and
+   `SPARKLE_PUBLIC_KEY`, so A trusts B's EdDSA signature and Team ID).
+3. Make the staging appcast: a folder holding only B's ZIP, then
+   `"$SPARKLE_BIN/generate_appcast" --download-url-prefix <HTTPS folder where B's ZIP is uploaded>/ <folder>`, and
+   upload its `appcast.xml` as `appcast-staging.xml` with B's ZIP. `appcast.xml` stays untouched.
+4. On a clean VM clone: download A's ZIP like a tester, drag A to Applications in Finder, open it, let the companion
+   start (and pair, to have something running), then **Counterpart → Check for Updates… → Install Update → Install
+   and Relaunch**. Check: `/Applications/Counterpart.app`'s `CFBundleVersion` is B; `launchctl print
+   gui/$(id -u)/com.scantomake.mac.companion` shows it running; `defaults read com.scantomake.mac agentAfterUpdate`
+   has no value; the phone still reaches the Mac. Then the waits: start a cleanup, choose Install and Relaunch, see the
+   sentence, and watch it install once the cleanup ends; and a dismissed Ready to Install followed by Quit.
+
+Sparkle 2.9.3 also reads a `SUFeedURL` user default before Info.plist (`SUHost objectForKey:`; it logs a warning,
+and the app implements no `feedURLStringForUpdater`), so `defaults write com.scantomake.mac SUFeedURL
+https://counterpart.dtmont.com/appcast-staging.xml` points an installed configured build at the staging feed
+without a rebuild (`defaults delete com.scantomake.mac SUFeedURL` undoes it). It doesn't replace building A: beta 7
+and earlier refuse every check while their agent runs.
+
+Development builds do not start Sparkle.
