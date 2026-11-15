@@ -1688,13 +1688,14 @@ extension AppTests {
         let connection = MacConnection(client: CompanionClient(pairing: pairing, transport: mac))
         let defaults = try XCTUnwrap(UserDefaults(suiteName: "stranded-real-\(UUID().uuidString)"))
         let listed = try await connection.list()
-        let due = MacConnection.strandedScans(listed, defaults, capabilities: onAsk, kept: { _ in .stopped(run: run, photos: 2) }, requested: { _ in false })
+        let due = MacConnection.strandedScans(listed, defaults, capabilities: onAsk, kept: { _ in .stopped(run: run, photos: 20) }, requested: { _ in false })
         XCTAssertEqual(due.map(\.action), [.send])
-        try await MacConnection.sendStranded(due[0], defaults, send: { _ = try await connection.sendStoppedScan($0, run: $1) })
+        let scan = try XCTUnwrap(due.first)
+        try await MacConnection.sendStranded(scan, defaults, send: { _ = try await connection.sendStoppedScan($0, run: $1) })
         let one = "/v1/objects/\(project)"
         XCTAssertEqual(mac.requests, ["GET /v1/objects", "GET \(one)", "GET /healthz", "POST \(one)/capture-manifest", "GET \(one)",
                                       "POST \(one)/capture?name=0001.heic", "POST \(one)/capture?name=0002.heic", "POST \(one)/start"])
-        XCTAssertEqual(MacConnection.strandedScans(listed, defaults, capabilities: onAsk, kept: { _ in .stopped(run: run, photos: 2) },
+        XCTAssertEqual(MacConnection.strandedScans(listed, defaults, capabilities: onAsk, kept: { _ in .stopped(run: run, photos: 20) },
                                                    requested: { _ in false }), [], "once")
     }
 }
