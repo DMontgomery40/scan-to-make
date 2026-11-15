@@ -21,7 +21,7 @@ import CounterpartKit
     /// per project version, as before.
     nonisolated static func key(_ project: Project, _ path: String?, _ size: Int) -> String {
         let path = path ?? ""
-        return OnDeviceLibrary.namedByContent(path) ? "\(project.id)#\(path)#\(size)" : "\(project.id)#\(Int64(project.mediaVersion))#\(path)#\(size)"
+        return OnDeviceLibrary.namedByContent(path) ? "\(project.id)#\(path)#\(size)" : "\(project.id)#\(project.mediaVersionNumber)#\(path)#\(size)"
     }
     /// Remembers a decoded picture under its key and as this path's latest.
     func store(_ image: UIImage, _ key: String, project: String, path: String?) {
@@ -117,7 +117,7 @@ extension ImageMemory {
         guard let kept = app.companion.library.latest(project: project.id, name: path) else { return nil }
         let url = kept.url
         guard let image = await DecodeLane.shared.run({ ImageMemory.thumbnail(at: url, maxPixelSize: size) }) ?? nil else { return nil }
-        return (image, kept.version == Int64(project.mediaVersion) || OnDeviceLibrary.namedByContent(path))
+        return (image, kept.version == project.mediaVersionNumber || OnDeviceLibrary.namedByContent(path))
     }
 
     /// Downloads one of the project's pictures and decodes it at `maxPixelSize`. Nil when it can't be had.
@@ -352,13 +352,15 @@ private extension StagePicture.Shows {
         while !Task.isCancelled {
             do {
                 if snapshots {
-                    let frame = project != nil ? try await client.camera(project: project!, fullScreen: fullScreen, previous: previous)
-                        : try await client.camera(printer: printer!, fullScreen: fullScreen, previous: previous)
+                    let frame: CompanionClient.CameraFrame
+                    if let project { frame = try await client.camera(project: project, fullScreen: fullScreen, previous: previous) }
+                    else if let printer { frame = try await client.camera(printer: printer, fullScreen: fullScreen, previous: previous) }
+                    else { return }
                     if previous == nil || frame.etag == nil || frame.etag != previous?.etag { await display(frame) }
                     previous = frame; problem = nil
                 } else {
-                    let frames = project != nil ? client.cameraFrames(project: project!, fullScreen: fullScreen)
-                        : client.cameraFrames(printer: printer!, fullScreen: fullScreen)
+                    guard let frames = project.map({ client.cameraFrames(project: $0, fullScreen: fullScreen) })
+                        ?? printer.map({ client.cameraFrames(printer: $0, fullScreen: fullScreen) }) else { return }
                     for try await frame in frames { await display(frame) }
                 }
             } catch let error as CompanionError {
@@ -398,7 +400,7 @@ struct AskPhoto: View {
     private var image: UIImage? { load.key == key ? load.picture : ImageMemory.shared.image(key) }
     private var file: URL? { load.key == key ? load.file : nil }
     private var aspect: CGFloat { image.map { $0.size.width / max($0.size.height, 1) } ?? 4 / 3 }
-    private var key: String { "\(project.id)#\(Int64(project.mediaVersion))#\(path ?? "")#ask" }
+    private var key: String { "\(project.id)#\(project.mediaVersionNumber)#\(path ?? "")#ask" }
 
     var body: some View {
         Group { if !(load.key == key && load.hidden) { figure } }
@@ -442,7 +444,7 @@ struct AskPhoto: View {
         guard let path else { load.downloaded(nil, for: key); return }
         // The phone's own copy when it is this version; else the Mac's, falling back to the copy the phone has.
         let kept = app.companion.library.latest(project: project.id, name: path)
-        let url = kept?.version == Int64(project.mediaVersion) ? kept?.url : ((try? await app.projects.mac.download(project, path)) ?? kept?.url)
+        let url = kept?.version == project.mediaVersionNumber ? kept?.url : ((try? await app.projects.mac.download(project, path)) ?? kept?.url)
         guard !Task.isCancelled else { return }
         load.downloaded(url, for: key)
         guard let url, load.picture == nil else { return }
@@ -516,7 +518,8 @@ struct ZoomableImage: UIViewRepresentable {
             accessibilityTraits = [.image]
             accessibilityLabel = "Picture"
         }
-        required init?(coder: NSCoder) { fatalError() }
+        /// Never made from a storyboard; nil rather than a crash if it ever were (#840).
+        required init?(coder: NSCoder) { return nil }
 
         override func layoutSubviews() {
             super.layoutSubviews()

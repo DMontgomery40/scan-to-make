@@ -42,7 +42,9 @@ public struct AskSizesForm: Equatable, Sendable {
 
     /// A number as a person types it: no trailing ".0", at most two decimals.
     public static func text(_ mm: Double) -> String {
+        // A size the companion sent can be anything: past Int's range it is written as it is, never converted (a trap).
         let rounded = (mm * 100).rounded() / 100
+        guard rounded.isFinite, abs(rounded) < 1e15 else { return rounded.isFinite ? String(rounded) : "" }
         return rounded == rounded.rounded() ? String(Int(rounded)) : String(rounded)
     }
 

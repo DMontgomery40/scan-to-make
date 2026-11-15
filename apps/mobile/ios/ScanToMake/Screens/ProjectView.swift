@@ -514,7 +514,7 @@ struct ProjectView: View {
     private func demandModel(_ object: Project) {
         store.models.setActive(scenePhase == .active)
         if object.current != nil, scenePhase == .active { store.models.want(object, "model.stl") }
-        let context = store.models.traceContext(object, "model.stl") ?? MediaTrace.Context(project: object.id, version: String(Int64(object.mediaVersion)))
+        let context = store.models.traceContext(object, "model.stl") ?? MediaTrace.Context(project: object.id, version: object.mediaVersionTag)
         MediaTrace.record("page.model-begin", ["key": object.current?.model ?? "none", "scene": String(describing: scenePhase), "page": instance], context: context)
         MediaTrace.record(Task.isCancelled ? "page.model-cancelled" : "page.model-demanded", ["scene": String(describing: scenePhase)], context: context)
     }
@@ -525,7 +525,7 @@ struct ProjectView: View {
         let url = modelURL(object)
         guard modelTrace.claim("\(url?.path ?? "")#\(object.spoolColour ?? "")") else { return }
         MediaTrace.record("page.model-published", ["file": String(url != nil), "scene": String(describing: scenePhase), "page": instance],
-                          context: store.models.traceContext(object, "model.stl") ?? MediaTrace.Context(project: object.id, version: String(Int64(object.mediaVersion))))
+                          context: store.models.traceContext(object, "model.stl") ?? MediaTrace.Context(project: object.id, version: object.mediaVersionTag))
     }
 
     // MARK: Answering a card
@@ -1612,8 +1612,9 @@ enum ARModel {
     }
 
     /// The AR files the app wrote before Nov 11 beside this STL (`model.usdz`, `model.<rrggbb>.usdz`) are Reality files:
-    /// never handed to AR Quick Look again, and their space comes back.
-    static func removeStale(beside url: URL) {
+    /// never handed to AR Quick Look again, and their space comes back. So do the scratch files a write left when the app
+    /// stopped partway (`ar-<uuid>.usda`/`.usdz`, #840: every crashed tap left one), once no write could still own them.
+    static func removeStale(beside url: URL, now: Date = Date()) {
         let folder = url.deletingLastPathComponent(), base = url.deletingPathExtension().lastPathComponent + "."
         guard let names = try? FileManager.default.contentsOfDirectory(atPath: folder.path) else { return }
         for name in names where name.hasPrefix(base) && name.lowercased().hasSuffix(".usdz") {
@@ -1621,6 +1622,17 @@ enum ARModel {
             if !PartUSDZ.isUSDZ(file) {
                 try? FileManager.default.removeItem(at: file)
                 MediaTrace.record("ar.stale-removed", ["name": name])
+            }
+        }
+        let abandoned = now.addingTimeInterval(-2 * Double(exportDeadline.components.seconds))
+        // Only the writer's own scratch names (`PartUSDZ.isScratch`), and only when the file's date can be read and is old
+        // enough that no write could still own it (review R4 on #843).
+        for name in names where PartUSDZ.isScratch(name) {
+            let file = folder.appendingPathComponent(name)
+            guard let modified = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate else { continue }
+            if modified < abandoned {
+                try? FileManager.default.removeItem(at: file)
+                MediaTrace.record("ar.scratch-removed", ["name": String(name.suffix(5))])
             }
         }
     }

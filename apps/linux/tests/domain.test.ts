@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { canLocate, gallery, partMesh, drawnColour, photoPicture, still, filePath, stageStill, pictureClock, PICTURE_PATIENCE_MS, NOT_DRAWN_LINE } from "../src/gallery";
+import { ar, canLocate, gallery, partMesh, drawnColour, photoPicture, still, filePath, stageStill, pictureClock, PICTURE_PATIENCE_MS, NOT_DRAWN_LINE } from "../src/gallery";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { ProjectPage } from "../src/ProjectView";
@@ -118,6 +118,9 @@ test("every client derives the same pictures from the shared gallery cases", () 
         ? { assembly: { part: entry.drawing.assembly.part, object: entry.drawing.assembly.object, seats: entry.drawing.assembly.seats.length } }
         : entry.drawing;
       assert.deepEqual(drawing, want.drawing, item.name);
+      // #840: what the stage's AR opens, the one rule every client derives (null: none).
+      assert.ok("ar" in want, `${item.name}: ${entry.id} says what its AR opens`);
+      assert.equal(ar(entry) ?? null, want.ar, `${item.name}: ${entry.id}'s AR`);
     });
   }
   const many = doc.cases.find((c: { name: string }) => c.name.includes("six plates"));

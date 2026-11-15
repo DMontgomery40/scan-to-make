@@ -66,7 +66,7 @@ struct ProjectGalleryView: View {
     }
 
     /// What the stage's downloads depend on.
-    private var wantKey: String { "\(project.id)#\(ownMesh ?? "")#\(project.scan ?? "")#\(Int64(project.mediaVersion))#\(String(describing: project.scanFiles))#\(scenePhase)" }
+    private var wantKey: String { "\(project.id)#\(ownMesh ?? "")#\(project.scan ?? "")#\(project.mediaVersionTag)#\(String(describing: project.scanFiles))#\(scenePhase)" }
 
     var body: some View {
         // #769: a pushed page's instance can draw without running its `.task`s (`BodyKick`): the downloads start from here too.
@@ -103,7 +103,7 @@ struct ProjectGalleryView: View {
         let url = effectiveModelURL
         guard urlTrace.claim(url?.path ?? "") else { return }
         MediaTrace.record("gallery.url", ["gallery": instance, "url": String(url != nil), "mesh": ownMesh ?? "model.stl", "entry": entry?.id ?? "none"],
-                          context: MediaTrace.Context(project: project.id, version: String(Int64(project.mediaVersion))))
+                          context: MediaTrace.Context(project: project.id, version: project.mediaVersionTag))
     }
 
     // MARK: The models the stage draws
@@ -295,20 +295,24 @@ struct ProjectGalleryView: View {
         }
     }
 
+    /// Whether the chip is there at all, and what it opens, is `Entry.ar` (#840): the one rule every client derives from the
+    /// project's own state. What follows only says how far along that file is on this phone.
     private func arChip(_ entry: ProjectGallery.Entry) -> ARChip? {
+        guard let path = entry.ar else { return nil }
         switch entry.kind {
         case .part:
-            guard let path = entry.arMesh else { return nil }
             if arPreparing { return .preparing }
             if let arURL { return .show(arURL) }
             if let effectiveModelURL { return arFailed ? .failed(effectiveModelURL) : .prepare(effectiveModelURL) }
             // While the model a design draws from is coming, the chip says so (#606); an earlier design's is its own file (#616).
             return store.away ? .needsMac : waiting(for: ownMesh ?? path)
         case .scan:
-            if let scanURL, scanURL.pathExtension.lowercased() == "usdz" { return arFailed ? .failedScan(scanURL) : .show(scanURL) }
-            if case .file = scanModel, store.away { return .needsMac }
-            if case .file(let path) = scanModel, (path as NSString).pathExtension.lowercased() == "usdz" { return waiting(for: path) }
-            return nil
+            // `path` is the file the rule chose: the scan's USDZ, or the phone's preview beside a large rebuild (review R2
+            // on #843). Here, only whether it is on this phone yet; a scan still only on this phone is its own file.
+            if let url = store.models.file(project, path) ?? localScan, url.pathExtension.lowercased() == "usdz" {
+                return arFailed ? .failedScan(url) : .show(url)
+            }
+            return store.away ? .needsMac : waiting(for: path)
         case .together, .plate:
             return nil
         }
