@@ -130,6 +130,8 @@ class CompanionClient(
             return when {
                 reply.status == 401 || reply.status == 403 -> CompanionException("pairing", "Connect to your computer again.")
                 // #827: only a companion from before the fix refuses the project list, and it does so when no printer is set up.
+                // A newer companion refuses it only when it runs without a capture folder; that companion is unsupported (the
+                // computer app's agent always has one), so it isn't told apart here (review F8).
                 reply.status == 404 && path == "/v1/objects" -> CompanionException("not-set-up", "Add your printer on your computer first: in Counterpart, open Settings › Printers.")
                 reply.status == 404 && path.endsWith("/filaments") -> CompanionException("not-set-up", "Update Counterpart on your computer to choose a filament here.")
                 reply.status == 404 && path.endsWith("/camera.jpg") && code == "not-found" && message?.contains("camera") == true ->

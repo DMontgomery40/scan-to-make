@@ -258,6 +258,8 @@ public final class CompanionClient: @unchecked Sendable {
         switch reply.status {
         case 401, 403: return CompanionError(code: "pairing", message: "Connect to your Mac again.")
         // #827: only a companion from before the fix refuses the project list, and it does so when no printer is set up.
+        // A newer companion refuses it only when it runs without a capture folder; that companion is unsupported (the
+        // Mac app's agent always has one), so it isn't told apart here (review F8).
         case 404 where path == "/v1/objects": return CompanionError(code: "not-set-up", message: Self.noPrinterYet)
         case 404 where path.hasSuffix("/filaments"): return CompanionError(code: "not-set-up", message: "Update Counterpart on your Mac to choose a filament here.")
         case 404 where path.hasSuffix("/colour-mapping"): return CompanionError(code: "not-set-up", message: "Update Counterpart on your Mac to choose a spool for each colour here.")
