@@ -56,17 +56,18 @@ struct NewObjectView: View {
     enum Attached: Equatable { case walkAround, inHand }
 
     /// What New knows about a stopped scan it holds (#795): how many photos it kept, said under its question, and the
-    /// run Remove takes off when they may be too few. Kept together so a new scan clears both: a Remove left over from
-    /// a 12-photo stop beside a scan that finished took the old run off and cleared the sheet while the new one still sent.
+    /// run Remove takes off. Kept together so a new scan clears both: a Remove left over from a 12-photo stop beside a
+    /// scan that finished took the old run off and cleared the sheet while the new one still sent.
     @MainActor struct ScanStop: Equatable {
         private(set) var photos: Int?
         private(set) var removableRun: String?
         /// A scan that finished, in hand or walked around, or none: nothing to say and nothing for Remove.
         mutating func clear() { self = ScanStop() }
-        /// A scan stopped after keeping `photos`: Remove is offered only when they may be too few.
+        /// A scan stopped after keeping `photos`: Remove is offered whatever it kept (David, Nov 15: a 68-photo stop
+        /// could never be taken off once the Mac was told about it; Remove now tells the Mac to forget it).
         mutating func stopped(run: String, photos: Int) {
             self.photos = photos
-            removableRun = MacConnection.isEnough(stoppedPhotos: photos) ? nil : run
+            removableRun = run
         }
     }
 
@@ -425,12 +426,8 @@ struct NewObjectView: View {
                     Button("Remove") { picked = nil; scanUse = nil }.font(.subheadline)
                         .disabled(working != nil).accessibilityIdentifier("scan-use-remove")
                 } else if let run = stop.removableRun {
-                    // A few stray photos from a stopped scan: take them off and the project designs from the words.
-                    Button("Remove") {
-                        MacConnection.removeStoppedScan(run: run)
-                        stop.clear(); attached = nil; captureWarning = nil; scanUse = nil
-                        store.refreshStoppedScans()
-                    }
+                    // A stopped scan: take it off (the Mac forgets it if it was told) and the project designs from the words.
+                    Button("Remove") { Task { await removeStopped(run) } }
                     .font(.subheadline).disabled(working != nil).accessibilityIdentifier("scan-use-remove")
                 }
             }
@@ -720,6 +717,15 @@ struct NewObjectView: View {
     private func declareStoppedScan(_ id: String) {
         let mac = store.mac
         if mac.recordStoppedDeclare(id) { Task { await mac.retryPendingDeclares() } }
+    }
+
+    /// Remove beside a stopped scan. When the Mac doesn't answer and was told about it, the scan stays and the sheet says so.
+    private func removeStopped(_ run: String) async {
+        await self.run("remove") {
+            if let id = created?.id { try await store.mac.removeStoppedScan(id, run: run) } else { MacConnection.removeStoppedScan(run: run) }
+            stop.clear(); attached = nil; captureWarning = nil; scanUse = nil
+            store.refreshStoppedScans()
+        }
     }
 
     /// Scans for this draft and comes back here with the scan attached; Send sends it with the rest.

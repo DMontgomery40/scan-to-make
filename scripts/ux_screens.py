@@ -274,7 +274,7 @@ def screens(ids: dict, record: str, offline_record: str, fixtures: Path, offline
         [['press', 'id="project-search"'], ['type', 'holder']], pages=2)
     add('new', 'New', 'nothing chosen', 'real', real + ['-CounterpartScreen', 'new'], pages=3)
     add('new-scan', 'New, after a scan', 'scan attached, no use chosen', 'real (scan faked)', real + ['-CounterpartScreen', 'new', '-CounterpartNewScan', 'walk-around'], pages=2)
-    # A scan stopped before Done (#795): enough photos for the Mac to build from, and too few (Remove is offered).
+    # A scan stopped before Done (#795): enough photos for the Mac to build from, and too few. Both offer Remove.
     for photos in (68, 12):
         add(f'new-scan-stopped-{photos}', 'New, after a stopped scan', f'stopped at {photos} photos', 'real (scan faked)',
             real + ['-CounterpartScreen', 'new', '-CounterpartNewScan', f'stopped-{photos}'], pages=2)

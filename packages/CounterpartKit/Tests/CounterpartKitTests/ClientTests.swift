@@ -983,6 +983,21 @@ final class CompanionClientTests: XCTestCase {
         XCTAssertEqual(seen.body["depthRequired"] as? Bool, false)
     }
 
+    /// Remove on a stopped scan, or a different run about to be named: the declared list is taken off with a bodiless DELETE.
+    func testAWalkAroundIsForgottenWithADeleteOfItsManifest() async throws {
+        let id = "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a02"
+        final class Seen: @unchecked Sendable { var method = ""; var path = ""; var body: Data? }
+        let seen = Seen()
+        let fake = FakeTransport { request, _ in
+            seen.method = request.httpMethod ?? ""; seen.path = request.url!.path; seen.body = request.httpBody
+            return json(200, ["object": ["id": id, "createdAtMs": 1, "updatedAtMs": 1, "state": "new", "photos": [], "passes": []]])
+        }
+        _ = try await try client(fake).forgetCapture(id)
+        XCTAssertEqual(seen.method, "DELETE")
+        XCTAssertEqual(seen.path, "/v1/objects/\(id)/capture-manifest")
+        XCTAssertNil(seen.body)
+    }
+
     /// Apple's Object Capture names become the Mac's capture frame names, NNNN in capture order; anything else stops the send.
     func testObjectCaptureImagesBecomeNumberedFramesInCaptureOrder() throws {
         let frames = try ProjectUploader.captureFrames(["00393.886463125.HEIC", "00041.732011084.HEIC", ".hidden", "00049.698417084.HEIC"])

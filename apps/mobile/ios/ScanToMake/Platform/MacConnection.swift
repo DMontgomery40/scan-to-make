@@ -346,7 +346,7 @@ typealias MacError = CompanionError
     static func declaredRuns(_ defaults: UserDefaults = .standard) -> [String: String] {
         (defaults.dictionary(forKey: declaredRunsKey) as? [String: String]) ?? [:]
     }
-    static func setDeclaredRun(project: String, run: String, _ defaults: UserDefaults = .standard) {
+    static func setDeclaredRun(project: String, run: String?, _ defaults: UserDefaults = .standard) {
         var runs = declaredRuns(defaults)
         runs[project] = run
         defaults.set(runs, forKey: declaredRunsKey)
@@ -360,16 +360,17 @@ typealias MacError = CompanionError
                              declared: Self.declaredRuns()[id], photos: Self.photoCount)
     }
 
-    /// Stopped runs taken off their project on New with Remove (review of #795): a stray few photos never lock a draft
-    /// or go with its Send. Kept on the phone; nothing deletes a capture.
-    static var removedStoppedScans: Set<String> { Set(UserDefaults.standard.stringArray(forKey: removedStoppedKey) ?? []) }
-    static func removeStoppedScan(run: String) {
-        UserDefaults.standard.set((removedStoppedScans.union([run])).sorted(), forKey: removedStoppedKey)
+    /// Stopped runs taken off their project on New with Remove (review of #795; every stopped scan since David, Nov 15):
+    /// they never lock a draft or go with its Send. Kept on the phone; nothing deletes a capture.
+    static var removedStoppedScans: Set<String> { removedStoppedScans(.standard) }
+    static func removedStoppedScans(_ defaults: UserDefaults) -> Set<String> { Set(defaults.stringArray(forKey: removedStoppedKey) ?? []) }
+    static func removeStoppedScan(run: String, _ defaults: UserDefaults = .standard) {
+        defaults.set((removedStoppedScans(defaults).union([run])).sorted(), forKey: removedStoppedKey)
     }
     private static let removedStoppedKey = "CounterpartRemovedStoppedScans"
 
     /// Whether a kept scan is named to the Mac as soon as it's attached: a stopped one with enough photos. One with
-    /// fewer waits for Send, so Remove can still take it off and the project designs from the words (review of #795).
+    /// fewer waits for Send (review of #795). Either can be taken off with Remove, which tells the Mac to forget it.
     static func declaresAtOnce(_ kept: KeptScan?) -> Bool {
         if case .stopped(_, let photos)? = kept { return isEnough(stoppedPhotos: photos) }
         return false
@@ -411,7 +412,56 @@ typealias MacError = CompanionError
         let images = URL.documentsDirectory.appending(path: "NativeCaptures/\(run)/Images", directoryHint: .isDirectory)
         let frames = try ProjectUploader.captureFrames((try? FileManager.default.contentsOfDirectory(atPath: images.path)) ?? [])
         guard !frames.isEmpty, try await client.capabilities().contains("objectCaptureImages") else { return }
-        _ = try await client.declareCapture(id, manifest: Self.captureManifest(frames.map(\.name)))
+        try await declare(id, run: run, manifest: Self.captureManifest(frames.map(\.name)))
+    }
+
+    /// Names a run's photos to the Mac. A different run the Mac acknowledged before is forgotten first, with any of its
+    /// photos that came: every run names its photos alike (0001.heic…) and a send skips names the Mac already has, so
+    /// an older run's photos would otherwise be rebuilt as the newer scan.
+    private func declare(_ id: String, run: String, manifest: [String: Any]) async throws {
+        try await Self.declare(project: id, run: run, forget: { [client] in _ = try await client.forgetCapture($0) },
+                               declare: { [client] in _ = try await client.declareCapture($0, manifest: manifest) })
+    }
+
+    static func declare(project: String, run: String, _ defaults: UserDefaults = .standard,
+                        forget: (String) async throws -> Void, declare: (String) async throws -> Void) async throws {
+        if let earlier = acknowledgedRuns(defaults)[project], earlier != run {
+            try await forget(project)
+            setAcknowledgedRun(project: project, run: nil, defaults)
+        }
+        try await declare(project)
+        setAcknowledgedRun(project: project, run: run, defaults)
+    }
+
+    /// The run whose photo list the Mac last acknowledged, by project; nil once it was forgotten.
+    static func acknowledgedRuns(_ defaults: UserDefaults = .standard) -> [String: String] {
+        (defaults.dictionary(forKey: acknowledgedRunsKey) as? [String: String]) ?? [:]
+    }
+    static func setAcknowledgedRun(project: String, run: String?, _ defaults: UserDefaults = .standard) {
+        var runs = acknowledgedRuns(defaults)
+        runs[project] = run
+        defaults.set(runs, forKey: acknowledgedRunsKey)
+    }
+    private static let acknowledgedRunsKey = "CounterpartAcknowledgedScanRuns"
+
+    /// Remove on a stopped scan (David, Nov 15: a 20-photo-or-more stop could never be taken off): the Mac forgets it if
+    /// it was told, and this phone stops offering it. Kept on the phone; nothing deletes a capture. A declare that never
+    /// reached the Mac (still pending, and the Mac doesn't answer) needs no forgetting.
+    func removeStoppedScan(_ id: String, run: String) async throws {
+        try await Self.removeStoppedScan(project: id, run: run, forget: { [client] in _ = try await client.forgetCapture($0) })
+    }
+
+    static func removeStoppedScan(project: String, run: String, _ defaults: UserDefaults = .standard,
+                                  forget: (String) async throws -> Void) async throws {
+        let told = acknowledgedRuns(defaults)[project] == run, pending = pendingDeclares(defaults)[project] == run
+        if told || pending {
+            do { try await forget(project) }
+            catch let failure as CompanionError where !told && failure.isUnreachable {}
+        }
+        setPendingDeclare(project: project, run: nil, defaults)
+        if told { setAcknowledgedRun(project: project, run: nil, defaults) }
+        if declaredRuns(defaults)[project] == run { setDeclaredRun(project: project, run: nil, defaults) }
+        removeStoppedScan(run: run, defaults)
     }
 
     static func captureManifest(_ images: [String]) -> [String: Any] {
@@ -526,7 +576,7 @@ typealias MacError = CompanionError
         let frames = try ProjectUploader.captureFrames(((try? FileManager.default.contentsOfDirectory(atPath: images.path)) ?? []))
         let manifest = Self.captureManifest(frames.map(\.name))
         // Every image is named before any is sent: no client can start the Mac on part of them.
-        _ = try await client.declareCapture(id, manifest: manifest)
+        try await declare(id, run: run, manifest: manifest)
         Self.setDeclaredRun(project: id, run: run)
         // Then the images: the Mac takes capture frames only until a scan is there.
         let files = frames.map { UploadFile.image(images.appending(path: $0.file), name: $0.name, kind: .capture) } + (hasModel ? [preview] : [])

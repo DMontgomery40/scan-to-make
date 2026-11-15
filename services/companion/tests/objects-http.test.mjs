@@ -180,6 +180,13 @@ test('a walk-around declares its images before any frame, marks its preview, and
   assert.equal((await call('POST', `${path}/capture-manifest`, manifest)).status, 200);
   assert.equal((await call('POST', `${path}/capture?name=0001.heic`, Buffer.from('a'))).status, 200);
   assert.equal((await call('POST', `${path}/capture?name=0003.heic`, Buffer.from('c'))).status, 409, 'not one of the declared images');
+  // Remove on the phone, or a different run about to be named: the list and its frames go, then it is named again.
+  const forgotten = await call('DELETE', `${path}/capture-manifest`);
+  assert.equal(forgotten.status, 200);
+  assert.equal(forgotten.json.object.captureDeclared, undefined);
+  assert.deepEqual(forgotten.json.object.capture ?? [], []);
+  assert.equal((await call('POST', `${path}/capture-manifest`, manifest)).status, 200);
+  assert.equal((await call('POST', `${path}/capture?name=0001.heic`, Buffer.from('a'))).status, 200);
   const early = await call('POST', path + '/start', undefined, undefined, 'other-paired-phone');
   assert.equal(early.status, 409);
   assert.match(early.json.error.message, /phone that recorded it/);
@@ -191,6 +198,7 @@ test('a walk-around declares its images before any frame, marks its preview, and
   assert.equal((await service.settled(id)).state, 'ready');
   assert.equal(builds.length, 1);
   assert.equal(builds[0].objectCapture, true);
+  assert.equal((await call('DELETE', `${path}/capture-manifest`)).status, 409, 'once the touch-up started, the scan stays');
 
   // A computer without Apple's rebuild (Linux) refuses an iPhone walk-around in words.
   const linux = await fixture(t);

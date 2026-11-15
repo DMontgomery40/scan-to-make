@@ -1522,6 +1522,23 @@ export class ObjectService {
     });
   }
 
+  /**
+   * A walk-around taken off before its touch-up starts: the declared list and every frame of it that came are dropped,
+   * so the project designs from its words, or a newer scan arrives clean. The phone skips frames the Mac already has by
+   * name, and every run names them alike (0000.heic…), so a newer scan must never meet an older one's frames.
+   */
+  forgetCapture(id: string): Promise<StmObject> {
+    return this.#gate(id, async () => {
+      const object = await this.get(id);
+      if (object.state !== 'new' || object.scan) throw new InvalidStateError('The scan can only be changed before the touch-up starts.');
+      if (!object.captureDeclared && !object.capture?.length && !object.captureDepth?.length && !object.captureCamera) return object;
+      await rm(join(this.dir(id), 'capture'), {recursive: true, force: true});
+      await clearReconstructionInputs(this.dir(id));
+      return this.#changed(await this.#deps.store.update(id, o => ({...o, captureDeclared: undefined, capture: undefined,
+        captureDepth: undefined, captureCamera: undefined, captureCompletion: undefined, reconstructionReview: undefined})));
+    });
+  }
+
   /** One photo of a handheld scan (the object turned in front of a still phone). */
   addCapturePhoto(id: string, name: string, bytes: Buffer): Promise<StmObject> {
     return this.#gate(id, async () => {
