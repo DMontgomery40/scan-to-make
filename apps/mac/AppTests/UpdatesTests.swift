@@ -186,6 +186,9 @@ final class UpdateStagingTests: XCTestCase {
         _ = await quit.shouldTerminate()
         XCTAssertEqual(fake.windows, 2)
         XCTAssertGreaterThanOrEqual(fake.closes, 1, "the old window goes before a new one")
+        // The auto-quit is waiting for the companion before it is called off.
+        for _ in 0..<1000 where fake.idle == nil { await Task.yield() }
+        XCTAssertNotNil(fake.idle)
         fake.cancel?()
         fake.idle?.resume()
         await quit.lastAutoQuit?.value
