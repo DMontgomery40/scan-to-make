@@ -15,8 +15,9 @@ import Foundation
 /// value: `token=[set]hunter2` goes), so a report still says whether something is configured; and the words around them.
 public enum DiagnosticsRedaction {
     // `auth`, `key`, `pin` and `otp` only as a word of their own (`AUTH_TOKEN`, `session_key`, `PAIRING_PIN`, `pinCode`), so
-    // "Failed to authenticate", "keyboard", "colourMapping", "shipping" and "pinnedBaseURL" keep their letters.
-    static let secretWord = #"(?:password|passwd|passphrase|passcode|pwd|secret|token|api[_-]?key|apikey|access[_-]?code|accesscode|authorization|auth(?:[_-]?key)?(?![a-z])|key(?![a-z])|pin(?:[_-]?code)?(?![a-z])|pairing[_-]?code|lan[_-]?code|otp(?![a-z])|sha256|session|cookie|credential|signature|ticket|login|email|user[_-]?info)"#
+    // "Failed to authenticate", "keyboard", "colourMapping", "shipping" and "pinnedBaseURL" keep their letters. `key` needs
+    // something before it (`privateKey`, `SCAN_TO_MAKE_MODEL_KEY`): the media trace's own `"key"` field is a model's path.
+    static let secretWord = #"(?:password|passwd|passphrase|passcode|pwd|secret|token|api[_-]?key|apikey|access[_-]?code|accesscode|authorization|auth(?:[_-]?key)?(?![a-z])|(?<=[A-Za-z0-9_.-])key(?![a-z])|pin(?:[_-]?code)?(?![a-z])|pairing[_-]?code|lan[_-]?code|otp(?![a-z])|sha256|session|cookie|credential|signature|ticket|login|email|user[_-]?info)"#
     static let secretKey = "[A-Za-z0-9_.-]*" + secretWord + "[A-Za-z0-9_.-]*"
     /// A value that is safe as a whole: a marker, empty, true, false or null, followed by the value's end.
     static let safe = #"(?!(?:"(?:\[set\]|\[redacted[^"\]]*\])?"|\[set\]|\[redacted[^\]\s"]*\]|true|false|null)(?=[\s,;&}\]"']|$))"#

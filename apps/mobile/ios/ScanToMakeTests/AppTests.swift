@@ -469,7 +469,7 @@ import CounterpartKit
     /// #799: Settings → Share Diagnostics… gathers only what this phone keeps and makes the ZIP on the device itself (the
     /// system's `.forUploading` archiver). The pairing's token, pin and device id are handed to the redactor by value, and
     /// the Mac's name never leaves. The contents and every redaction rule are checked in CounterpartKit `PhoneDiagnosticsTests`.
-    func testShareDiagnosticsGathersThePhonesStateAndMakesAZIPOnTheDevice() throws {
+    func testShareDiagnosticsGathersThePhonesStateAndMakesAZIPOnTheDevice() async throws {
         let mac = SettingsMac()
         let pairing = PairingClient(store: PairingStore(store: Fixtures.store()), transport: mac)
         let store = ProjectsStore(mac: MacConnection(client: CompanionClient(pairing: pairing, transport: mac)), pairing: pairing)
@@ -500,6 +500,13 @@ import CounterpartKit
         for name in ["about.txt", "pairing.json", "errors.txt", "drafts.json", "notes.txt"] {
             XCTAssertTrue(names.contains("Counterpart Phone Diagnostics ") && names.contains(name), name)
         }
+
+        // The path the share sheet takes: the FileRepresentation itself (main-actor gather, detached ZIP, SentTransferredFile).
+        let shared = try await DiagnosticsShare(store: store, cloud: MobileCloud()).exported(as: .zip)
+        XCTAssertEqual(Array(shared.prefix(4)), [0x50, 0x4B, 0x03, 0x04], "the share sheet gets a ZIP")
+        let sharedNames = String(decoding: shared, as: UTF8.self)
+        for name in ["about.txt", "pairing.json", "notes.txt"] { XCTAssertTrue(sharedNames.contains(name), name) }
+        XCTAssertFalse(sharedNames.contains(token), "the shared ZIP's names carry no token")
     }
 
     /// #720: a launch into one project's page reads that project alone, before (or without) the list. That one project is

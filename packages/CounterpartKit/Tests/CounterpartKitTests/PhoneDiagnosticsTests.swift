@@ -367,6 +367,12 @@ final class PhoneDiagnosticsTests: XCTestCase {
         XCTAssertEqual(r(#"{"colourMapping":"ams","shipping":"x","pinnedBaseURL":"none","keyboard":"on"}"#),
                        #"{"colourMapping":"ams","shipping":"x","pinnedBaseURL":"none","keyboard":"on"}"#)
         XCTAssertEqual(r("basic settings and a Token of thanks"), "basic settings and a Token of thanks")
+        // The media trace's fields keep their values (#769 was read from these): a model's path under "key", codes, owners.
+        for row in [#"{"event":"model.begin","key":"objects/7f157a66-0000-4000-8000-000000000001/v3/model.stl","time":"1"}"#,
+                    #"{"event":"page.model-begin","key":"none","page":"2","scene":"active"}"#,
+                    #"{"code":"-1001","event":"request.error","owner":"0C4F6B0E-7E0A-4B8C-9F0A-1A2B3C4D5E6F","success":"false"}"#] {
+            XCTAssertEqual(r(row), row)
+        }
         XCTAssertEqual(r(#"{"event":"stage.begin","stage":"3fa9c2d1","generation":"0C4F6B0E-7E0A-4B8C-9F0A-1A2B3C4D5E6F"}"#),
                        #"{"event":"stage.begin","stage":"3fa9c2d1","generation":"0C4F6B0E-7E0A-4B8C-9F0A-1A2B3C4D5E6F"}"#)
     }
