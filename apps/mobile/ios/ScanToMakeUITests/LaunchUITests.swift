@@ -2110,13 +2110,6 @@ final class LayoutParityUITests: XCTestCase {
         XCTAssertTrue(shown, "the share sheet opens with the diagnostics ZIP")
         sleep(2)
         try shoot(app, "share-diagnostics-sheet")
-        // Save to Files shows the file's name as the tester will send it (kept for review, not asserted: the sheet is the system's).
-        let save = app.buttons["Save to Files"].exists ? app.buttons["Save to Files"] : app.descendants(matching: .any)["Save to Files"]
-        if save.exists {
-            save.tap()
-            sleep(4)
-            try shoot(app, "share-diagnostics-save")
-        }
     }
 
     /// On-device library (docs/design/overhaul/on-device-library.md), PRD §6.1: Settings → Keep on this iPhone (iPad) is
