@@ -2,7 +2,7 @@ import {spawn, type ChildProcess} from 'node:child_process';
 import {StringDecoder} from 'node:string_decoder';
 import {mkdir, readdir, readFile, rename, rm as fsRm, writeFile} from 'node:fs/promises';
 import {createHash, randomUUID} from 'node:crypto';
-import {dirname, join} from 'node:path';
+import {dirname, isAbsolute, join} from 'node:path';
 import {printerBackendSchema, type PrinterBackend, type PrinterHandoffConfig, type PrinterSession} from '@scan-to-make/printer-handoff';
 import {newerVersion} from './directory.js';
 import type {PrintGate} from './print-gate.js';
@@ -381,6 +381,11 @@ export class UpdateJournals {
  * itself was missing). npm's network error codes say the registry wasn't reached; anything else is npm's own words.
  */
 export function npmLookupSentence(pkg: string, code: number | null, output: string): string {
+  // Review F3: runCommand never throws. npm that can't start answers `spawn <path> EACCES` (or ENOENT), and the app's
+  // npm-cli.js gone answers node's module stack: both are this install, not the registry.
+  if (/^spawn .+ E(?:ACCES|NOENT|PERM|NOEXEC)\s*$/m.test(output)
+      || (/\bMODULE_NOT_FOUND\b/.test(output) && /Cannot find module '[^']*\/npm-cli\.js'/.test(output)))
+    return `Counterpart couldn't run npm to look up the latest ${pkg}. Reinstall Counterpart, then try again.`;
   const lines = output.split('\n').map(line => line.trim()).filter(Boolean);
   const errors = lines.filter(line => /^npm (?:error|ERR!)/.test(line));
   const said = (errors.find(line => !/^npm (?:error|ERR!) code\b/.test(line)) ?? errors[0] ?? lines.at(-1) ?? '').slice(0, 240);
@@ -390,6 +395,17 @@ export function npmLookupSentence(pkg: string, code: number | null, output: stri
   if (/\bE5\d\d\b/.test(output)) return `The npm registry couldn't answer for ${pkg} just now${because}. Try again in a moment.`;
   if (code === 0) return `npm answered without a version for ${pkg}${because}. Try again in a moment.`;
   return `npm couldn't look up the latest ${pkg}${because}.`;
+}
+
+/**
+ * Review F10: the app's npm runs under the copy's own node (so native parts match it), and refuses a node older than its
+ * `engines` (`^20.17 || >=22.9`); a package may refuse it too (EBADENGINE). One sentence instead of npm's words.
+ */
+export function nodeTooOldSentence(output: string, node?: string): string | undefined {
+  if (!/does not support Node\.js v\d|is known not to run on Node\.js v\d|\bEBADENGINE\b/.test(output)) return undefined;
+  const version = output.match(/Node\.js (v\d+\.\d+\.\d+)/)?.[1] ?? output.match(/Actual:.*"node":\s*"v?(\d+\.\d+\.\d+)"/)?.[1]?.replace(/^/, 'v');
+  const which = [node && isAbsolute(node) ? node : undefined, version].filter(Boolean).join(', ');
+  return `This printer software needs a newer Node.js than the one it runs on here${which ? ` (${which})` : ''}. Update that Node.js, then try again.`;
 }
 
 /**
@@ -959,7 +975,8 @@ export class McpUpdater {
     const run = async (label: string, command: string, args: string[], cwd: string | undefined, env: NodeJS.ProcessEnv) => {
       const result = await this.#run(command, args, {cwd, env, timeoutMs: MCP_UPDATE_TIMEOUT_MS});
       log += `$ ${[command, ...args].join(' ')}\n${result.output}\n`;
-      if (result.code !== 0) throw Object.assign(new Error(`${label} failed`), result.code === 3 && /local changes/.test(result.output) ? {sentence: 'This copy has local changes, so Counterpart left it as it is.'} : {});
+      const tooOld = nodeTooOldSentence(result.output, command);
+      if (result.code !== 0) throw Object.assign(new Error(`${label} failed`), result.code === 3 && /local changes/.test(result.output) ? {sentence: 'This copy has local changes, so Counterpart left it as it is.'} : tooOld ? {sentence: tooOld} : {});
       return result.output;
     };
     let undo: (() => Promise<void>) | undefined, finish: (() => Promise<void>) | undefined;
@@ -1159,7 +1176,7 @@ export class McpUpdater {
       await this.#note(update, pkg, {phase: 'changing', change: swap, overrides: {}});
       const result = await this.#run(plan.command, [...plan.args, 'install', '--global', '--prefix', staging, `--allow-scripts=${pkg}`, '--ignore-scripts=false', '--foreground-scripts', '--loglevel=notice', `${pkg}@${latest}`], {env: plan.env, timeoutMs: MCP_UPDATE_TIMEOUT_MS});
       log += `$ ${[plan.command, ...plan.args, 'install', '--global', '--prefix', staging, `--allow-scripts=${pkg}`, '--ignore-scripts=false', '--foreground-scripts', '--loglevel=notice', `${pkg}@${latest}`].join(' ')}\n${result.output}\n`;
-      if (result.code !== 0) throw new Error('npm install failed');
+      if (result.code !== 0) { const sentence = nodeTooOldSentence(result.output, plan.command); throw Object.assign(new Error('npm install failed'), sentence ? {sentence} : {}); }
       if (!this.#deps.env.exists(join(staged, 'package.json'))) throw new Error('npm install left no package');
       this.#verifyPostinstall(staged, result.output);
       await this.#fs.mkdir(dirname(live));
@@ -1194,8 +1211,15 @@ export class McpUpdater {
     }
   }
 
+  /**
+   * Review F10: a lifecycle script's bare `npm` is the app's, never an old Homebrew one. npm's own `bin` folder (npm,
+   * npx and node-gyp, no node) comes first, then the node that runs the copy, so bare `node` and node-gyp's
+   * `#!/usr/bin/env node` stay that node and native parts match it. Not the app npm's folder itself: the app's node is
+   * there too. Then npm's folder, then the companion's PATH.
+   */
   #env(npm: string, node?: string): NodeJS.ProcessEnv {
-    const dirs = [...new Set([...(node ? [dirname(node)] : []), dirname(npm)])];
+    const cli = npmCli(npm, this.#deps.env);
+    const dirs = [...new Set([...(cli ? [dirname(cli)] : []), ...(node ? [dirname(node)] : []), dirname(npm)])];
     return {...process.env, PATH: [...dirs, this.#deps.path ?? process.env.PATH ?? '/usr/bin:/bin'].join(':')};
   }
 

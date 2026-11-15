@@ -8,7 +8,7 @@ import {PrintGate} from '../dist/printing/print-gate.js';
 import {join} from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {resolveMcpInstall, shellCommand, forcedCommand, mcpIdFor, installedVersion, findNpm} from '../dist/printing/mcp-install.js';
-import {McpUpdater, McpOverrides} from '../dist/printing/mcp-updates.js';
+import {McpUpdater, McpOverrides, npmLookupSentence} from '../dist/printing/mcp-updates.js';
 import {tempDir, tempDirSync} from './support/temp.mjs';
 
 const HOME = '/Users/ada', APP = `${HOME}/Library/Application Support/Scan to Make`;
@@ -2234,7 +2234,8 @@ test('#826: the app\'s own npm, run by its node, is used before PATH, Homebrew a
   const f = updaterWith(everywhere, ok);
   assert.equal(await f.updates.checkLatest('bambu-printer-mcp'), '1.1.94');
   assert.equal(f.commands[0].line, `${node} ${bundledCli} view bambu-printer-mcp version`);
-  assert.ok(f.commands[0].env.PATH.startsWith(`${PAYLOAD}/bin:`), 'npm\'s children find the app\'s node first');
+  assert.deepEqual(f.commands[0].env.PATH.split(':').slice(0, 2), [`${PAYLOAD}/lib/node_modules/npm/bin`, `${PAYLOAD}/bin`],
+    'npm\'s children find the app\'s npm, then the app\'s node');
   // Download installs with the same npm and node.
   await f.updates.download('bambu-printer-mcp');
   await until(() => f.events.some(event => event.type === 'mcp.update.done' || event.type === 'mcp.update.failed'));
@@ -2260,11 +2261,18 @@ test('#826: the app\'s own npm, run by its node, is used before PATH, Homebrew a
   assert.match(refused.message, /npm error 404 Not Found/);
   assert.doesNotMatch(refused.message, /internet/i);
 
-  // npm can't be started at all.
-  const broken = updaterWith(everywhere, async () => { throw Object.assign(new Error('spawn EACCES'), {code: 'EACCES'}); });
-  const unstartable = await broken.updates.download('bambu-printer-mcp').then(() => undefined, error => error);
-  assert.match(unstartable.message, /couldn't run npm/i);
-  assert.doesNotMatch(unstartable.message, /internet/i);
+  // npm can't be started at all (review F3): as runCommand really answers, never by throwing. A spawn error, and the
+  // app's npm-cli.js missing (node exits 1 with a module stack), both say to reinstall, not npm's last stack line.
+  const missingCli = `node:internal/modules/cjs/loader:1386\n  throw err;\n  ^\n\nError: Cannot find module '${bundledCli}'\n    at Function._resolveFilename (node:internal/modules/cjs/loader:1383:15)\n    at node:internal/main/run_main_module:36:49 {\n  code: 'MODULE_NOT_FOUND',\n  requireStack: []\n}\n\nNode.js v24.22.2\n`;
+  for (const output of [`spawn ${node} EACCES`, `spawn ${node} ENOENT`, missingCli]) {
+    const broken = updaterWith(everywhere, async () => ({code: 1, output}));
+    const unstartable = await broken.updates.download('bambu-printer-mcp').then(() => undefined, error => error);
+    assert.match(unstartable.message, /couldn't run npm/i, output);
+    assert.match(unstartable.message, /Reinstall Counterpart/, output);
+    assert.doesNotMatch(unstartable.message, /internet|Node\.js v24|requireStack/i, output);
+  }
+  // A package that isn't npm's own CLI missing is npm's own words, as before.
+  assert.doesNotMatch(npmLookupSentence('bambu-printer-mcp', 1, "Error: Cannot find module 'semver'\n  code: 'MODULE_NOT_FOUND'\n"), /Reinstall/);
 
   // A later answer clears the earlier failure.
   let fail = true;
@@ -2282,6 +2290,53 @@ test('#826: npm-cli.js is found through a symlink (Homebrew) or beside a launche
   const app = mac({'/p/node/bin/npm': '', '/p/node/lib/node_modules/npm/bin/npm-cli.js': ''});
   assert.equal(npmCli('/p/node/bin/npm', app), '/p/node/lib/node_modules/npm/bin/npm-cli.js');
   assert.equal(npmCli('/b/npm', mac({'/b/npm': ''})), undefined);
+});
+
+// Review F10: a copy installed under an old node is updated by the app's npm run by that node. Bare `npm` in a lifecycle
+// script is the app's (its folder is first on PATH, before that node's), and npm refusing the old node is one sentence.
+test('review F10: the app\'s npm leads PATH for an old node\'s copy, and npm refusing that node says Node.js needs updating', async () => {
+  const PAYLOAD = '/Applications/Scan to Make.app/Contents/Resources/Payload/node';
+  const node = `${PAYLOAD}/bin/node`, bundledCli = `${PAYLOAD}/lib/node_modules/npm/bin/npm-cli.js`;
+  const live = '/usr/local/lib/node_modules/bambu-printer-mcp';
+  const files = {[`${PAYLOAD}/bin/npm`]: '#!/bin/sh\n', [bundledCli]: '', '/usr/local/bin/node': '', '/usr/local/bin/npm': '',
+    [`${live}/package.json`]: pkgJson('1.1.46'), [`${live}/dist/index.js`]: ''};
+  const run = (engine) => {
+    const commands = [], events = [];
+    const updates = new McpUpdater({destinations: () => [{id: 'p1s', config: bambu('/usr/local/bin/node', [`${live}/dist/index.js`])}],
+      env: mac(files), overrides: new McpOverrides(join(tempDirSync('mcp-f10-'), 'o.json')),
+      session: () => ({restart: async () => undefined, connect: async () => ({server: {name: 'bambu-printer-mcp', version: '1.1.50'}, tools: []})}),
+      busy: async () => false, runningVersion: () => '1.1.46', node, path: '/usr/bin:/bin', waitPollMs: 20,
+      fs: {rename: async () => undefined, rm: async () => undefined, mkdir: async () => undefined},
+      emit: async event => { events.push(event); },
+      run: async (command, args, options) => {
+        commands.push({line: [command, ...args].join(' '), env: options.env});
+        if (args.includes('view')) return {code: 0, output: '1.1.50\n'};
+        if (args.includes('install') && engine) return {code: 1, output: engine};
+        return {code: 0, output: ''};
+      }});
+    return {updates, commands, events};
+  };
+  const ok = run();
+  await ok.updates.update(ok.updates.mcpId('p1s'));
+  await until(() => ok.events.some(event => event.type === 'mcp.update.done' || event.type === 'mcp.update.failed'));
+  const install = ok.commands.find(command => / install --global /.test(command.line));
+  assert.ok(install.line.startsWith(`/usr/local/bin/node ${bundledCli} install --global `), install.line);
+  const path = install.env.PATH.split(':');
+  assert.deepEqual(path.slice(0, 2), [`${PAYLOAD}/lib/node_modules/npm/bin`, '/usr/local/bin'], 'bare npm in a script is the app\'s; node is still that copy\'s');
+  assert.ok(path.indexOf(`${PAYLOAD}/bin`) > path.indexOf('/usr/local/bin'), 'the app\'s node never wins over the copy\'s (native parts)');
+
+  for (const refusal of [
+    'npm v11.6.2 does not support Node.js v18.19.0. This version of npm supports the following node versions: `^20.17.0 || >=22.9.0`. You can find the latest version at https://nodejs.org/.\n',
+    'ERROR: npm v11.6.2 is known not to run on Node.js v16.20.2.  This version of npm supports the following node versions: `^20.17.0 || >=22.9.0`.\n',
+    'npm error code EBADENGINE\nnpm error engine Unsupported engine\nnpm error engine Not compatible with your version of node/npm: bambu-printer-mcp@1.1.50\nnpm error notsup Required: {"node":">=20"}\nnpm error notsup Actual:   {"npm":"11.6.2","node":"v18.19.0"}\n',
+  ]) {
+    const old = run(refusal);
+    await old.updates.update(old.updates.mcpId('p1s'));
+    await until(() => old.events.some(event => event.type === 'mcp.update.failed'));
+    const said = old.events.find(event => event.type === 'mcp.update.failed').data.log.trim().split('\n').at(-1);
+    assert.match(said, /^This printer software needs a newer Node\.js than the one it runs on here/, refusal);
+    assert.match(said, /\/usr\/local\/bin\/node/, 'which node');
+  }
 });
 
 test('#826: the app\'s own npm comes first, before npm beside another node, PATH, Homebrew and nvm (--allow-scripts needs its version)', () => {
