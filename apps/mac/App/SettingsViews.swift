@@ -857,7 +857,7 @@ struct AdvancedSettings: View {
                     }
                 } label: {
                     Text("Diagnostics")
-                    Text(exportProblem ?? "A zip of logs, settings and your printer software’s own diagnostics, with tokens, keys and email addresses removed. Nothing is sent anywhere.")
+                    Text(exportProblem ?? "A zip of logs, settings and your printer software’s own diagnostics. It removes the tokens, keys and email addresses it recognises; look before you send. Nothing is sent anywhere.")
                 }
             }
         }
