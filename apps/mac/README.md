@@ -271,17 +271,19 @@ runs from, so (`Updates` in `App/Main.swift`, the rule in `App/UpdateGate.swift`
    prepared or sent (not yet on the printer), the printer's question waiting, or a phone sending a project's files. It
    says "Counterpart will update as soon as the print or cleanup it’s working on is finished." and asks again every
    15 s. A print the printer already has doesn't hold it: the printer prints on, and the companion's print monitor
-   resumes after a restart. A companion that isn't there has nothing to protect; one too slow to answer holds it for
-   at most 40 asks in a row (about 10 minutes).
+   resumes after a restart. A companion that isn't there has nothing to protect; one that answers busy, badly or too
+   late holds it for 10 minutes at most (`UpdateGate.Waiter`).
 2. Sparkle quits the app. With an update waiting (`staged`), `applicationShouldTerminate` **unregisters the agent**
    (which stops it), waits until launchd no longer has the job, and records `agentAfterUpdate = stopped`.
 3. Sparkle replaces the app and relaunches it; the relaunched app **registers the agent again** before anything else
    reaches it.
 
-A downloaded update the person dismissed still installs when the app quits (Sparkle's behaviour); the same quit path
-stops the agent, and it starts again the next time Counterpart opens (at login, by default). If that quit finds work
-in progress, the agent is left running (never stop a pass or a print being sent) and `agentAfterUpdate = outdated`
-makes the next launch restart it once idle (`launchctl kickstart -k`).
+A downloaded update the person dismissed still installs when the app quits (Sparkle's behaviour, and 2.9.3 can't
+put it off for one quit); the same quit path stops the agent, and it starts again the next time Counterpart opens (at
+login, by default). A quit while the companion is working (or doesn't answer within 4 s) is refused with the same
+sentence, and the app quits by itself once the work is done, so the app is never replaced under a pass or a print
+being sent. Logging out, restarting or shutting down is never held up: they end the agent too, and launchd starts it
+from the new app at the next login.
 
 A copy opened straight from Downloads runs App-Translocated (`…/AppTranslocation/…`): it can't register the
 companion or the login item, and Sparkle can't update it. At launch such a copy only says "Move Counterpart to
