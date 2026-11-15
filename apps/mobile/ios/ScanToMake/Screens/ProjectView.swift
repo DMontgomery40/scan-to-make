@@ -677,7 +677,7 @@ struct ProjectView: View {
     @ViewBuilder private func stateCard(_ object: Project, _ words: ProjectWords) -> some View {
         switch words.phase {
         // A scan stopped before the fix, sent by itself to the project asking for it (#825): said before the question.
-        case _ where store.recoveringScans[object.id] != nil: workingCard(object, words)
+        case _ where store.recovering(object.id) != nil: workingCard(object, words)
         case .working, .sending: workingCard(object, words)
         // A printer question needs you too (an older Mac sends no status); it's answered in its sheet, not with photos.
         case .needsYou where object.printConfirmation != nil:
@@ -760,7 +760,7 @@ struct ProjectView: View {
             // While the Mac isn't answering, time left stays as it was when the phone last heard (the line above says when),
             // never counting down as if it were live.
             let work = WorkProgress(object, now: away ? (store.heard[object.id] ?? context.date) : context.date)
-            let recovering = store.recoveringScans[object.id]
+            let recovering = store.recovering(object.id)
             let sending = words.phase == .sending || recovering != nil
             VStack(alignment: .leading, spacing: 12) {
                 HStack {

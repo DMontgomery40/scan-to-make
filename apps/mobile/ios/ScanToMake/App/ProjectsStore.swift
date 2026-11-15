@@ -54,6 +54,16 @@ import CounterpartKit
     func refreshStoppedScans() { stoppedScans = mac.stoppedScans(); readyScans = mac.readyScanProjects() }
     /// Projects this phone is sending a stranded stopped scan to by itself (#825), with its photo count, for the card.
     var recoveringScans: [String: Int] = [:]
+    /// The photos of a stranded scan this phone is sending to the project now (#825), for its card.
+    func recovering(_ id: String) -> Int? {
+        #if DEBUG
+        // `-CounterpartRecoveringScan 68` (scripts/ux_screens.py): the asking plush shows a stranded scan being sent.
+        if Fixtures.folder != nil, id == Fixtures.ids.plush, let photos = Int(UserDefaults.standard.string(forKey: "CounterpartRecoveringScan") ?? "") {
+            return photos
+        }
+        #endif
+        return recoveringScans[id]
+    }
     /// "Scan stopped · 9 photos kept", while the project hasn't been sent.
     func stoppedScanWords(_ project: Project) -> String? {
         guard project.state == .new, let stopped = stoppedScans[project.id] else { return nil }
@@ -113,10 +123,6 @@ import CounterpartKit
         // UI tests: a wait that never hears from the canned Mac expires within the test.
         if Fixtures.folder != nil, let seconds = ProcessInfo.processInfo.environment["COUNTERPART_MCP_WAIT_SECONDS"].flatMap(Double.init) {
             mcpWaits.waitingLimit = .milliseconds(Int(seconds * 1000))
-        }
-        // `-CounterpartRecoveringScan 68` (scripts/ux_screens.py): the asking plush shows a stranded scan being sent (#825).
-        if Fixtures.folder != nil, let photos = Int(UserDefaults.standard.string(forKey: "CounterpartRecoveringScan") ?? "") {
-            recoveringScans[Fixtures.ids.plush] = photos
         }
         #endif
     }
