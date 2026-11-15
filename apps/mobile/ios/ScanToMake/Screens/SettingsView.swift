@@ -1,6 +1,8 @@
 import SwiftUI
 import UserNotifications
+import UniformTypeIdentifiers
 import CounterpartKit
+import GuidedObjectCapture
 
 /// Settings (PRD §5.9, screens/phone-settings.jpg), opened from the account button on Home as a sheet: your
 /// Mac, notifications, help and About. Printers are configured on the Mac and never duplicated here.
@@ -83,6 +85,18 @@ struct SettingsView: View {
                          SettingsLinkRow(symbol: "rotate.3d.fill", tint: .filament, title: "Print the scan rig", detail: "By Kass 3D on MakerWorld. For casual photos, not professional equipment."))
                 } header: { Text("Help") }
 
+                // #799: what this phone knows, for a tester to send (the media trace, pairing, drafts, recent errors).
+                Section {
+                    ShareLink(item: DiagnosticsShare(store: store, cloud: app.cloud),
+                              preview: SharePreview(PhoneDiagnostics.fileName())) {
+                        SettingsRow(symbol: "stethoscope", tint: .gray, title: "Share Diagnostics…")
+                    }
+                    .foregroundStyle(.primary)
+                    .accessibilityIdentifier("share-diagnostics")
+                } footer: {
+                    Text("A ZIP of this \(UIDevice.current.userInterfaceIdiom == .pad ? "iPad" : "iPhone")'s connection, the scans kept on it, its recent errors and its picture trace, with codes, tokens, emails and addresses removed. Send it by Mail or with TestFlight feedback.")
+                }
+
                 Section {
                     NavigationLink(value: "about") {
                         HStack(spacing: 12) {
@@ -134,6 +148,68 @@ struct SettingsView: View {
             defer { checking = false }
             await store.load()
         }
+    }
+}
+
+/// Settings → Share Diagnostics… (#799): the ZIP is made when the share sheet asks for it, from what this phone keeps
+/// (never a request to the Mac, so it works with the Mac away or paired only through iCloud). The contents and their
+/// redaction are CounterpartKit's `PhoneDiagnostics`.
+struct DiagnosticsShare: Transferable {
+    let snapshot: @MainActor @Sendable () -> PhoneDiagnostics
+
+    @MainActor init(store: ProjectsStore, cloud: MobileCloud) {
+        snapshot = { Self.gather(store: store, cloud: cloud) }
+    }
+
+    static var transferRepresentation: some TransferRepresentation {
+        FileRepresentation(exportedContentType: .zip) { share in
+            let diagnostics = await share.snapshot()
+            let folder = FileManager.default.temporaryDirectory.appendingPathComponent("Diagnostics", isDirectory: true)
+            let zip = try await Task.detached(priority: .userInitiated) { try diagnostics.makeZIP(in: folder) }.value
+            return SentTransferredFile(zip)
+        }
+    }
+
+    @MainActor static func gather(store: ProjectsStore, cloud: MobileCloud) -> PhoneDiagnostics {
+        let info = Bundle.main.infoDictionary
+        let device = UIDevice.current
+        var status: PairingStatus?, unreadable = false, notes: [String] = [], secrets: [String] = []
+        do {
+            let record = try store.pairingClient.store.read()
+            status = PairingStatus(record)
+            // Removed by value from every file, in every form (CounterpartKit `DiagnosticsRedaction`).
+            secrets = [record?.token, record?.certificateSha256, record?.publicKeySha256, record?.deviceId].compactMap { $0 }
+        } catch {
+            unreadable = true
+            notes.append("The pairing couldn’t be read (\((error as NSError).domain) \((error as NSError).code)); the phone may have been locked.")
+        }
+        var errors: [String] = []
+        if let error = store.error { errors.append("Projects: \(error.code): \(error.message)") }
+        if let problem = store.printerProblem { errors.append("Printers: \(problem)") }
+        for (project, failure) in store.sendFailures.sorted(by: { $0.key < $1.key }) { errors.append("Send \(project): \(failure)") }
+        var listed: [[String: Any]] = []
+        do { listed = try NativeCaptureCoordinator.shared.drafts() }
+        catch { notes.append("The scans kept on this phone couldn’t be listed (\((error as NSError).domain) \((error as NSError).code)).") }
+        let drafts = listed.compactMap { draft -> PhoneDiagnostics.Draft? in
+            guard let run = draft["runID"] as? String else { return nil }
+            return PhoneDiagnostics.Draft(run: run, project: (draft["origin"] as? [String: Any])?["projectId"] as? String ?? "–",
+                                          status: draft["status"] as? String ?? "–", createdAt: draft["createdAt"] as? String ?? "–",
+                                          photos: MacConnection.photoCount(run), hasModel: draft["file"] is [String: Any],
+                                          stitchingIncomplete: draft["stitchingIncomplete"] as? Bool == true, message: draft["message"] as? String)
+        }
+        return PhoneDiagnostics(
+            about: .init(version: info?["CFBundleShortVersionString"] as? String ?? "–", build: info?["CFBundleVersion"] as? String ?? "–",
+                         system: "\(device.systemName) \(device.systemVersion)", model: modelIdentifier),
+            pairing: .init(status: status, unreadable: unreadable, link: store.link, macName: store.macName,
+                           cloudConfigured: MobileCloud.configured, cloudMacs: cloud.macs.count, cloudMessage: cloud.message),
+            errors: errors, drafts: drafts, trace: MediaTrace.shared.url, secrets: secrets, notes: notes)
+    }
+
+    /// "iPhone18,2"; in the Simulator, the model it simulates.
+    static var modelIdentifier: String {
+        if let simulated = ProcessInfo.processInfo.environment["SIMULATOR_MODEL_IDENTIFIER"] { return "Simulator (\(simulated))" }
+        var system = utsname(); uname(&system)
+        return withUnsafeBytes(of: &system.machine) { String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self) }
     }
 }
 
