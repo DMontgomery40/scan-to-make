@@ -30,26 +30,56 @@ enum UpdateGate {
         return words.busy && !words.printRunning
     }
 
-    /// Consecutive timed-out asks (about 10 minutes at one every 15 s) after which a companion that never answers is
-    /// taken as stuck, so an update can't be held off for good (#828).
-    static let timeoutLimit = 40
-
-    /// What to do, from the companion's project list. A companion that isn't there (no socket, refused) has nothing
-    /// running to protect. One that says it is busy answering is working. One that is too slow to answer may be working,
-    /// so it waits, but only for `timeoutLimit` asks in a row (`timeoutsBefore` counts the earlier ones).
-    static func decide(_ projects: Result<[Project], Error>, timeoutsBefore: Int = 0) -> Decision {
-        switch projects {
-        case .success(let projects): return projects.contains(where: interrupts) ? .wait : .install
-        case .failure(let error):
-            if (error as? ControlRemoteError)?.code == "busy" { return .wait }
-            if (error as? ControlClientError) == .timedOut { return timeoutsBefore + 1 >= timeoutLimit ? .install : .wait }
-            return .install
+    /// Whether quitting would install a downloaded update: Sparkle's installer, once started, waits for the app to quit
+    /// (Install and Relaunch, or a dismissed Ready to Install; SPUUpdaterDelegate.h). Fed from Sparkle's callbacks.
+    struct Staging {
+        enum Event {
+            /// `didExtractUpdate`.
+            case extracted
+            /// `willInstallUpdate` or the relaunch postponed.
+            case installing
+            /// `userDidMake(_:forUpdate:state:)`: Skip, and whether the installer had started (`state.stage == .installing`).
+            case choice(skip: Bool, installerStarted: Bool)
+            /// `didAbortWithError` (review F6); "no update found" says nothing about one already waiting.
+            case aborted(noUpdateFound: Bool)
+        }
+        private(set) var staged = false
+        mutating func apply(_ event: Event) {
+            switch event {
+            case .extracted, .installing: staged = true
+            case .choice(let skip, let started): if skip { staged = false } else if started { staged = true }
+            case .aborted(let noUpdateFound): if !noUpdateFound { staged = false }
+            }
         }
     }
 
-    static func timedOut(_ projects: Result<[Project], Error>) -> Bool {
-        if case .failure(let error) = projects { return (error as? ControlClientError) == .timedOut }
-        return false
+    /// One ask, on its own (`Waiter` keeps the clock across asks).
+    static func decide(_ projects: Result<[Project], Error>) -> Decision {
+        var waiter = Waiter()
+        return waiter.next(projects)
+    }
+
+    /// Asks in a row, with a clock (review F5). A companion that isn't there (no socket, refused) has nothing running to
+    /// protect. One that answers `busy`, an error, something unreadable, or not in time may be working, so it holds the
+    /// install, but for `limit` seconds of wall-clock time at most, so an update is never refused for good.
+    struct Waiter {
+        static let limit: TimeInterval = 600
+        private var unansweredSince: Date?
+
+        mutating func next(_ projects: Result<[Project], Error>, now: Date = Date()) -> Decision {
+            switch projects {
+            case .success(let projects):
+                unansweredSince = nil
+                return projects.contains(where: interrupts) ? .wait : .install
+            case .failure(let error):
+                let answeredBadly = error is ControlRemoteError
+                    || [.timedOut, .invalidResponse].contains(error as? ControlClientError)
+                guard answeredBadly else { unansweredSince = nil; return .install }
+                let since = unansweredSince ?? now
+                unansweredSince = since
+                return now.timeIntervalSince(since) >= Self.limit ? .install : .wait
+            }
+        }
     }
 }
 

@@ -51,20 +51,67 @@ final class UpdateGateTests: XCTestCase {
         XCTAssertEqual(UpdateGate.decide(.success([project(["progress": "Receiving 3 of 12 photos"])])), .wait)
     }
 
-    func testACompanionThatDoesntAnswerHasNothingToProtect() {
-        XCTAssertEqual(UpdateGate.decide(.failure(ControlClientError.unavailable)), .install)
-        XCTAssertEqual(UpdateGate.decide(.failure(ControlClientError.invalidResponse)), .install)
+    func testACompanionThatIsntThereHasNothingToProtect() {
+        var waiter = UpdateGate.Waiter()
+        XCTAssertEqual(waiter.next(.failure(ControlClientError.unavailable)), .install)
+        XCTAssertEqual(waiter.next(.failure(ControlClientError.invalidEndpoint)), .install)
     }
 
-    func testASlowCompanionHoldsTheInstallOnlyForAWhile() {
-        let slow: Result<[Project], Error> = .failure(ControlClientError.timedOut)
-        XCTAssertTrue(UpdateGate.timedOut(slow))
-        XCTAssertEqual(UpdateGate.decide(slow), .wait, "too slow to answer may be working")
-        XCTAssertEqual(UpdateGate.decide(slow, timeoutsBefore: UpdateGate.timeoutLimit - 2), .wait)
-        XCTAssertEqual(UpdateGate.decide(slow, timeoutsBefore: UpdateGate.timeoutLimit - 1), .install, "never held off for good")
-        XCTAssertFalse(UpdateGate.timedOut(.success([])))
-        XCTAssertEqual(UpdateGate.decide(.failure(ControlRemoteError(code: "busy", message: "Your Mac is answering too many requests at once."))), .wait,
-                       "busy answering is a working companion")
+    /// Review F5: a companion that answers badly, busy or not in time may be working, so it holds the install, but
+    /// for 10 minutes of wall-clock time at most, however long each ask takes.
+    func testACompanionThatAnswersBadlyHoldsTheInstallForTenMinutesAtMost() {
+        let start = Date(timeIntervalSince1970: 1_794_700_800)
+        let unanswered: [Error] = [ControlClientError.timedOut, ControlClientError.invalidResponse,
+                                   ControlRemoteError(code: "busy", message: "Your Mac is answering too many requests at once.")]
+        for error in unanswered {
+            var waiter = UpdateGate.Waiter()
+            XCTAssertEqual(waiter.next(.failure(error), now: start), .wait, "\(error): it answered, or may still")
+            XCTAssertEqual(waiter.next(.failure(error), now: start.addingTimeInterval(9 * 60 + 59)), .wait, "\(error)")
+            XCTAssertEqual(waiter.next(.failure(error), now: start.addingTimeInterval(10 * 60)), .install, "\(error): never held off for good")
+        }
+        // 24 asks of 25 s each (a 10 s timeout, then 15 s asleep) is 10 minutes, not 40 asks.
+        var waiter = UpdateGate.Waiter()
+        var now = start
+        for _ in 0..<24 { XCTAssertEqual(waiter.next(.failure(ControlClientError.timedOut), now: now), .wait); now += 25 }
+        XCTAssertEqual(waiter.next(.failure(ControlClientError.timedOut), now: now), .install)
+    }
+
+    func testAnAnswerRestartsTheClock() {
+        let start = Date(timeIntervalSince1970: 1_794_700_800)
+        var waiter = UpdateGate.Waiter()
+        XCTAssertEqual(waiter.next(.failure(ControlClientError.timedOut), now: start), .wait)
+        let working = project(["scan": "scan.usdz", "state": "touching-up"])
+        XCTAssertEqual(waiter.next(.success([working]), now: start.addingTimeInterval(300)), .wait)
+        XCTAssertEqual(waiter.next(.failure(ControlClientError.timedOut), now: start.addingTimeInterval(9 * 60)), .wait,
+                       "a real answer in between: the 10 minutes count from the next unanswered ask")
+        XCTAssertEqual(waiter.next(.failure(ControlClientError.timedOut), now: start.addingTimeInterval(19 * 60)), .install)
+        XCTAssertEqual(UpdateGate.Waiter.limit, 600)
+    }
+}
+
+/// #828: whether a quit would install an update (Sparkle's installer waits for the app to quit), from Sparkle's callbacks.
+final class UpdateStagingTests: XCTestCase {
+    func testAnUpdateWaitsToInstallOnQuitOnceItsInstallerStarted() {
+        var staging = UpdateGate.Staging()
+        XCTAssertFalse(staging.staged)
+        staging.apply(.choice(skip: false, installerStarted: false))
+        XCTAssertFalse(staging.staged, "downloaded, installer not started: nothing installs on quit")
+        staging.apply(.extracted)
+        XCTAssertTrue(staging.staged)
+        staging.apply(.choice(skip: true, installerStarted: true))
+        XCTAssertFalse(staging.staged, "Skip cancels an install that began")
+        staging.apply(.choice(skip: false, installerStarted: true))
+        XCTAssertTrue(staging.staged, "a dismissed Ready to Install still installs on quit")
+    }
+
+    /// Review F6: an aborted update installs nothing, so the next quit must leave the agent alone.
+    func testAnAbortedUpdateIsNoLongerWaiting() {
+        var staging = UpdateGate.Staging()
+        staging.apply(.installing)
+        staging.apply(.aborted(noUpdateFound: true))
+        XCTAssertTrue(staging.staged, "a check finding nothing says nothing about the update already waiting")
+        staging.apply(.aborted(noUpdateFound: false))
+        XCTAssertFalse(staging.staged)
     }
 }
 
