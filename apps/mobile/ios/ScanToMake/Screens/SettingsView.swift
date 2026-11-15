@@ -88,7 +88,7 @@ struct SettingsView: View {
                 // #799: what this phone knows, for a tester to send (the media trace, pairing, drafts, recent errors).
                 Section {
                     ShareLink(item: DiagnosticsShare(store: store, cloud: app.cloud),
-                              preview: SharePreview(PhoneDiagnostics.fileName(), image: Image(systemName: "doc.zipper"))) {
+                              preview: SharePreview(PhoneDiagnostics.fileName())) {
                         SettingsRow(symbol: "stethoscope", tint: .gray, title: "Share Diagnostics…")
                     }
                     .foregroundStyle(.primary)
