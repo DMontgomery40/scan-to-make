@@ -220,17 +220,18 @@ export type CounterpartDiagnostics = z.infer<typeof counterpartDiagnosticsSchema
  * Throws when the MCP can't be started, doesn't answer, or answers something else.
  */
 export async function readDiagnostics(session: PrinterSession, maxBytes: number, options: SessionCallOptions = {}): Promise<{server: {name: string; version: string}} & (
-  {diagnostics: CounterpartDiagnostics} | {unsupported: true})> {
+  {diagnostics: CounterpartDiagnostics; infoUnread?: true} | {unsupported: true})> {
   const catalog = await session.connect({...(options.signal ? {signal: options.signal} : {}), ...(options.failFast ? {failFast: true} : {})});
   const server = {name: catalog.server.name, version: catalog.server.version};
-  const info = await readPrinterInfo(session, options);
-  // The tool is there but its printer info didn't parse: say that, not "too old".
-  if (!info && session.hasTool('counterpart_diagnostics')) throw new Error("its printer info couldn't be read");
-  if (info?.capabilities.diagnostics !== true || !session.hasTool('counterpart_diagnostics')) return {server, unsupported: true};
+  if (!session.hasTool('counterpart_diagnostics')) return {server, unsupported: true};
+  // Printer info may ask the printer itself (an OctoPrint that's away times out): a printer that can't be reached is
+  // when diagnostics matter most, so an unreadable answer doesn't stop the ask; the listed tool says it's there.
+  const info = await readPrinterInfo(session, {...options, timeoutMs: 8000}).catch(() => undefined);
+  if (info && info.capabilities.diagnostics !== true) return {server, unsupported: true};
   const result = await session.call('counterpart_diagnostics', {max_bytes: maxBytes}, {timeoutMs: 20000, largeResult: true, ...options});
   const parsed = counterpartDiagnosticsSchema.safeParse(toolResultJson(result));
   if (!parsed.success) throw new PrinterMcpError('invalid-response');
-  return {server, diagnostics: parsed.data};
+  return {server, diagnostics: parsed.data, ...(info ? {} : {infoUnread: true as const})};
 }
 
 /**

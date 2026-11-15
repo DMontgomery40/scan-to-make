@@ -63,7 +63,7 @@ export interface SoftwarePackage {
 // so `mapping`, `keyboard` and "Failed to authenticate:" keep their values.
 const SECRET_WORDS = new Set(['password', 'passwd', 'passcode', 'passphrase', 'pwd', 'secret', 'secrets', 'token', 'tokens', 'key', 'keys',
   'apikey', 'accesscode', 'accesskey', 'privatekey', 'authorization', 'auth', 'cookie', 'cookies', 'credential', 'credentials', 'signature',
-  'ticket', 'login', 'email', 'userinfo', 'session', 'sessionid', 'sid', 'pin', 'otp', 'jwt', 'bearer']);
+  'ticket', 'login', 'email', 'userinfo', 'session', 'sessionid', 'sid', 'pin', 'otp', 'jwt', 'bearer', 'certificate']);
 const SECRET_PAIRS = new Set(['access code', 'lan code', 'pair code', 'pairing code', 'user info', 'id token']);
 // Long words that are secrets even inside one unbroken name (`accesstoken`, `CLIENTSECRET`).
 const SECRET_INSIDE = /password|passwd|passcode|passphrase|secret|token|credential|cookie|authorization|signature|apikey|accesscode|privatekey/;
@@ -91,7 +91,7 @@ const NAMED: [RegExp, (match: string, ...groups: string[]) => string][] = [
   [new RegExp(String.raw`("(${KEY_CHARS})"\s*:\s*)("(?:[^"\\]|\\.)*"|${BARE})`, 'g'),
     (match, head, key, value) => isSecretName(key!) && value && !safeValue(value) ? `${head}"[redacted]"` : match],
   // key=value, key: value, ?key=value&, #key=value (on one line: `KEY=` with nothing after it stays empty).
-  [new RegExp(String.raw`(^|[^A-Za-z0-9_.\-\\])([A-Za-z][A-Za-z0-9_.\-]*)([ \t]*[=:](?!\/\/)[ \t]*)("[^"\n]*"|'[^'\n]*'|${BARE})`, 'gm'),
+  [new RegExp(String.raw`(^|[^A-Za-z0-9_.\\])([A-Za-z][A-Za-z0-9_.\-]*)([ \t]*[=:](?!\/\/)[ \t]*)("[^"\n]*"|'[^'\n]*'|${BARE})`, 'gm'),
     (match, before, key, sep, value) => isSecretName(key!) && value && !safeValue(value) ? `${before}${key}${sep}[redacted]` : match],
   // --key value.
   [/(--)([A-Za-z][A-Za-z0-9_.-]*)([ \t]+)("[^"\n]*"|'[^'\n]*'|[^\s"']+)/g,
@@ -117,6 +117,10 @@ const VALUES: [RegExp, string][] = [
   // Any long run of mixed case and digits (a pairing code, an unlabelled key). Serials (no lowercase) and hashes (no
   // uppercase) stay.
   [/\b(?=[A-Za-z0-9_]*[A-Z])(?=[A-Za-z0-9_]*[a-z])(?=[A-Za-z0-9_]*[0-9])[A-Za-z0-9_]{24,}\b/g, '[redacted token]'],
+  // A long base64 run (a DER certificate, a key), digits or not.
+  [/\b(?=[A-Za-z0-9+]*[A-Z])(?=[A-Za-z0-9+]*[a-z])[A-Za-z0-9+]{40,}={0,2}/g, '[redacted token]'],
+  // A pairing code or PIN said in words: "The pairing code is 482913", "Enter PIN 482913".
+  [/\b((?:pin|code)(?:\s+is)?\s+)\d{4,8}\b/gi, '$1[redacted]'],
   // Email addresses (an Apple Account, a Bambu account).
   [/[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}/g, '[redacted email]'],
   // A pairing link carries its code.
@@ -267,6 +271,7 @@ export async function diagnosticsBundle(source: DiagnosticsSource): Promise<Diag
       }
       const {diagnostics} = answer;
       const out: BundleFile[] = [], said: string[] = [];
+      if (answer.infoUnread) said.push(`${label} for ${printer}: its printer info couldn't be read, so Counterpart asked for its diagnostics without it.`);
       // Names, contents and notes all count against the bundle's share, as JSON (escapes included).
       let budget = maxBytes;
       for (const note of diagnostics.notes.slice(0, MAX_MCP_NOTES)) {

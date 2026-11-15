@@ -82,12 +82,21 @@ test('the bundle has the event log tail, the printers and the printer software, 
   assert.deepEqual(p1s.calls[1].args, {max_bytes: DIAGNOSTICS_LIMITS.mcpEachBytes}, 'one printer gets one MCP\'s full share; only max_bytes is passed');
 });
 
+test('an MCP whose printer info answers without capabilities.diagnostics gets the same line, and isn\'t asked', async t => {
+  const {eventsPath} = await fixture(t, '');
+  const listed = session('old', {version: '1.2.70', diagnostics: undefined});
+  listed.session.hasTool = name => name === 'counterpart_diagnostics' || name === 'counterpart_printer_info';
+  const bundle = await diagnosticsBundle({eventsPath, sessions: () => [{destinationId: 'old', printer: 'Ender', session: listed.session}]});
+  assert.deepEqual(bundle.notes, ['bambu-printer-mcp 1.2.70 is too old to add its own diagnostics; update it in Settings → Printers.']);
+  assert.deepEqual(listed.calls.map(call => call.name), ['counterpart_printer_info']);
+});
+
 test('an MCP that doesn\'t advertise diagnostics gets one line, and is never asked for them', async t => {
   const {eventsPath} = await fixture(t, '');
   const old = session('old', {version: '1.1.52', diagnostics: undefined});
   const bundle = await diagnosticsBundle({eventsPath, sessions: () => [{destinationId: 'old', printer: 'A1 mini', session: old.session}]});
   assert.deepEqual(bundle.notes, ['bambu-printer-mcp 1.1.52 is too old to add its own diagnostics; update it in Settings → Printers.']);
-  assert.deepEqual(old.calls.map(call => call.name), ['counterpart_printer_info']);
+  assert.deepEqual(old.calls.map(call => call.name), [], 'without the tool listed, nothing is asked');
   assert.ok(!bundle.files.some(item => item.name.startsWith('mcp/')));
 });
 
@@ -177,16 +186,16 @@ test('safe markers stay: [set], empty values and whether a credential is set (a 
   assert.ok(!redact('"accessCode": 12345678').includes('12345678'));
 });
 
-test('an MCP that lists counterpart_diagnostics but whose printer info can\'t be read is not called too old', async t => {
+test('an MCP that lists counterpart_diagnostics but whose printer info can\'t be read (a printer that\'s away) is still asked', async t => {
   const {eventsPath} = await fixture(t, '');
-  const odd = session('p1s', {diagnostics: true, bundle: {}});
-  const tools = odd.session;
-  // Its printer info answers something this version can't read.
-  const original = tools.call.bind(tools);
-  tools.call = async (name, args, options) => name === 'counterpart_printer_info' ? {content: [{type: 'text', text: '{"contract":"counterpart/1"}'}]} : original(name, args, options);
-  const bundle = await diagnosticsBundle({eventsPath, sessions: () => [{destinationId: 'p1s', printer: 'P1S', session: odd.session}]});
+  const away = session('p1s', {diagnostics: true, bundle: {package: 'mcp-3d-printer-server', version: '1.2.76', files: [{name: 'server.json', content: '{}', truncated: false}], notes: []}});
+  const original = away.session.call.bind(away.session);
+  // Its printer info times out asking the printer (mcp-3D-printer-server #117 with an OctoPrint that isn't there).
+  away.session.call = async (name, args, options) => name === 'counterpart_printer_info' ? Promise.reject(Object.assign(new Error('MCP error -32001: Request timed out'), {code: 'tool-failed'})) : original(name, args, options);
+  const bundle = await diagnosticsBundle({eventsPath, sessions: () => [{destinationId: 'p1s', printer: 'P1S', session: away.session}]});
   assert.ok(!bundle.notes.some(note => note.includes('too old')), bundle.notes.join('\n'));
-  assert.ok(bundle.notes.some(note => note.includes('printer info couldn\'t be read')), bundle.notes.join('\n'));
+  assert.ok(bundle.notes.some(note => note.includes('printer info couldn\'t be read, so Counterpart asked for its diagnostics without it')), bundle.notes.join('\n'));
+  assert.ok(file(bundle, 'mcp/P1S-bambu-printer-mcp-p1s/server.json'));
 });
 
 test('tail starts at a whole line', () => {
