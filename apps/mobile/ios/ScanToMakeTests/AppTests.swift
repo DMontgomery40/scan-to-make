@@ -1144,6 +1144,37 @@ private actor HeldDownload {
         XCTAssertTrue(MacConnection.removedStoppedScans(defaults).contains(few))
     }
 
+    /// Regression watcher on e6a975db: Remove right after Stop, while the stopped scan's declare is still on its way to the
+    /// Mac. The Remove waits for that declare, and its forget is the last thing the Mac hears; nothing is left recorded
+    /// as the Mac's, so the draft is never stranded "still on the phone".
+    func testRemoveDuringAnInFlightDeclareForgetsAfterIt() async throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "race-\(UUID().uuidString)"))
+        let run = "3b072103-c190-41b9-8158-03177424d0c5"
+        final class Mac { var heard: [String] = []; var release: CheckedContinuation<Void, Never>? }
+        let mac = Mac()
+        MacConnection.setPendingDeclare(project: "dad", run: run, defaults)
+        MacConnection.setDeclaredRun(project: "dad", run: run, defaults)  // as recordStoppedDeclare leaves it
+        let retry = Task { @MainActor in
+            await MacConnection.retryDeclares(defaults, kept: { _ in .stopped(run: run, photos: 68) }, declare: { project, _ in
+                await withCheckedContinuation { mac.release = $0 }
+                mac.heard.append("declare \(project)")
+            })
+        }
+        while mac.release == nil { await Task.yield() }
+        let remove = Task { @MainActor in
+            try await MacConnection.removeStoppedScan(project: "dad", run: run, defaults, forget: { mac.heard.append("forget \($0)") })
+        }
+        for _ in 0..<50 { await Task.yield() }
+        mac.release?.resume()
+        await retry.value
+        try await remove.value
+        XCTAssertEqual(mac.heard.last, "forget dad", "the forget comes after the declare it raced")
+        XCTAssertNil(MacConnection.acknowledgedRuns(defaults)["dad"])
+        XCTAssertNil(MacConnection.macRun("dad", defaults), "nothing left recorded as the Mac's")
+        XCTAssertEqual(MacConnection.pendingDeclares(defaults), [:])
+        XCTAssertTrue(MacConnection.removedStoppedScans(defaults).contains(run))
+    }
+
     /// Scans the build before this one (202611142311) declared recorded only `declaredRuns`, set once the Mac answered.
     /// After the update they are still the Mac's: Remove forgets them, and a newer run forgets them first.
     func testScansDeclaredByTheEarlierBuildAreStillForgotten() async throws {
