@@ -26,13 +26,15 @@ pub fn scrub(text: &str, home: Option<&str>) -> String {
     static RULES: OnceLock<Vec<(Regex, &'static str)>> = OnceLock::new();
     let rules = RULES.get_or_init(|| {
         [
-            (r#"(?i)\b([a-z][a-z0-9+.-]*://)[^/\s:@"']+(:[^/\s@"']*)?@"#, "${1}<removed>@"),
-            (r"(?i)\b(bearer|basic|digest|token)(\s+)[A-Za-z0-9._~+/=-]{6,}", "${1}${2}<removed>"),
+            // PEM blocks first: a header line or scheme rule must never eat a block's BEGIN marker.
             (r"-----BEGIN [A-Z0-9 ]+-----[\s\S]*?(-----END [A-Z0-9 ]+-----|$)", "<removed PEM block>"),
+            (r#"(?i)\b([a-z][a-z0-9+.-]*://)[^/\s:@"']+(:[^/\s@"']*)?@"#, "${1}<removed>@"),
+            (r#"(?im)(^|[^"\w-])((?:Proxy-)?Authorization[ \t]*:)[^\n]*"#, "${1}${2} <removed>"),
+            (r"(?i)\b(bearer|basic|digest|negotiate|token)(\s+)[A-Za-z0-9._~+/=-]{6,}", "${1}${2}<removed>"),
             (r"\beyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]+", "<removed token>"),
             (r"\b((sk|pk|rk)-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|A(KIA|SIA)[0-9A-Z]{16}\b|AIza[0-9A-Za-z_-]{30,}|hf_[A-Za-z0-9]{20,})", "<removed key>"),
             (r#"scantomake://pair\?[^\s"]+"#, "scantomake://pair?<removed>"),
-            (r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}", "<removed email>"),
+            (r"[A-Za-z0-9._%+-]+(@|%40)[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}", "<removed email>"),
         ]
         .into_iter()
         .map(|(pattern, with)| (Regex::new(pattern).expect("diagnostics pattern"), with))
@@ -223,11 +225,11 @@ mod tests {
 
     #[test]
     fn the_value_shaped_pass_runs_on_every_file_and_note() {
-        let planted = "authorization: basic dXNlcjpwYXNzd29yZA== Token abcDEF123456 http://u:pw@192.0.2.7 eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJl ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6 AKIAIOSFODNN7EXAMPLE a.b+tag@example.co.uk /home/someone/x /home/me/y -----BEGIN CERTIFICATE-----\nMIIBszCC\n-----END CERTIFICATE----- scantomake://pair?c=abc";
+        let planted = "Authorization: Digest username=\"taylorperson\", response=\"6629fae4\"\nnegotiate TlRMTVNTUAABAAA12345 someone%40example.com\nauthorization: basic dXNlcjpwYXNzd29yZA==\nToken abcDEF123456 http://u:pw@192.0.2.7 eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJl ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6 AKIAIOSFODNN7EXAMPLE a.b+tag@example.co.uk /home/someone/x /home/me/y -----BEGIN CERTIFICATE-----\nMIIBszCC\n-----END CERTIFICATE----- scantomake://pair?c=abc";
         let bundle = json!({"files":[{"name":"x.log","content":planted,"truncated":false}],"notes":[planted]});
         let out = entries(Ok(&bundle), "about", Some("/home/me"));
         let all: String = out.iter().map(|(_, data)| String::from_utf8_lossy(data).into_owned()).collect();
-        for secret in ["dXNlcjpwYXNzd29yZA==", "abcDEF123456", "pw@", "eyJzdWIiOiIxIn0", "ghp_A1b2", "AKIAIOSFODNN7EXAMPLE", "a.b+tag@example.co.uk", "someone", "/home/me", "MIIBszCC", "c=abc"] {
+        for secret in ["taylorperson", "6629fae4", "TlRMTVNTUAABAAA12345", "someone%40example.com", "dXNlcjpwYXNzd29yZA==", "abcDEF123456", "pw@", "eyJzdWIiOiIxIn0", "ghp_A1b2", "AKIAIOSFODNN7EXAMPLE", "a.b+tag@example.co.uk", "someone", "/home/me", "MIIBszCC", "c=abc"] {
             assert!(!all.contains(secret), "{secret} survived: {all}");
         }
         assert!(all.contains("192.0.2.7") && all.contains("~/y"));
