@@ -42,6 +42,9 @@ class ProjectGalleryTests {
                 }
                 val colour = when (val c = entry.colour) { ProjectGallery.Colour.Neutral -> "neutral"; ProjectGallery.Colour.Own -> "own"; is ProjectGallery.Colour.Spool -> c.hex }
                 assertEquals(name, want["colour"]!!.jsonPrimitive.content, colour)
+                // #840: what the stage's AR opens, the one rule every client derives (null: none).
+                assertTrue("$name: ${entry.id} says what its AR opens", want.containsKey("ar"))
+                assertEquals("$name: ${entry.id}'s AR", (want["ar"] as? JsonPrimitive)?.contentOrNull, entry.ar)
                 val drawing = want["drawing"]!!.jsonObject
                 when (val d = entry.drawing) {
                     is ProjectGallery.Drawing.Model -> assertEquals(name, drawing["model"]?.jsonPrimitive?.content, d.path)

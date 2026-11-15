@@ -19,7 +19,7 @@ Errors use `{v:1,id,error:{code,message}}`; malformed envelopes may have `id:nul
 
 | Method | Parameters | Result |
 |---|---|---|
-| `status.get` | `{}` | Protocol/companion version, transport, paired device count and capability booleans as above; `name`, the Mac's name as people know it ("Mac mini", as in `/healthz`), when the companion has one. |
+| `status.get` | `{}` | Protocol/companion version, transport, paired device count and capability booleans as above; `name`, the Mac's name as people know it ("Mac mini", as in `/healthz`), when the companion has one; `appBuild` and `appPayload`, the build (`CFBundleVersion`) and payload of the Mac app that launched it (#850: an app replaced by hand restarts a companion that isn't its own; absent before #850 and never on `/healthz`). |
 | `jobs.list` | `{projectId?,cursor?,limit?}` | `{items:[{kind,projectId,projectName,job}],nextCursor?}`. Default limit 50; range 1–100. |
 | `devices.list` | `{}` | `{devices:[{deviceId,deviceName,scopes,pairedAt,lastRefreshedAt,expiresAt,pairedVia:{transport,login}}]}`. No tokens or token hashes. |
 | `devices.remove` | `{deviceId}` | `{removed:true}`; an unknown device returns `not-found`. Existing device credentials are revoked. |

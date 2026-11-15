@@ -105,8 +105,8 @@ import CounterpartKit
         guard !projects.isEmpty else { return }
         let wants = LibraryPlan.wants(projects, opened: opened.union(projects.compactMap { library.lastOpened($0.id) != nil ? $0.id : nil }), keep: keep)
             .filter { LibraryPlan.fetches($0, keep: keep, expensive: expensive, constrained: constrained) }
-            .filter { library.file(project: $0.project.id, name: $0.name, version: Int64($0.project.mediaVersion)) == nil }
-            .filter { !library.isTooLarge(project: $0.project.id, name: $0.name, version: Int64($0.project.mediaVersion)) }
+            .filter { library.file(project: $0.project.id, name: $0.name, version: $0.project.mediaVersionNumber) == nil }
+            .filter { !library.isTooLarge(project: $0.project.id, name: $0.name, version: $0.project.mediaVersionNumber) }
         // Added to what is being fetched, never cancelling a file in flight: on a slow link the event stream reloads the
         // list constantly, and cancelling would throw each transfer away.
         let fresh = wants.filter { inFlight.insert(Self.key($0)).inserted }
@@ -116,7 +116,7 @@ import CounterpartKit
         if pump == nil { pump = Task { await drain() } }
     }
 
-    nonisolated private static func key(_ want: LibraryPlan.Want) -> String { "\(want.project.id)#\(want.name)#\(Int64(want.project.mediaVersion))" }
+    nonisolated private static func key(_ want: LibraryPlan.Want) -> String { "\(want.project.id)#\(want.name)#\(want.project.mediaVersionNumber)" }
 
     /// Fetches the queue three at a time until it is empty, then keeps the library under its ceiling.
     private func drain() async {

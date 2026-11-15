@@ -15,8 +15,8 @@ public enum Format {
     /// A print or work duration: "45 s", "38 min", "1 h 12 m", "3 h".
     public static func duration(_ seconds: Double?) -> String? {
         guard let seconds, seconds.isFinite, seconds >= 0 else { return nil }
-        if seconds < 60 { return "\(Int(seconds.rounded())) s" }
-        let minutes = Int((seconds / 60).rounded())
+        if seconds < 60 { return "\(Int(saturating: seconds.rounded())) s" }
+        let minutes = Int(saturating: (seconds / 60).rounded())
         if minutes < 60 { return "\(minutes) min" }
         let hours = minutes / 60, rest = minutes % 60
         return rest == 0 ? "\(hours) h" : "\(hours) h \(rest) m"
@@ -33,27 +33,27 @@ public enum Format {
     public static func grams(_ grams: Double?) -> String? {
         guard let grams, grams.isFinite, grams >= 0 else { return nil }
         if grams > 0 && grams < 0.05 { return "<0.1 g" }
-        return grams < 10 ? String(format: "%.1f g", grams) : "\(Int(grams.rounded())) g"
+        return grams < 10 ? String(format: "%.1f g", grams) : "\(Int(saturating: grams.rounded())) g"
     }
 
     /// "42%"
     public static func percent(_ value: Double?) -> String? {
         guard let value, value.isFinite else { return nil }
-        return "\(Int(min(100, max(0, value)).rounded(.down)))%"
+        return "\(Int(saturating: min(100, max(0, value)).rounded(.down)))%"
     }
 
     /// "220 °C"
     public static func temperature(_ celsius: Double?) -> String? {
         guard let celsius, celsius.isFinite else { return nil }
-        return "\(Int(celsius.rounded())) °C"
+        return "\(Int(saturating: celsius.rounded())) °C"
     }
 
     /// When something happened, as a card shows it: "Now", "2 min ago", "3 h ago", "Yesterday", "Oct 30".
     public static func when(_ date: Date, now: Date = Date(), calendar: Calendar = .current, locale: Locale = .current) -> String {
         let seconds = now.timeIntervalSince(date)
         if seconds < 60 { return "Now" }
-        if seconds < 3600 { return "\(Int(seconds / 60)) min ago" }
-        if calendar.isDate(date, inSameDayAs: now) { return "\(Int(seconds / 3600)) h ago" }
+        if seconds < 3600 { return "\(Int(saturating: seconds / 60)) min ago" }
+        if calendar.isDate(date, inSameDayAs: now) { return "\(Int(saturating: seconds / 3600)) h ago" }
         if let yesterday = calendar.date(byAdding: .day, value: -1, to: now), calendar.isDate(date, inSameDayAs: yesterday) { return "Yesterday" }
         let style = Date.FormatStyle(locale: locale, calendar: calendar).month(.abbreviated).day()
         return date.formatted(style)
@@ -77,14 +77,14 @@ public enum Format {
 
     /// "Updated 3 s ago", for a refreshing photo.
     public static func updated(_ date: Date, now: Date = Date()) -> String {
-        let seconds = max(0, Int(now.timeIntervalSince(date)))
+        let seconds = max(0, Int(saturating: now.timeIntervalSince(date)))
         if seconds < 60 { return "Updated \(seconds) s ago" }
         return "Updated \(seconds / 60) min ago"
     }
 
     /// "3 s ago", short, for an overlay.
     public static func ago(_ date: Date, now: Date = Date()) -> String {
-        let seconds = max(0, Int(now.timeIntervalSince(date)))
+        let seconds = max(0, Int(saturating: now.timeIntervalSince(date)))
         return seconds < 60 ? "\(seconds) s ago" : "\(seconds / 60) min ago"
     }
 }

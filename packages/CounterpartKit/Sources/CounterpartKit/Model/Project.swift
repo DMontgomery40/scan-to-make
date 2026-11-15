@@ -290,6 +290,16 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
     /// A locate pass changes no file (docs/protocols/seats.md), so it never rolls the version over.
     public var mediaVersion: Double { passes.last(where: { $0.endedAtMs != nil && $0.trigger != "locate" })?.endedAtMs ?? createdAtMs }
 
+    /// `mediaVersion` as the whole number the media trace and the stage's download key write. Total (#840): a time that
+    /// isn't a finite number within `Int64` is 0, never a conversion that traps on every redraw of the page.
+    public var mediaVersionTag: String { String(mediaVersionNumber) }
+
+    /// `mediaVersion` as a whole number, for cache keys and the on-device library. Total (#840), as `mediaVersionTag`.
+    public var mediaVersionNumber: Int64 {
+        let v = mediaVersion
+        return v.isFinite && abs(v) < 9e18 ? Int64(v) : 0
+    }
+
     /// The pass in progress, if the Mac is working.
     public var runningPass: Pass? { state == .touchingUp ? passes.last(where: { $0.endedAtMs == nil }) : nil }
 

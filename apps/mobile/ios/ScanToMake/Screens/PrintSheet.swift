@@ -561,7 +561,7 @@ struct PrintSheet: View {
         var parts: [String] = []
         if let layer = estimate?.layerHeightMm { parts.append(String(format: "%.2f mm layers", layer)) }
         if let walls = estimate?.wallLoops { parts.append("\(walls) walls") }
-        if let infill = estimate?.infillPercent { parts.append("\(Int(infill))% infill") }
+        if let infill = estimate?.infillPercent { parts.append("\(Int(saturating: infill))% infill") }
         if let chosen { parts.append("\(chosen.displayName) profile") }
         return parts.joined(separator: " · ")
     }
@@ -682,7 +682,7 @@ struct PrintSheet: View {
             // tray this phone sent; else the one the Mac suggests.
             let recorded = project?.resolvedPrintDefaults(destinationId: id).colour?.object
             let last: PrinterFilament? = if let slot = recorded?["amsSlot"]?.number {
-                reported.first { $0.slot == Int(slot) }
+                reported.first { $0.slot == Int(saturating: slot) }
             } else if recorded?["external"] == .bool(true) {
                 reported.first { $0.isExternal }
             } else if let material = recorded?["material"]?.string {

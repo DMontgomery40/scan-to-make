@@ -72,7 +72,9 @@ enum UpdateGate {
                 unansweredSince = nil
                 return projects.contains(where: interrupts) ? .wait : .install
             case .failure(let error):
-                let answeredBadly = error is ControlRemoteError
+                // #850: a companion that says it has no projects (`unavailable`, beta 6 with no printer) has none to protect.
+                let noProjects = (error as? ControlRemoteError)?.code == "unavailable"
+                let answeredBadly = (error is ControlRemoteError && !noProjects)
                     || [.timedOut, .invalidResponse].contains(error as? ControlClientError)
                 guard answeredBadly else { unansweredSince = nil; return .install }
                 let since = unansweredSince ?? now
@@ -152,6 +154,68 @@ enum UpdateGate {
         autoQuit?.cancel()
         autoQuit = nil
         effects.closeWaiting()
+    }
+}
+
+/// #850: an app replaced by hand (the only way off beta 6) leaves the old app's companion running, and both say
+/// companion 0.1.0. At launch the app asks which build launched the companion (`status.get`'s `appBuild`, missing from
+/// every companion before #850) and restarts the LaunchAgent when it isn't this one, so it runs this app's payload. A
+/// working companion is restarted only once idle (the update gate, with its waiting sentence); one that doesn't come
+/// back as this build is said plainly instead of leaving Settings › Printers spinning.
+@MainActor final class CompanionBuildCheck {
+    enum Outcome: Equatable { case current, restarted, notRunning, didNotComeBack, otherCopy }
+    /// What status.get says launched the companion: `appBuild` and `appPayload`, both nil before #850.
+    struct Reported: Equatable { var build: String?; var payload: String? }
+    static let didNotComeBack = "Counterpart couldn’t restart in the background after this update. Restart this Mac, then open Counterpart."
+    /// Review F1: the agent belongs to another installed copy, and `kickstart -k` would relaunch that copy, not this one.
+    static func otherCopy(_ payload: String, home: String = NSHomeDirectory()) -> String {
+        var folder = URL(fileURLWithPath: payload).standardizedFileURL.deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent().path
+        if folder == home || folder.hasPrefix(home + "/") { folder = "~" + folder.dropFirst(home.count) }
+        return "Another copy of Counterpart, in \(folder), runs in the background. Open that one, or remove the extra copy."
+    }
+    /// About two minutes, under load, for a restarted companion to answer as this build (review F3).
+    static let pauseSeconds = 2.0
+    static let attempts = 60
+    struct Effects {
+        /// status.get's `appBuild` and `appPayload`, or why it didn't answer.
+        var status: () async -> Result<Reported, Error>
+        var ask: () async -> UpdateGate.Decision
+        /// Waits, saying so, until the companion is idle.
+        var waitUntilIdle: () async -> Void
+        /// `launchctl kickstart -k` of the companion's LaunchAgent.
+        var restart: () async -> Void
+        /// `pauseSeconds`.
+        var pause: () async -> Void
+        var say: (String) -> Void
+    }
+    let appBuild: String, appPayload: String
+    private let effects: Effects
+    init(appBuild: String, appPayload: String, effects: Effects) { self.appBuild = appBuild; self.appPayload = appPayload; self.effects = effects }
+
+    private static func same(_ a: String, _ b: String) -> Bool {
+        let path = { (p: String) in URL(fileURLWithPath: p).standardizedFileURL.resolvingSymlinksInPath().path }
+        return path(a) == path(b)
+    }
+
+    func run() async -> Outcome {
+        // Two tries (review F2); still no answer: the usual start (pairing, readiness) deals with it.
+        var first = await effects.status()
+        if case .failure = first { await effects.pause(); first = await effects.status() }
+        guard case .success(let running) = first else { return .notRunning }
+        if let payload = running.payload, !Self.same(payload, appPayload) {
+            effects.say(Self.otherCopy(payload))
+            return .otherCopy
+        }
+        if running.build == appBuild { return .current }
+        if await effects.ask() == .wait { await effects.waitUntilIdle() }
+        await effects.restart()
+        for _ in 0..<Self.attempts {
+            await effects.pause()
+            if case .success(let now) = await effects.status(), now.build == appBuild { return .restarted }
+        }
+        effects.say(Self.didNotComeBack)
+        return .didNotComeBack
     }
 }
 

@@ -22,6 +22,20 @@ public struct ProjectGallery: Equatable, Sendable {
         public var sizeMm: [Double]?
         /// For a scan: its photos (project paths), one tap further.
         public var photos: [String]
+        /// What the stage's AR opens for this entry, as a project path, or nil for none: the one rule for whether AR is
+        /// offered and what it opens, from the project's own state, read by every client and layout (#840, David, Nov 15:
+        /// "how we manage state and attach properties to projects so wildly inconsistently"; the shared cases carry it as
+        /// each entry's `ar`). Set by `ProjectGallery`:
+        /// - a part that turns in 3D: the STL its stage turns (`Project.partMesh`): a one-colour design's `model.stl`, an
+        ///   earlier design's own file, a multi-part design's merged mesh. The phone writes it as a USDZ on tap (`PartUSDZ`);
+        /// - a scan: the USDZ this device may fetch (`Project.scanModel(limit:)`): the phone's own preview beside a large Mac
+        ///   rebuild, else the scan itself, and none when every file is over the limit (review R2 on #843: the chip had made
+        ///   that choice itself). A scan still only on this phone opens its own file. A handheld STL scan has none;
+        /// - none for Together, a plate, or a part shown as a picture (a designer's published 3MF, a 3MF whose merged mesh
+        ///   isn't listed): no mesh comes with it.
+        /// Mac, Android and Linux show no AR control (PRD §6.1). Android and Linux derive the same value from the shared
+        /// cases; they read no `scanFiles` (no size limit there), so those cases carry none.
+        public var ar: String? = nil
     }
 
     public enum Drawing: Equatable, Sendable {
@@ -47,7 +61,7 @@ public struct ProjectGallery: Equatable, Sendable {
 
     /// `parts` is the seam a project's part list will feed (several bodies, a lid on its own, one part changed or
     /// printed by itself; that model is being designed separately). Today it is `project.printableParts`.
-    public init(project: Project, parts: [PrintablePart]? = nil, scanOnThisDevice: Bool = false) {
+    public init(project: Project, parts: [PrintablePart]? = nil, scanOnThisDevice: Bool = false, scanLimit: Double = Double(CompanionClient.scanLimit)) {
         let parts = parts ?? project.printableParts
         var entries: [Entry] = parts.map { part in
             Entry(id: part.id, kind: part.isPlate ? .plate : .part, label: part.label, drawing: part.drawing, colour: part.colour,
@@ -70,6 +84,20 @@ public struct ProjectGallery: Equatable, Sendable {
         // mockup's potato), so it leads, and the project's picture is the same (§5.1). A spool puts the copy first.
         if project.usesCopyWorkflow, project.spoolColour == nil, let scan = entries.firstIndex(where: { $0.kind == .scan }) {
             entries.insert(entries.remove(at: scan), at: 0)
+        }
+        // What each entry's AR opens (`Entry.ar`).
+        let scanAR: String? = switch project.scanModel(limit: scanLimit) {
+        case .file(let path): path.lowercased().hasSuffix(".usdz") ? path : nil
+        case .tooLarge: nil
+        case .none: scanOnThisDevice ? "scan/scan.usdz" : nil
+        }
+        for index in entries.indices {
+            guard case .model(let path) = entries[index].drawing else { continue }
+            switch entries[index].kind {
+            case .part: entries[index].ar = path.lowercased().hasSuffix(".stl") ? path : nil
+            case .scan: entries[index].ar = path.lowercased().hasSuffix(".usdz") ? scanAR : nil
+            case .together, .plate: break
+            }
         }
         self.entries = entries
     }
@@ -123,11 +151,15 @@ extension Project {
     /// - for a multi-part design, the merged mesh beside its 3MF (`current/model.stl`, `versions/<id>/model.stl`), only
     ///   when the Mac lists it (`Result.mergedMesh`, there only while the file is: review of #770).
     /// Nil for a designer's published 3MF, and for a 3MF whose merged mesh isn't listed (none was written, or an older Mac
-    /// that doesn't say): the stage shows its picture, as before #769, never a 3D model that can't come.
+    /// that doesn't say): the stage shows its picture, as before #769, never a 3D model that can't come. Nil too for a
+    /// result that is neither an STL nor a 3MF (#840): `model.stl` would serve its bytes, which no stage can turn.
     /// `model.stl` stays the route for the file that prints (the 3MF itself for a multi-part design): Share and Print use it.
     public var partMesh: String? {
         guard let model = current?.model else { return nil }
-        guard preservesPublishedFilaments else { return model.hasPrefix("versions/") ? model : "model.stl" }
+        guard preservesPublishedFilaments else {
+            guard model.lowercased().hasSuffix(".stl") else { return nil }
+            return model.hasPrefix("versions/") ? model : "model.stl"
+        }
         guard kind != "published", model.hasPrefix("current/") || model.hasPrefix("versions/"),
               let mesh = current?.mergedMesh, mesh == Self.versionMesh(model) else { return nil }
         return mesh
@@ -267,13 +299,8 @@ extension Project {
 }
 
 extension ProjectGallery.Entry {
-    /// The STL the part's AR file is written from (#769): the mesh its stage turns, whatever the design's file is called (an
-    /// earlier design's `versions/<id>/touched.stl`, a multi-part design's merged mesh). None for a picture, a plate or
-    /// Together; a scan's AR is its own USDZ, decided by the stage.
-    public var arMesh: String? {
-        guard kind == .part, case .model(let path) = drawing else { return nil }
-        return path
-    }
+    /// The STL the part's AR file is written from (#769): `ar` for a part. None for a picture, a plate, Together or a scan.
+    public var arMesh: String? { kind == .part ? ar : nil }
 
     /// The size chip: what it measures and its size ("Part · 213 × 43 × 82 mm"), when the size is known.
     public func sizeText(_ measured: [Double]? = nil) -> String? {

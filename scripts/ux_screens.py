@@ -385,6 +385,10 @@ def project_screens(name: str, pid: str, state: str, data: str, record: str) -> 
     # it makes. The second writes a project into the capture's copy of the data, never into the real app's.
     open_new = [['press', 'id="make-from-scan"']]
     made = open_new + [['press', 'id="scan-use-fit"'], ['press', 'id="describe"'], ['type', 'A belt case for it'], ['press', 'id="send"']]
+    # The stage's AR chip, tapped (#840: on David's Pink snap-lid box it crashed the app). The part's USDZ is written on
+    # tap; the frame after shows Quick Look, or the chip's one sentence where the simulator can't preview it.
+    items.append({'order': 0, 'name': f'project-{name}-result-ar', 'screen': 'Project: Result, AR tapped', 'state': state, 'data': data,
+                  'args': base, 'actions': [['press', 'id="gallery-ar"'], ['sleep', '8']], 'pages': 1, 'note': 'AR pressed, 8 s later'})
     items += [{'order': 0, 'name': f'project-{name}-make-from-scan', 'screen': 'New, holding this scan', 'state': state, 'data': data,
                'args': base, 'actions': open_new, 'pages': 2, 'note': 'Make something else from this scan, pressed'},
               {'order': 0, 'name': f'project-{name}-made-from-scan', 'screen': 'The project made from this scan', 'state': state, 'data': data,
@@ -484,6 +488,7 @@ class Device:
             try:
                 if action[0] == 'type': self.ad('type', action[1])
                 elif action[0] == 'home': self.ad('home')
+                elif action[0] == 'sleep': time.sleep(float(action[1]))
                 elif action[0] == 'find': self.ad(*action)
                 else: self.ad(action[0], action[1], '--settle')
                 time.sleep(1.5)
@@ -755,6 +760,8 @@ def main() -> int:
                              "on a kept simulator of its own (stm-ux-<kind>-kept): run once with --keep-app-data start (a fresh install there), "
                              "then again with --condition away --keep-app-data to see what the phone shows from what it kept")
     parser.add_argument('--pages', type=int, help='at most this many scrolled pages per screen')
+    parser.add_argument('--text-size', choices=['default', 'largest'], default='default',
+                        help='largest: every screen at the largest accessibility text size (UIPreferredContentSizeCategoryName); one size per output folder')
     parser.add_argument('--redo', action='store_true', help='capture the selected screens again (with --devices/--screens)')
     args = parser.parse_args()
     out, work = args.out.resolve(), (args.work or args.out.resolve().parent / 'ux-screens-work').resolve()
@@ -860,6 +867,9 @@ def select(args, out: Path, keys: list[str], ctx: dict) -> tuple[list[dict], set
             items = [i for i in items if any(i['name'].endswith('-' + w.lstrip('=')) for w in args.screens.split(','))]
     if getattr(args, 'pages', None):  # --pages N: at most N scrolled pages per screen (the stage is on the first)
         items = [{**i, 'pages': min(i['pages'], args.pages)} for i in items]
+    if getattr(args, 'text_size', 'default') == 'largest':  # UIKit reads the size from the app's defaults, as a launch argument
+        items = [{**i, 'state': f"{i['state']}, largest text",
+                  'args': i['args'] + ['-UIPreferredContentSizeCategoryName', 'UICTContentSizeCategoryAccessibilityXXXL']} for i in items]
     # A screen is done only for the build that captured it: after a new commit the same folder captures it again.
     source = ctx['info'].get('source')
     done = {(d['device'], d['name']) for d in read_jsonl(out / 'done.jsonl') if not source or d.get('source') == source}

@@ -192,7 +192,7 @@ import CounterpartKit
         guard (try? await center.requestAuthorization(options: [.alert, .sound])) == true, let folder = Fixtures.folder else { return }
         let content = UNMutableNotificationContent()
         content.title = "\(snapshot.attributes.title) is halfway"
-        content.body = "\(max(1, Int((snapshot.content.endsAt.timeIntervalSinceNow / 60).rounded()))) min left · " + PrintActivityWords.detail(snapshot.content, printer: snapshot.attributes.printerName)
+        content.body = "\(max(1, Int(saturating: (snapshot.content.endsAt.timeIntervalSinceNow / 60).rounded()))) min left · " + PrintActivityWords.detail(snapshot.content, printer: snapshot.attributes.printerName)
         content.threadIdentifier = snapshot.attributes.projectId
         content.interruptionLevel = .active
         content.userInfo = ["projectId": snapshot.attributes.projectId, "printId": snapshot.attributes.printId, "type": "print.milestone"]

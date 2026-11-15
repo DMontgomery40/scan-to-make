@@ -126,7 +126,7 @@ import CounterpartKit
         #if DEBUG
         // UI tests: a wait that never hears from the canned Mac expires within the test.
         if Fixtures.folder != nil, let seconds = ProcessInfo.processInfo.environment["COUNTERPART_MCP_WAIT_SECONDS"].flatMap(Double.init) {
-            mcpWaits.waitingLimit = .milliseconds(Int(seconds * 1000))
+            mcpWaits.waitingLimit = .milliseconds(Int(saturating: seconds * 1000))
         }
         #endif
     }
@@ -660,7 +660,7 @@ struct MCPUpdateProgress: Equatable {
     }
 
     static func key(_ project: Project, _ path: String) -> String {
-        "\(project.id)#\(Int64(project.mediaVersion))#\(path)#\(path == "model.stl" ? project.current?.model ?? "" : "")"
+        "\(project.id)#\(project.mediaVersionNumber)#\(path)#\(path == "model.stl" ? project.current?.model ?? "" : "")"
     }
     func traceContext(_ project: Project, _ path: String) -> MediaTrace.Context? { contexts[Self.key(project, path)] }
     func fetch(_ project: Project, _ path: String) -> Fetch? { fetches[Self.key(project, path)] }
@@ -685,7 +685,7 @@ struct MCPUpdateProgress: Equatable {
         fetches[key] = .loading
         let download = download, pauses = pauses, generation = UUID()
         generations[key] = generation
-        let context = MediaTrace.Context(project: project.id, version: String(Int64(project.mediaVersion)), generation: generation.uuidString, scene: "active")
+        let context = MediaTrace.Context(project: project.id, version: project.mediaVersionTag, generation: generation.uuidString, scene: "active")
         contexts[key] = context
         running[key] = Task {
             await MediaTrace.$context.withValue(context) {

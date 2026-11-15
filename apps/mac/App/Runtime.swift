@@ -70,6 +70,9 @@ func launchAgent(_ installation: Installation) -> Never {
     child.arguments = installation.arguments("serve")
     child.environment = installation.environment
     child.environment?["SCAN_TO_MAKE_MODEL_WORKER"] = installation.bundle.executableURL?.path
+    // #850: which app launched it, so an app replaced by hand can tell its companion is still the old one (status.get).
+    child.environment?["SCAN_TO_MAKE_APP_BUILD"] = installation.bundle.object(forInfoDictionaryKey:"CFBundleVersion") as? String
+    child.environment?["SCAN_TO_MAKE_APP_PAYLOAD"] = installation.resources.appendingPathComponent("Payload").path
     child.standardInput = FileHandle.nullDevice
     // The companion's own log lines (refused control requests, refused print controls) land in the files Settings and
     // Diagnostics show. Since Oct 31 they went to /dev/null, so a refusal was invisible (Nov 6).

@@ -212,6 +212,7 @@ struct CounterpartCommands: Commands {
         }
         #endif
         updates.resumeAgentAfterUpdate()
+        updates.checkCompanionBuild()
         if Installation(bundle:.main).variant.isEmpty && SMAppService.mainApp.status == .notRegistered
             && !UserDefaults.standard.bool(forKey:"openAtLoginOff") {
             try? SMAppService.mainApp.register()
@@ -392,6 +393,20 @@ struct CounterpartCommands: Commands {
         alert.window.center()
         alert.window.makeKeyAndOrderFront(nil)
     }
+    /// A plain sentence in its own small window (#850: the companion didn't come back).
+    private func showNotice(_ text: String) {
+        closeWaiting()
+        let alert = NSAlert()
+        alert.messageText = text
+        alert.addButton(withTitle:"OK")
+        alert.buttons.first?.target = self
+        alert.buttons.first?.action = #selector(closeWaiting)
+        alert.layout()
+        waitingAlert = alert
+        NSApp.activate()
+        alert.window.center()
+        alert.window.makeKeyAndOrderFront(nil)
+    }
     @objc private func closeWaiting() {
         waitingAlert?.window.orderOut(nil)
         waitingAlert = nil
@@ -458,15 +473,36 @@ struct CounterpartCommands: Commands {
             guard (try? RegisteredAgent(service:installation.service).register()) != nil else { return }
             UserDefaults.standard.removeObject(forKey:Self.agentKey)
         case "outdated"?:
-            // Review R1: launchd refused to stop it for the update, so it may still run the old app's code.
-            Task { @MainActor in
-                await waitUntilIdle(announce:false)
-                let target = "gui/\(getuid())/\(installation.label)"
-                _ = try? await Task.detached { try command(URL(fileURLWithPath:"/bin/launchctl"), ["kickstart", "-k", target]) }.value
-                UserDefaults.standard.removeObject(forKey:Self.agentKey)
-            }
+            // Review R1: launchd refused to stop it for the update, so it may still run the old app's code; the build
+            // check (#850) restarts it once idle.
+            UserDefaults.standard.removeObject(forKey:Self.agentKey)
         default: return
         }
+    }
+
+    /// #850, at every launch: a companion launched by another build (an app replaced by hand, or one before #850, which
+    /// doesn't say) is restarted to run this app's payload, once idle. Only for the installed app with its agent enabled:
+    /// a development build elsewhere never restarts the installed app's companion.
+    func checkCompanionBuild() {
+        let installation = Installation(bundle:.main)
+        let path = installation.bundle.bundleURL.resolvingSymlinksInPath().path
+        let userApps = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications").path + "/"
+        guard path.hasPrefix("/Applications/") || path.hasPrefix(userApps), installation.service.status == .enabled,
+              let build = installation.bundle.object(forInfoDictionaryKey:"CFBundleVersion") as? String, !build.isEmpty else { return }
+        let socket = ModelAccessModel.socketPath(for:installation), target = "gui/\(getuid())/\(installation.label)"
+        let check = CompanionBuildCheck(appBuild:build, appPayload:installation.resources.appendingPathComponent("Payload").path, effects:.init(
+            status: {
+                do {
+                    let status = try await ControlClient(socketPath:socket, timeout:5).status()
+                    return .success(.init(build:status.appBuild, payload:status.appPayload))
+                } catch { return .failure(error) }
+            },
+            ask: { await Self.askOnce() },
+            waitUntilIdle: { [weak self] in await self?.waitUntilIdle(announce:true) },
+            restart: { _ = try? await Task.detached { try command(URL(fileURLWithPath:"/bin/launchctl"), ["kickstart", "-k", target]) }.value },
+            pause: { try? await Task.sleep(for:.seconds(CompanionBuildCheck.pauseSeconds)) },
+            say: { [weak self] in self?.showNotice($0) }))
+        Task { @MainActor in _ = await check.run() }
     }
 }
 

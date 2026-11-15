@@ -55,6 +55,8 @@ final class UpdateGateTests: XCTestCase {
         var waiter = UpdateGate.Waiter()
         XCTAssertEqual(waiter.next(.failure(ControlClientError.unavailable)), .install)
         XCTAssertEqual(waiter.next(.failure(ControlClientError.invalidEndpoint)), .install)
+        // #850: beta 6's companion with no printer refuses objects.list as `unavailable`: it has no projects to protect.
+        XCTAssertEqual(waiter.next(.failure(ControlRemoteError(code: "unavailable", message: "That isn’t available on your Mac right now."))), .install)
     }
 
     /// Review F5: a companion that answers badly, busy or not in time may be working, so it holds the install, but
@@ -193,6 +195,111 @@ final class UpdateStagingTests: XCTestCase {
         fake.idle?.resume()
         await quit.lastAutoQuit?.value
         XCTAssertEqual(fake.terminations, 0, "called off")
+    }
+}
+
+/// #850: a companion left running by an app replaced by hand is restarted at launch, unless it is working.
+@MainActor final class CompanionBuildCheckTests: XCTestCase {
+    static let ours = "/Applications/Counterpart.app/Contents/Resources/Payload"
+    final class Fake {
+        /// What status.get answers, in order; the last repeats. A nil build: no `appBuild` (every companion before #850).
+        var answers: [Result<CompanionBuildCheck.Reported, Error>] = [.success(.init(build: nil, payload: nil))]
+        var decision = UpdateGate.Decision.install
+        var events: [String] = [], said: [String] = []
+        var pauses = 0
+        var restarts: Int { events.filter { $0 == "restart" }.count }
+        func next() -> Result<CompanionBuildCheck.Reported, Error> { answers.count > 1 ? answers.removeFirst() : answers[0] }
+    }
+    private static func running(_ build: String?, _ payload: String? = ours) -> Result<CompanionBuildCheck.Reported, Error> {
+        .success(.init(build: build, payload: payload))
+    }
+    private func check(_ fake: Fake) -> CompanionBuildCheck {
+        CompanionBuildCheck(appBuild: "202611151700", appPayload: Self.ours, effects: .init(
+            status: { fake.events.append("status"); return fake.next() },
+            ask: { fake.decision },
+            waitUntilIdle: { fake.events.append("wait") },
+            restart: { fake.events.append("restart") },
+            pause: { fake.pauses += 1 },
+            say: { fake.said.append($0) }))
+    }
+
+    func testACompanionWithoutABuildIsRestartedAndComesBackCurrent() async {
+        let fake = Fake()
+        fake.answers = [Self.running(nil, nil), Self.running("202611151700")]
+        let outcome = await check(fake).run()
+        XCTAssertEqual(outcome, .restarted)
+        XCTAssertEqual(fake.restarts, 1)
+        XCTAssertEqual(fake.said, [])
+    }
+
+    func testAStaleBuildIsRestarted() async {
+        let fake = Fake()
+        fake.answers = [Self.running("202611061933"), .failure(ControlClientError.unavailable), Self.running("202611151700")]
+        let outcome = await check(fake).run()
+        XCTAssertEqual(outcome, .restarted, "it waits for the restarted companion to answer")
+        XCTAssertEqual(fake.restarts, 1)
+    }
+
+    func testTheCurrentBuildIsLeftAlone() async {
+        let fake = Fake()
+        fake.answers = [Self.running("202611151700")]
+        let outcome = await check(fake).run()
+        XCTAssertEqual(outcome, .current)
+        XCTAssertEqual(fake.restarts, 0)
+    }
+
+    /// Review F5: the wait comes before the restart, never after.
+    func testABusyCompanionIsRestartedOnlyOnceIdle() async {
+        let fake = Fake()
+        fake.answers = [Self.running("202611061933"), Self.running("202611151700")]
+        fake.decision = .wait
+        let outcome = await check(fake).run()
+        XCTAssertEqual(fake.events.filter { $0 != "status" }, ["wait", "restart"], "waits (saying so) for the pass or print first")
+        XCTAssertEqual(outcome, .restarted)
+    }
+
+    /// Review F3: about two minutes for a restarted companion to answer under load, then it is said plainly.
+    func testACompanionThatDoesntComeBackIsSaidPlainly() async {
+        let fake = Fake()
+        fake.answers = [Self.running("202611061933"), .failure(ControlClientError.unavailable)]
+        let outcome = await check(fake).run()
+        XCTAssertEqual(outcome, .didNotComeBack)
+        XCTAssertEqual(fake.said, [CompanionBuildCheck.didNotComeBack])
+        XCTAssertGreaterThanOrEqual(Double(fake.pauses) * CompanionBuildCheck.pauseSeconds, 120)
+        let stillOld = Fake()
+        stillOld.answers = [Self.running("202611061933")]
+        let again = await check(stillOld).run()
+        XCTAssertEqual(again, .didNotComeBack, "restarted but still the old build")
+    }
+
+    /// Review F2: one slow first answer is asked again before it is left alone.
+    func testTheFirstAskIsTriedTwice() async {
+        let fake = Fake()
+        fake.answers = [.failure(ControlClientError.timedOut), Self.running(nil, nil), Self.running("202611151700")]
+        let outcome = await check(fake).run()
+        XCTAssertEqual(outcome, .restarted)
+        let silent = Fake()
+        silent.answers = [.failure(ControlClientError.unavailable)]
+        let left = await check(silent).run()
+        XCTAssertEqual(left, .notRunning)
+        XCTAssertEqual(silent.events, ["status", "status"], "two tries, then the usual start deals with it")
+        XCTAssertEqual(silent.restarts, 0)
+    }
+
+    /// Review F1 (P2): the agent belongs to another installed copy; restarting it would relaunch that copy, not this one.
+    func testAnotherInstalledCopysCompanionIsNamedNotRestarted() async {
+        let fake = Fake()
+        let theirs = NSHomeDirectory() + "/Applications/Counterpart.app/Contents/Resources/Payload"
+        fake.answers = [Self.running("202611061933", theirs)]
+        let outcome = await check(fake).run()
+        XCTAssertEqual(outcome, .otherCopy)
+        XCTAssertEqual(fake.restarts, 0)
+        XCTAssertEqual(fake.said, ["Another copy of Counterpart, in ~/Applications, runs in the background. Open that one, or remove the extra copy."])
+        // Ours, reported through a symlinked or unnormalised path, is still ours.
+        let same = Fake()
+        same.answers = [Self.running("202611151700", "/Applications/./Counterpart.app/Contents/Resources/Payload/")]
+        let current = await check(same).run()
+        XCTAssertEqual(current, .current)
     }
 }
 

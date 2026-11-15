@@ -95,9 +95,12 @@ public struct ControlStatus: Decodable, Sendable {
     public let companionVersion: String, transport: String
     public let pairedDeviceCount: Int
     public let capabilities: Capabilities
-    public init(protocolVersion: Int = 1, companionVersion: String, transport: String = "lan", pairedDeviceCount: Int, capabilities: Capabilities) {
+    /// #850: the app build (CFBundleVersion) and payload that launched the companion; absent before #850.
+    public let appBuild: String?, appPayload: String?
+    public init(protocolVersion: Int = 1, companionVersion: String, transport: String = "lan", pairedDeviceCount: Int, capabilities: Capabilities,
+                appBuild: String? = nil, appPayload: String? = nil) {
         self.protocolVersion = protocolVersion; self.companionVersion = companionVersion; self.transport = transport
-        self.pairedDeviceCount = pairedDeviceCount; self.capabilities = capabilities
+        self.pairedDeviceCount = pairedDeviceCount; self.capabilities = capabilities; self.appBuild = appBuild; self.appPayload = appPayload
     }
 }
 public struct ControlDevice: Decodable, Sendable, Identifiable {

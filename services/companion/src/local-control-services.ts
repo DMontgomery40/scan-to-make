@@ -39,6 +39,10 @@ export interface ControlServices {
   runtimeSettings?: import('./runtime-settings.js').RuntimeSettings;
   auth: RemoteAuthStore;
   companionVersion: string;
+  /** #850: the app build (CFBundleVersion) and payload that launched this companion, for the Mac app alone to compare with its
+   * own; never on /healthz or anything a phone or MCP reads. */
+  appBuild?: string;
+  appPayload?: string;
   /** The Mac's name as people know it ("Mac mini"), as in /healthz. */
   name?: string;
   capture?: CaptureServices;
@@ -182,7 +186,7 @@ export function createControlDispatcher(services: ControlServices) {
           // Never waits on a probe: a capability whose check is still running is false and named in `checking`,
           // so the first status after an update answers at once (#751) and a later one has the settled value.
           const reconstruction = services.objects ? reconstructionReadinessNow() : {ok:false};
-          return {protocolVersion:1,companionVersion:services.companionVersion,platform:hostPlatform(),...(services.name?{name:services.name}:{}),transport:auth.transport,
+          return {protocolVersion:1,companionVersion:services.companionVersion,...(services.appBuild?{appBuild:services.appBuild}:{}),...(services.appPayload?{appPayload:services.appPayload}:{}),platform:hostPlatform(),...(services.name?{name:services.name}:{}),transport:auth.transport,
           pairedDeviceCount:(await auth.listDevices()).length,capabilities:{capture:!!capture?.captures,cleanup:!!capture?.scanProcessing,printerHandoff:!!printHandoff,nearbyPairing:!!services.nearby,
             objectsCreate:!!services.objects,printSettings:!!services.objects?.printSettingsAvailable,printControl:!!services.objects?.printSettingsAvailable,
             events:!!services.events&&!!services.liveActivityTokens,structuredPasses:!!services.objects,genericConfirmations:!!services.objects,materialChoice:!!services.objects,colourMapping:!!services.objects,projectSettings:!!services.objects,projectPreferences:!!services.objects,projectRename:!!services.objects,makeFromScan:!!services.objects,messagePhotos:!!services.objects,messageIds:!!services.objects,publishedModels:!!services.objects,fitFields:!!services.objects,mcpUpdates:!!services.mcpUpdates,printerSetup:!!services.printerSetup,blenderAddon:!!services.blenderAddon,printCopies:!!services.objects?.printCopiesAvailable,printerChoices:!!services.objects&&!!services.printerSetup,icloudEnrolment:!!services.icloudToken,reconstructionReviewV1:reconstruction!=='checking'&&reconstruction.ok},

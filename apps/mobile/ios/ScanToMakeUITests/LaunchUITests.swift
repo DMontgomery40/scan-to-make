@@ -1716,6 +1716,89 @@ final class LayoutParityUITests: XCTestCase {
         shot.name = posterFails ? "stage-live-still-failed" : "stage-live"; shot.lifetime = .keepAlways; add(shot)
     }
 
+    // MARK: #844: nothing on a project page is wider than the screen
+
+    /// The named elements of `app`'s first window that reach past its left or right edge, as one line each. A row that scrolls
+    /// sideways (the gallery's labels) may hold more than it shows; what it holds is skipped, the row itself is not.
+    private func overflowing(_ app: XCUIApplication) throws -> [String] {
+        let window = app.windows.firstMatch.frame
+        var found: [String] = []
+        func walk(_ element: XCUIElementSnapshot, sideways inRow: Bool = false) {
+            let frame = element.frame
+            let visible = frame.width > 0 && frame.height > 0 && frame.maxY > window.minY && frame.minY < window.maxY
+            // What a person reads or presses: it has words or a name. An unnamed container may extend past the edge by
+            // design (the iPad's floating sidebar glass sits 16 pt past it); the bug's title, Print Another and chips were named.
+            let named = !element.label.isEmpty || !element.identifier.isEmpty
+            // In a row that scrolls sideways a thing may sit past the edge, but never be wider than the screen: then it
+            // can't be seen whole even by scrolling (the gallery's "What you scanned" was 435 pt on a 402 pt phone).
+            let past = inRow ? frame.width > window.width + 1 : frame.minX < window.minX - 1 || frame.maxX > window.maxX + 1
+            if visible && named && past {
+                found.append("\(element.elementType.rawValue) \(element.identifier.isEmpty ? "-" : element.identifier) “\(element.label.prefix(40))” x \(Int(frame.minX))…\(Int(frame.maxX)) of \(Int(window.width))")
+            }
+            let sideways = inRow || element.elementType == .scrollView && frame.height < window.height / 3
+            element.children.forEach { walkUnlessIndicator($0, sideways: sideways) }
+        }
+        func walkUnlessIndicator(_ element: XCUIElementSnapshot, sideways: Bool = false) {
+            // A scroll view's indicators sit a few points past its edge by design; they and theirs are not the page.
+            if element.label.localizedCaseInsensitiveContains("scroll bar") { return }
+            walk(element, sideways: sideways)
+        }
+        walkUnlessIndicator(try app.snapshot())
+        return found
+    }
+
+    /// #844 (found capturing #840): at the largest text size the result page was 614 pt wide on a 402 pt iPhone, so its
+    /// title, status, description and Print Another were cut off at both edges. The bottom bar's Print Another kept its
+    /// whole name on one line beside the ask field, and the stage's chips, the print tiles and the tabs took that width.
+    /// At accessibility text sizes nothing on any project page may reach past the screen's edges, on the iPhone and the
+    /// iPad: the result with its stage (part and scan), a project still working, one asking a question, a draft design,
+    /// a ready one and a print in progress, each on its first screen and scrolled once.
+    /// Its limits (review of #849, F4): only named elements are measured, so an unnamed capsule or image past the edge
+    /// isn't; nothing below the second screen is measured; and inside a short scroll view an element fails only when it
+    /// is wider than the whole window. None of these hides the #844 class (a named element widening the page).
+    func testNothingOnAProjectPageIsWiderThanTheScreenAtTheLargestTextSize() throws {
+        executionTimeAllowance = 300  // seven launches at the largest text size
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try Self.boxSTL().write(to: folder.appendingPathComponent("mic.stl"))
+        let pages: [(name: String, args: [String], tap: String?)] = [
+            ("the printed part's stage", ["-CounterpartFixtures", folder.path, "-CounterpartFixtureSet", "ar-stage", "-CounterpartScreen", "printed"], nil),
+            ("the printed project's scan", ["-CounterpartFixtures", folder.path, "-CounterpartFixtureSet", "ar-stage", "-CounterpartScreen", "printed"], "gallery-scan"),
+            ("a ready project", ["-CounterpartFixtures", NSTemporaryDirectory() + "no-assets", "-CounterpartFixtureSet", "all", "-CounterpartScreen", "ready"], nil),
+            ("a project the Mac is working on", ["-CounterpartFixtures", NSTemporaryDirectory() + "no-assets", "-CounterpartFixtureSet", "all", "-CounterpartScreen", "working"], nil),
+            ("a project asking a question", ["-CounterpartFixtures", NSTemporaryDirectory() + "no-assets", "-CounterpartFixtureSet", "all", "-CounterpartScreen", "ask"], nil),
+            ("a print in progress", ["-CounterpartFixtures", NSTemporaryDirectory() + "no-assets", "-CounterpartFixtureSet", "all", "-CounterpartScreen", "printing"], nil),
+            ("a draft design", ["-CounterpartFixtures", NSTemporaryDirectory() + "no-assets", "-CounterpartFixtureSet", "draft-design",
+                                "-CounterpartOpen", "counterpart://project/7a1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01"], nil),
+        ]
+        var failures: [String] = []
+        for page in pages {
+            let app = XCUIApplication()
+            app.launchArguments = page.args + ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+            app.launch()
+            XCTAssertTrue(app.scrollViews.firstMatch.waitForExistence(timeout: 30), "\(page.name): \(app.debugDescription)")
+            if let tap = page.tap {
+                let entry = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", tap)).firstMatch
+                if entry.waitForExistence(timeout: 10) { entry.tap() } else { failures.append("\(page.name): no \(tap) to tap") }
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(3))
+            for screen in ["first screen", "scrolled"] {
+                let past = try overflowing(app)
+                if !past.isEmpty {
+                    let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "844 \(page.name), \(screen)"; shot.lifetime = .keepAlways; add(shot)
+                    failures.append("\(page.name), \(screen):\n  " + past.prefix(12).joined(separator: "\n  "))
+                }
+                let scroll = app.scrollViews.firstMatch
+                scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.85))
+                    .press(forDuration: 0.05, thenDragTo: scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.25)))
+                RunLoop.current.run(until: Date().addingTimeInterval(1))
+            }
+            app.terminate()
+        }
+        XCTAssertTrue(failures.isEmpty, "Past the screen's edge at the largest text size:\n" + failures.joined(separator: "\n"))
+    }
+
     static func boxSTL() -> Data {
         let size = SIMD3<Float>(146, 40, 20)
         let c: [SIMD3<Float>] = (0..<8).map { i in SIMD3(Float(i & 1), Float((i >> 1) & 1), Float((i >> 2) & 1)) * size }
@@ -2374,7 +2457,8 @@ final class LayoutParityUITests: XCTestCase {
         // Board X100: the line comes from the actual reason. The canned Mac has no file for 01 (404): it would not send it,
         // and with the picture missing too, the stage says both in one line with one Try Again. 02 is too large: said so.
         for (id, line) in [("6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01", "Your Mac didn’t send"),
-                           ("6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a02", "your scan’s 3D model is too large a file to show on a phone.")] {
+                           // The line names the device it's on (#831's review): "an iPad" on regular width, "a phone" here.
+                           ("6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a02", "your scan’s 3D model is too large a file to show on \(regular ? "an iPad" : "a phone").")] {
             let page = XCUIApplication()
             page.launchArguments = ["-CounterpartFixtures", NSTemporaryDirectory() + "no-assets", "-CounterpartFixtureSet", "scan-stage",
                                     "-CounterpartOpen", "counterpart://project/\(id)"]

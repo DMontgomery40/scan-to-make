@@ -335,8 +335,8 @@ struct ModelStage: View {
         func yUp(_ p: SIMD3<Float>) -> SIMD3<Float> { SIMD3(p.x, p.z, -p.y) * 0.001 }
         for t in triangles {
             let a = yUp(t.0), b = yUp(t.1), c = yUp(t.2)
-            let cross = simd_cross(b - a, c - a)
-            let n = simd_length(cross) > 0 ? simd_normalize(cross) : SIMD3<Float>(0, 1, 0)
+            // A triangle with no normal (a point, a line, a corner that isn't a number) draws nothing: it is left out (#840).
+            guard let n = STLMesh.faceNormal(a, b, c) else { continue }
             positions += [a, b, c]
             normals += [n, n, n]
         }
@@ -357,45 +357,4 @@ extension View {
 private final class PivotHolder {
     var pivot: Entity?
     var firstFrame: EventSubscription?
-}
-
-/// STL triangles from binary or ASCII data.
-enum STLMesh {
-    static func triangles(_ data: Data) -> [(SIMD3<Float>, SIMD3<Float>, SIMD3<Float>)] {
-        let count = Int(data.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: 80, as: UInt32.self) })
-        if data.count == 84 + count * 50 { return binary(data, count: count) }
-        if let text = String(data: data.prefix(min(data.count, 64 << 20)), encoding: .ascii), text.hasPrefix("solid") {
-            let ascii = self.ascii(text)
-            if !ascii.isEmpty { return ascii }
-        }
-        return binary(data, count: min(count, (data.count - 84) / 50))
-    }
-
-    static func binary(_ data: Data, count: Int) -> [(SIMD3<Float>, SIMD3<Float>, SIMD3<Float>)] {
-        var out: [(SIMD3<Float>, SIMD3<Float>, SIMD3<Float>)] = []
-        out.reserveCapacity(count)
-        data.withUnsafeBytes { raw in
-            for i in 0..<count {
-                let base = 84 + i * 50
-                guard base + 50 <= raw.count else { break }
-                func v(_ o: Int) -> SIMD3<Float> {
-                    SIMD3(raw.loadUnaligned(fromByteOffset: base + o, as: Float.self),
-                          raw.loadUnaligned(fromByteOffset: base + o + 4, as: Float.self),
-                          raw.loadUnaligned(fromByteOffset: base + o + 8, as: Float.self))
-                }
-                out.append((v(12), v(24), v(36)))
-            }
-        }
-        return out
-    }
-
-    static func ascii(_ text: String) -> [(SIMD3<Float>, SIMD3<Float>, SIMD3<Float>)] {
-        var vertices: [SIMD3<Float>] = []
-        for line in text.split(whereSeparator: \.isNewline) {
-            let parts = line.split(separator: " ", omittingEmptySubsequences: true)
-            guard parts.first == "vertex", parts.count == 4, let x = Float(parts[1]), let y = Float(parts[2]), let z = Float(parts[3]) else { continue }
-            vertices.append(SIMD3(x, y, z))
-        }
-        return stride(from: 0, to: vertices.count - vertices.count % 3, by: 3).map { (vertices[$0], vertices[$0 + 1], vertices[$0 + 2]) }
-    }
 }
