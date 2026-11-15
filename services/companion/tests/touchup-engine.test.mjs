@@ -5,6 +5,8 @@ import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {runTouchup, chooseEngine, printerDesignGuidance, slicingGuidanceUnavailable, slicingGuidanceUnreachable} from '../dist/touchup/touchup.js';
 import {prepareTouchupPass} from '../dist/touchup/inputs.js';
+import {BlenderNotInstalledError} from '../dist/touchup/blender.js';
+import {CaptureConversionError} from '../dist/capture-converter.js';
 import {systemRules, RULE_SECTIONS, TOUCHUP_RESULT_SCHEMA, buildTouchupInvocation} from '../dist/touchup/invocation.js';
 import {runTouchupWorker} from '../dist/touchup/runner.js';
 import {passEstimate, PassTimings, STAGE_DEFAULT_SEC} from '../dist/touchup/stages.js';
@@ -571,4 +573,54 @@ test('a code pass never touches Blender or Fusion: it converts the capture, read
   }});
   assert.deepEqual({...copied, inputs: undefined}, {script: 'script', parameters: '{"cup_h":70}', inputs: undefined, mesh: 'mesh'});
   assert.equal(await readFile(join(saved, 'touched.inputs.json'), 'utf8'), JSON.stringify({scan: join(saved, 'inputs', 'mesh.obj')}));
+});
+
+// #852: David's DAD scan (200.9 MB, rebuilt on his Mac) went to a hung Fusion, then failed 8 × 30 s later, and the
+// reason the code engine passed it over was never said. A Mac with neither Fusion nor Blender was told to install Blender.
+test('a scan the code engine can\'t read says why first, and never sends anyone to install Blender for it (#852)', async () => {
+  const root = await tempDir('touchup-unreadable-');
+  const usdz = join(root, 'scan.usdz');
+  await writeFile(usdz, 'usdz');
+  const ready = bridge({cad_status: cadStatus(true), fusion_mcp_status: text({configured: false, connected: false})}, [...CAD_TOOLS, ...LEGACY_TOOLS]);
+  const log = [];
+  const result = runTouchup({root, objectId: 'obj', scan: [usdz], photos: [], handoff, claudePath: '/c', instructions: 'A replica', kind: 'copy',
+    onProgress: progress => { for (const entry of progress.activity ?? []) log.push(`activity ${entry.text}`); }}, {
+    lockPath: join(root, 'blender.lock'), fusionLockPath: join(root, 'fusion.lock'), codeLockPath: join(root, 'code.lock'), client: ready.client,
+    convertCapture: async () => { throw new CaptureConversionError('Capture conversion failed or was unqualified', '/Root/Mesh: invalid topology', 'failed'); },
+    ensureBlender: async () => { log.push('ensureBlender'); throw new BlenderNotInstalledError(); },
+    run: async () => { log.push('run'); throw new Error('no worker runs'); }});
+  // It fails the way a pass that couldn't start does (the service records it never resumable: canRetryCleanup false).
+  const failure = await result.then(() => undefined, error => error);
+  assert.ok(failure instanceof Error, 'the pass fails');
+  assert.match(failure.message, /^The code design engine couldn't read this scan/);
+  assert.match(failure.message, /invalid topology/, 'with the converter\'s own reason');
+  assert.doesNotMatch(failure.message, /blender\.org|Install/, 'never "install Blender" for a scan the code engine should read');
+  assert.match(log[0], /^activity The code design engine couldn't read this scan.*invalid topology/, 'the real cause is said before any other engine starts');
+  assert.equal(log.includes('run'), false);
+});
+
+test('a Fusion that is running but doesn\'t answer is not responding: Blender if there is one, else one plain sentence (#852)', async () => {
+  // From the MCP's own status fields (since bambu-printer-mcp 1.1.76 its connected includes a read of the design), never its words.
+  const hung = {configured: true, connected: false, addinReachable: true, fusionRunning: true, error: 'anything the MCP says'};
+  const stuck = bridge({fusion_mcp_status: text(hung)});
+  assert.deepEqual(await chooseEngine({handoff, kind: 'fit'}, stuck), {engine: 'blender', note: "Fusion isn't responding on your Mac. Restart Fusion, then Try Again.", fusionUnresponsive: true});
+  assert.deepEqual(stuck.calls.map(call => call.name), ['fusion_mcp_status'], 'no design is opened in it');
+  // Not running at all is not "not responding": Blender, as before, with the MCP's reason.
+  const off = bridge({fusion_mcp_status: text({configured: true, connected: false, fusionRunning: false, error: 'Fusion is not running'})});
+  assert.deepEqual(await chooseEngine({handoff, kind: 'fit'}, off), {engine: 'blender', note: "Fusion isn't connected: Fusion is not running."});
+  const live = hung;
+
+  // No Blender either: the pass fails at once with that sentence, never a 4-minute run or "install Blender".
+  const root = await tempDir('touchup-fusion-hung-');
+  const stl = join(root, 'scan.stl');
+  await writeFile(stl, 'solid x\nendsolid x\n');
+  const started = Date.now(), log = [];
+  const result = runTouchup({root, objectId: 'obj', scan: [stl], photos: [], handoff, claudePath: '/c', instructions: 'A holder', kind: 'fit'}, {
+    lockPath: join(root, 'blender.lock'), fusionLockPath: join(root, 'fusion.lock'), codeLockPath: join(root, 'code.lock'),
+    client: bridge({fusion_mcp_status: text(live)}).client,
+    ensureBlender: async () => { log.push('ensureBlender'); throw new BlenderNotInstalledError(); },
+    run: async () => { log.push('run'); throw new Error('no worker runs'); }});
+  await assert.rejects(result, {message: "Fusion isn't responding on your Mac. Restart Fusion, then Try Again."});
+  assert.equal(log.includes('run'), false);
+  assert.ok(Date.now() - started < 5000, 'fast');
 });

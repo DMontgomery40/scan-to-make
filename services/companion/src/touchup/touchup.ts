@@ -2,13 +2,13 @@ import {createHash} from 'node:crypto';
 import {link, lstat, mkdir, readFile, rename, rm, unlink, writeFile} from 'node:fs/promises';
 import {randomUUID} from 'node:crypto';
 import {homedir} from 'node:os';
-import {dirname, join, resolve} from 'node:path';
+import {basename, dirname, join, resolve} from 'node:path';
 import {PrinterMcpClient, type PrinterHandoffConfig} from '@scan-to-make/printer-handoff';
-import {defaultBlenderLaunch, ensureBlenderMcp, resetBlenderScene, stopOwnedBlender} from './blender.js';
+import {BlenderNotInstalledError, BlenderNotReadyError, defaultBlenderLaunch, ensureBlenderMcp, resetBlenderScene, stopOwnedBlender} from './blender.js';
 import {prepareTouchupPass, type TouchupPass} from './inputs.js';
 import {buildTouchupInvocation, type DesignEngine, type DesignGuidance, type ScanFrame, type TouchupInvocation} from './invocation.js';
-import {codeEngineNotSetUp, codeEngineState, codeEngineUnreadableScan, copyDesign, isCodeDesign, passCadDir, passDesignDir, type CodeEngineState, type DesignSource} from './code-engine.js';
-import {createCaptureConverter} from '../capture-converter.js';
+import {codeEngineNotSetUp, codeEngineState, codeEngineUnreadableScan, copyDesign, FUSION_NOT_RESPONDING, isCodeDesign, passCadDir, passDesignDir, type CodeEngineState, type DesignSource} from './code-engine.js';
+import {CaptureConversionError, convertScanMesh, createCaptureConverter} from '../capture-converter.js';
 import {toolErrorText} from './blender.js';
 import {runTouchupWorker, publicTouchupText, type TouchupProgress, type TouchupResult} from './runner.js';
 import {DESIGNER_FILE_REBUILT, designerEditProblem} from './designer-file.js';
@@ -59,7 +59,9 @@ export interface TouchupInput {
 /** Which engine ran, and why it isn't Fusion (or the code engine) when that was wanted. */
 export interface EngineChoice {engine: DesignEngine; note?: string; documentId?: string;
   /** A note the person sees in the pass's activity: why the code engine didn't run. */
-  activity?: string}
+  activity?: string;
+  /** Fusion runs but didn't answer (#852): when Blender can't take the pass either, this is what it fails with. */
+  fusionUnresponsive?: boolean}
 export interface TouchupDeps {
   ensureBlender?: () => Promise<unknown>;
   resetScene?: (client: ReturnType<NonNullable<TouchupDeps['client']>>, signal?: AbortSignal) => Promise<void>;
@@ -217,8 +219,12 @@ async function appEngine(input: ChoiceInput, deps: Pick<TouchupDeps, 'client'> =
     if (!client.hasTool('fusion_mcp_status')) return {engine: 'blender'};
     const status = await client.callTool('fusion_mcp_status', {launch: true, timeout_ms: 90_000}, {signal: input.signal, timeoutMs: 120_000});
     if (status.isError) return {engine: 'blender', note: `Fusion isn't reachable: ${toolErrorText(status).slice(0, 200)}`};
-    const value = JSON.parse((status.content ?? []).flatMap(item => item.type === 'text' ? [item.text] : []).join('') || '{}') as {connected?: unknown; configured?: unknown; error?: unknown};
+    const value = JSON.parse((status.content ?? []).flatMap(item => item.type === 'text' ? [item.text] : []).join('') || '{}') as {connected?: unknown; configured?: unknown; error?: unknown; fusionRunning?: unknown};
     if (value.configured === false) return {engine: 'blender'};
+    // #852: Fusion is running but its MCP got no answer from it (the add-in, or its read of the design, since
+    // bambu-printer-mcp 1.1.76): not responding, which a restart fixes. Said from the status's own fields, never its words.
+    if (value.connected !== true && value.fusionRunning === true)
+      return {engine: 'blender', note: FUSION_NOT_RESPONDING, fusionUnresponsive: true};
     if (value.connected !== true) return {engine: 'blender', note: `Fusion isn't connected${typeof value.error === 'string' && value.error ? `: ${value.error.slice(0, 200)}` : ''}.`};
     if (!client.hasTool('fusion_mcp_new_design')) return {engine: 'blender', note: "This printer MCP can't open a new Fusion design."};
     if (!client.getTool('fusion_mcp_new_design').inputSchema.properties?.bind_document)
@@ -277,10 +283,22 @@ async function closeCompletedFusionDocument(input: TouchupInput, deps: TouchupDe
 
 const isCapture = (path: string) => /\.(usdz|usdc|usda)$/i.test(path);
 
+/** A conversion's reason in plain words, with its technical detail (#852). */
+function conversionReason(error: unknown): string {
+  if (error instanceof CaptureConversionError) {
+    if (error.kind === 'too-large') return `it is larger than this computer reads: ${error.reason}`;
+    if (error.kind === 'timed-out') return `converting it took too long: ${error.reason}`;
+    return error.reason ? `it couldn't be converted: ${error.reason}` : "it couldn't be converted";
+  }
+  return `it couldn't be converted: ${(error instanceof Error ? error.message : String(error)).slice(0, 300)}`;
+}
+
 /** The capture converter the companion already uses for imports, writing the mesh and its material files to `outDir`. */
 async function defaultConvertCapture(source: string, outDir: string, signal?: AbortSignal): Promise<{files: string[]; frame: ScanFrame}> {
   const converter = createCaptureConverter({executable: process.env.SCAN_TO_MAKE_CAPTURE_PYTHON ?? 'python3', temporaryRoot: outDir, timeoutMs: 120_000});
-  const converted = await converter.convert(await readFile(source), signal);
+  // A rebuild over the converter's usual limit (a Mac's or Linux's at full detail, about 200 MB, nearly all textures)
+  // gives its mesh alone: the same triangles in the same frame (#852).
+  const converted = await convertScanMesh(converter, source, signal);
   const report = JSON.parse(converted.report.toString('utf8')) as {metersPerUnit?: unknown; upAxis?: unknown};
   if (typeof report.metersPerUnit !== 'number' || !(report.metersPerUnit > 0) || typeof report.upAxis !== 'string') throw new Error('The capture has no unit or up axis.');
   // The mesh keeps the name its material file refers to.
@@ -292,7 +310,7 @@ async function defaultConvertCapture(source: string, outDir: string, signal?: Ab
 
 async function touchUp(input: TouchupInput, deps: TouchupDeps): Promise<TouchupResult & {passDir: string} & EngineChoice> {
   let code: CodeEngineState | 'unreadable' = await codeEngineFor(input, deps);
-  let scan = input.scan, frame: ScanFrame | undefined, converted: string | undefined;
+  let scan = input.scan, frame: ScanFrame | undefined, converted: string | undefined, unreadable: string | undefined;
   // The engine reads meshes, not captures: a scan comes to it as the capture converter's mesh, unchanged.
   if (code === 'ready' && input.scan.some(isCapture)) {
     converted = join(resolve(input.root), `.capture-${randomUUID()}`);
@@ -309,6 +327,11 @@ async function touchUp(input: TouchupInput, deps: TouchupDeps): Promise<TouchupR
       await rm(converted, {recursive: true, force: true}).catch(() => undefined);
       if (input.signal?.aborted) throw error;
       code = 'unreadable'; converted = undefined;
+      // #852: the reason, never dropped. Its technical words go to the companion's log for Diagnostics, and the pass's
+      // activity says it before any other engine starts, so a tester sees the real cause first.
+      unreadable = conversionReason(error);
+      console.error(`touch-up ${input.objectId}: the code design engine couldn't read ${input.scan.filter(isCapture).map(path => basename(path)).join(', ')}: ${error instanceof Error ? error.message : String(error)}`);
+      input.onProgress?.({seconds: 0, toolCalls: 0, activity: [{atMs: Date.now(), kind: 'message', text: codeEngineUnreadableScan(undefined, unreadable).split('. Your scan')[0]! + '.'}]});
     }
   }
   if (code === 'ready') {
@@ -329,9 +352,13 @@ async function touchUp(input: TouchupInput, deps: TouchupDeps): Promise<TouchupR
     const engine = choice.engine === 'fusion' ? 'fusion' : 'blender';
     // The person sees why the faster engine didn't run, in the pass's activity on every layout.
     if (code === 'not-set-up') choice = {...withNote(choice, codeEngineNotSetUp(engine)), activity: codeEngineNotSetUp(engine)};
-    else if (code === 'unreadable') choice = {...withNote(choice, codeEngineUnreadableScan(engine)), activity: codeEngineUnreadableScan(engine)};
+    else if (code === 'unreadable') choice = {...withNote(choice, codeEngineUnreadableScan(engine, unreadable)), activity: codeEngineUnreadableScan(engine, unreadable)};
   }
   catch (error) { await releaseFusion?.(); throw error; }
+  // When the engine this pass falls back to isn't there either, it fails with the cause, never "install Blender": a
+  // scan the code engine should have read (#852 release check: 30 ms to "Blender isn't installed"), or a Fusion that
+  // stopped responding. Nothing ran, so there is nothing to continue: Try Again starts it again.
+  const cause = code === 'unreadable' ? codeEngineUnreadableScan(undefined, unreadable) : choice.fusionUnresponsive ? FUSION_NOT_RESPONDING : undefined;
   // Fusion passes don't touch Blender: no Blender lock, no launch, no scene reset.
   if (choice.engine === 'fusion') {
     try {
@@ -350,7 +377,14 @@ async function touchUp(input: TouchupInput, deps: TouchupDeps): Promise<TouchupR
   }
   await releaseFusion?.();
   const release = await acquireBlenderLock(deps.lockPath);
-  try { const {activity: _shown, ...made} = choice; return {...await touchUpLocked(input, deps, choice), ...made}; }
+  try { const {activity: _shown, fusionUnresponsive: _down, ...made} = choice; return {...await touchUpLocked(input, deps, choice), ...made}; }
+  catch (error) {
+    if (!cause || !(error instanceof BlenderNotInstalledError || error instanceof BlenderNotReadyError)) throw error;
+    // Thrown like any pass that couldn't start: the project fails with this sentence, never resumable, and its
+    // `pass.failed` event carries it to the event log.
+    console.error(`touch-up ${input.objectId}: Blender couldn't take the pass either: ${error.message}`);
+    throw new Error(cause);
+  }
   finally { await release(); }
 }
 

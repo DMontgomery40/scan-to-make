@@ -40,7 +40,7 @@ import {InvalidAnswerError, printQuestion, validateAnswer, type ConfirmationValu
 import {EstimateSupersededError, InvalidStateError, SlicerRefusedError} from './errors.js';
 import type {TouchupInput} from '../touchup/touchup.js';
 import {carriedSeats, scanBoundsFromObj, seatsProblem, stlBounds, stlFileBounds, type Bounds, type Seat} from './seats.js';
-import {createCaptureConverter} from '../capture-converter.js';
+import {convertScanMesh, createCaptureConverter} from '../capture-converter.js';
 import {ProjectPictures, VersionPictures, leadPicture, type DrawPicture} from './pictures.js';
 import {NO_PRINTER, NO_SOFTWARE_FOR_DESIGN} from '../no-printer.js';
 import {publicTouchupText, limitWords, type TouchupActivity, type TouchupResult} from '../touchup/runner.js';
@@ -389,7 +389,8 @@ async function defaultScanBounds(path: string): Promise<Bounds | undefined> {
   if (/\.stl$/i.test(path)) return stlBounds(await readFile(path));
   if (!/\.(usdz|usdc|usda)$/i.test(path)) return undefined;
   const converter = createCaptureConverter({executable: process.env.SCAN_TO_MAKE_CAPTURE_PYTHON ?? 'python3', temporaryRoot: tmpdir(), timeoutMs: 120_000});
-  const converted = await converter.convert(await readFile(path));
+  // A rebuild over the converter's usual limit is read for its mesh alone, in the same frame (#852).
+  const converted = await convertScanMesh(converter, path);
   const report = JSON.parse(converted.report.toString('utf8')) as {metersPerUnit?: unknown; upAxis?: unknown};
   if (typeof report.metersPerUnit !== 'number' || typeof report.upAxis !== 'string') return undefined;
   return scanBoundsFromObj(converted.derived.toString('utf8'), report.metersPerUnit, report.upAxis);

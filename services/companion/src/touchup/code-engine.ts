@@ -56,10 +56,19 @@ export function codeEngineNotSetUp(engine: 'blender' | 'fusion'): string {
   return `This pass used ${engine === 'fusion' ? 'Fusion' : 'Blender'} because the code design engine isn't set up. Set it up in Settings for faster designs and cleanups.`;
 }
 
-/** The pass's note when the capture couldn't be converted into a mesh the code engine reads. */
-export function codeEngineUnreadableScan(engine: 'blender' | 'fusion'): string {
-  return `The code design engine couldn't read this scan, so this pass used ${engine === 'fusion' ? 'Fusion' : 'Blender'}.`;
+/**
+ * The pass's note when the capture couldn't be converted into a mesh the code engine reads, with the converter's own
+ * reason after it (#852: a byte limit that sent every big scan to Fusion was never said). With no `engine`, nothing else
+ * could take the pass: the sentence the pass fails with, never a request to install another app.
+ */
+export function codeEngineUnreadableScan(engine: 'blender' | 'fusion' | undefined, reason?: string): string {
+  const why = reason?.trim() ? ` (${reason.trim().replace(/[.\s]+$/, '')})` : '';
+  return engine ? `The code design engine couldn't read this scan${why}, so this pass used ${engine === 'fusion' ? 'Fusion' : 'Blender'}.`
+    : `The code design engine couldn't read this scan${why}. Your scan is kept: Try Again, and if it happens again, share Diagnostics from Settings.`;
 }
+
+/** #852: a Fusion that answers its add-in's ping but not a read of its design (hung on a dialog). */
+export const FUSION_NOT_RESPONDING = "Fusion isn't responding on your Mac. Restart Fusion, then Try Again.";
 
 async function isFile(path: string): Promise<boolean> { return stat(path).then(info => info.isFile(), () => false); }
 

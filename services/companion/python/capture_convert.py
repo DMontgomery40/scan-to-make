@@ -22,6 +22,8 @@ def main():
     parser.add_argument("--max-source-bytes", type=int, required=True)
     parser.add_argument("--max-derived-bytes", type=int, required=True)
     parser.add_argument("--timeout-ms", type=int, required=True)
+    # #852: this computer's own rebuild, read for its mesh alone. Its size is textures the design engine never reads.
+    parser.add_argument("--geometry-only", action="store_true")
     args = parser.parse_args()
     try:
         cpu = max(1, math.ceil(args.timeout_ms / 1000))
@@ -31,8 +33,9 @@ def main():
         if source.stat().st_size > args.max_source_bytes:
             raise ValueError("capture source byte limit exceeded")
         data = source.read_bytes()
-        check_input(data, source.name, args.max_source_bytes, 256, 128 * 1024 * 1024)
-        report = convert(source, args.out)
+        check_input(data, source.name, args.max_source_bytes, 256,
+                    max(128 * 1024 * 1024, args.max_source_bytes) if args.geometry_only else 128 * 1024 * 1024)
+        report = convert(source, args.out, geometry_only=args.geometry_only)
         Path(args.report).write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
         return 0 if report["metricQualified"] else 4
     except Exception as exc:

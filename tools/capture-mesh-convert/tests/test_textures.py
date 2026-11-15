@@ -159,6 +159,24 @@ class TextureTests(unittest.TestCase):
                 assignments.append(material)
         return vertices,uvs,faces,assignments
 
+    def test_geometry_only_writes_the_same_mesh_and_frame_without_textures(self):
+        # #852: a Mac rebuild is mostly textures (200 MB, of which 3 MB is mesh). Geometry only gives the code engine the
+        # same triangles in the same frame as a full conversion, with no texture decoded or written.
+        package,_,_ = self.fixture(surface_maps=[('normal','rgb','uvCapture'),('occlusion','r','uvCapture')])
+        full = convert(package,self.output/'full.obj')
+        bare = self.base/'bare'; bare.mkdir()
+        geometry = convert(package,bare/'mesh.obj',geometry_only=True)
+        def shape(path):
+            return [line for line in Path(path).read_text().splitlines() if line.startswith(('v ','f '))]
+        strip = lambda faces: [' '.join(token.split('/')[0] for token in line.split(' ')) for line in faces]
+        self.assertEqual(strip(shape(bare/'mesh.obj')),strip(shape(self.output/'full.obj')))
+        self.assertEqual(sorted(p.name for p in bare.iterdir()),['mesh.obj'],'no MTL, no PNG')
+        for key in ('metersPerUnit','upAxis','metricQualified','unitsAuthored'):
+            self.assertEqual(geometry[key],full[key],key)
+        self.assertTrue(geometry['geometryOnly'])
+        self.assertEqual(geometry['materials'],[])
+        self.assertFalse(full.get('geometryOnly',False))
+
     def test_indexed_corner_uvs_survive_reflection_and_triangulation(self):
         package,texture,values = self.fixture(reflected=True)
         out = self.output/'capture.obj'

@@ -161,7 +161,13 @@ def _has_time_samples(attr):
     return attr and attr.IsValid() and attr.GetNumTimeSamples() > 0
 
 
-def convert(src, out_obj):
+class _GeometryOnly(Exception):
+    """Skips a mesh's material and UVs in a geometry-only conversion."""
+
+
+def convert(src, out_obj, geometry_only=False):
+    """`geometry_only` (#852): the same triangles in the same frame, with no material or texture read or written. A Mac
+    rebuild is mostly textures (a 200 MB scan holds about 3 MB of mesh); a design engine reads the mesh."""
     _load_pxr()
     src = Path(src)
     out_obj = Path(out_obj)
@@ -268,7 +274,10 @@ def convert(src, out_obj):
             raise RuntimeError(f"{path}: invalid topology: index {bad[0]} out of range for {len(points)} points")
         material = None
         uv_name = "st"
+        uvs = None
         try:
+            if geometry_only:
+                raise _GeometryOnly()
             material = base_colour(prim, src, _layer_bytes)
             if material:
                 uv_name = material.get("uvPrimvar", "st")
@@ -282,6 +291,8 @@ def convert(src, out_obj):
                     unsupported.append({"feature":"textureWrapping", "prim":path,
                                         "detail":"out-of-range UVs affected by " +
                                                  "; ".join(material["textureWarnings"])})
+        except _GeometryOnly:
+            material, uvs = None, None
         except UnsupportedTexture as exc:
             unsupported.append({"feature":"baseColour", "prim":path, "detail":str(exc)})
             material, uvs = None, None
@@ -402,7 +413,7 @@ def convert(src, out_obj):
                         "metersPerUnit": mpu, "upAxis": str(up), "handedness": "right",
                         "winding": "counter-clockwise front faces",
                         "faces": "triangles (ear clipping on face plane)"},
-        "metricQualified": metric_qualified,
+        "metricQualified": metric_qualified, "geometryOnly": bool(geometry_only),
         "metricQualifiedReason": None if metric_qualified else
             ("metersPerUnit not authored (default used)" if not units_authored else "unsupported features present"),
         "subdivisionPolicy": SUBDIVISION_POLICY,
@@ -417,6 +428,7 @@ def main(argv=None):
     ap.add_argument("source")
     ap.add_argument("--out", required=True, help="output .obj path")
     ap.add_argument("--report", help="output JSON report path (default: stdout)")
+    ap.add_argument("--geometry-only", action="store_true", help="the mesh alone: no material or texture is read or written")
     a = ap.parse_args(argv)
     try:
         if a.report:
@@ -429,7 +441,7 @@ def main(argv=None):
                  (report_path.suffix == ".png" and any(report_path.name.startswith(stem+"_"+role+"_")
                                                        for role in ("basecolor", "normal", "occlusion"))))):
                 raise RuntimeError("report must not overwrite source or output artifacts")
-        report = convert(a.source, a.out)
+        report = convert(a.source, a.out, geometry_only=a.geometry_only)
     except Exception as e:  # noqa: BLE001
         print(f"error: {e}", file=sys.stderr)
         return 2
