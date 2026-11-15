@@ -20,12 +20,14 @@ enum Diagnostics {
     /// case, PEM blocks, JSON web tokens, keys with a known prefix, a pairing link, email addresses, and home folders
     /// (this Mac's reads `~`, anyone else's `/Users/<user>`). Linux runs the same pass (`diagnostics.rs`).
     static let valueRules: [(NSRegularExpression, String)] = [
-        (#"(?i)\b(bearer|basic|digest|token)(\s+)[A-Za-z0-9._~+/=-]{6,}"#, "$1$2<removed>"),
+        // PEM blocks first: a header line or scheme rule must never eat a block's BEGIN marker.
         (#"-----BEGIN [A-Z0-9 ]+-----[\s\S]*?(-----END [A-Z0-9 ]+-----|$)"#, "<removed PEM block>"),
+        (#"(?im)(^|[^"\w-])((?:Proxy-)?Authorization[ \t]*:)[^\n]*"#, "$1$2 <removed>"),
+        (#"(?i)\b(bearer|basic|digest|negotiate|token)(\s+)[A-Za-z0-9._~+/=-]{6,}"#, "$1$2<removed>"),
         (#"\beyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]+"#, "<removed token>"),
         (#"\b((sk|pk|rk)-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|A(KIA|SIA)[0-9A-Z]{16}\b|AIza[0-9A-Za-z_-]{30,}|hf_[A-Za-z0-9]{20,})"#, "<removed key>"),
         (#"scantomake://pair\?[^\s"]+"#, "scantomake://pair?<removed>"),
-        (#"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}"#, "<removed email>"),
+        (#"[A-Za-z0-9._%+-]+(@|%40)[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}"#, "<removed email>"),
     ].map { (try! NSRegularExpression(pattern:$0.0), $0.1) }
     static let homeRules: [(NSRegularExpression, String)] = [
         (#"(\\?/)(Users)(\\?/)(?!<user>)([^/\\\s"'<>:]+)"#, "$1$2$3<user>"),
@@ -59,7 +61,7 @@ enum Diagnostics {
     /// Log lines: `NAME=value` or `"name": "value"` for a secret-looking name, and every value-shaped secret, are removed.
     static func redact(log text: String) -> String {
         var out = scrub(text)
-        let named = try! NSRegularExpression(pattern:#"(?i)("?[A-Za-z0-9_.-]*(?:token|key|secret|password|pass|access_code|accesscode|auth|credential|session|cookie)[A-Za-z0-9_.-]*"?\s*[=:]\s*)("[^"]*"|[^\s,}]+)"#)
+        let named = try! NSRegularExpression(pattern:#"(?i)("?[A-Za-z0-9_.-]*(?:token|key|secret|password|pass(?![a-z])|access_code|accesscode|auth|credential|session|cookie)[A-Za-z0-9_.-]*"?\s*[=:]\s*)("[^"]*"|[^\s,}]+)"#)
         out = named.stringByReplacingMatches(in:out, range:NSRange(out.startIndex..., in:out), withTemplate:"$1<removed>")
         return out
     }
@@ -115,7 +117,10 @@ enum Diagnostics {
                 try fm.createDirectory(at:folder, withIntermediateDirectories:true)
                 for name in (try? fm.contentsOfDirectory(atPath:state.appendingPathComponent("logs").path)) ?? [] where name.hasSuffix(".log") {
                     let data = (try? Data(contentsOf:state.appendingPathComponent("logs/\(name)"))) ?? Data()
-                    let text = String(decoding:data.suffix(4 * 1024 * 1024), as:UTF8.self)
+                    // The last 4 MB, from its first whole line: a cut after a label would leave a secret unlabelled.
+                    var tail = data.suffix(4 * 1024 * 1024)
+                    if tail.count < data.count, let newline = tail.firstIndex(of:0x0A) { tail = tail[tail.index(after:newline)...] }
+                    let text = String(decoding:tail, as:UTF8.self)
                     save("logs/\(name)") { try redact(log:text).write(to:$0, atomically:true, encoding:.utf8) }
                 }
                 if let env = try? String(contentsOf:state.appendingPathComponent("companion.env"), encoding:.utf8) {

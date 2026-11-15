@@ -163,6 +163,37 @@ final class DiagnosticsTests: XCTestCase {
         XCTAssertTrue(notes.contains("named a file this export can’t use"), notes)
     }
 
+    /// #813 re-review N3, N6, N10, N11: header lines go whole, Negotiate and %40 emails go, `pass` is a word of its own.
+    func testHeaderLinesNegotiateEncodedEmailAndAWordBoundPass() {
+        let header = Diagnostics.redact(companion:"Authorization: Digest username=\"taylorperson\", response=\"6629fae49393a05397450978507c4ef1\"\nnext line")
+        XCTAssertFalse(header.contains("taylorperson") || header.contains("6629fae4"), header)
+        XCTAssertTrue(header.contains("next line"))
+        let pemAfterHeader = Diagnostics.redact(companion:"Authorization: Basic dXNlcjpw -----BEGIN CERTIFICATE-----\nMIIBszCCAVmg\n-----END CERTIFICATE-----")
+        XCTAssertFalse(pemAfterHeader.contains("MIIBszCCAVmg"), pemAfterHeader)
+        let other = Diagnostics.redact(companion:"negotiate TlRMTVNTUAABAAA12345 to=someone%40example.com")
+        XCTAssertFalse(other.contains("TlRMTVNTUAABAAA12345") || other.contains("someone%40example.com"), other)
+        let log = Diagnostics.redact(log:"{\"seq\":1,\"passIndex\":2} DB_PASS=hunter22 pass: hunter33")
+        XCTAssertTrue(log.contains("\"passIndex\":2"), log)
+        XCTAssertFalse(log.contains("hunter22") || log.contains("hunter33"), log)
+    }
+
+    /// #813 re-review N10: the Mac's own log, cut to its last 4 MB, starts at a whole line.
+    func testATruncatedLogStartsAtAWholeLine() async throws {
+        let fm = FileManager.default
+        let state = fm.temporaryDirectory.appendingPathComponent("diag-state-\(UUID().uuidString)")
+        try fm.createDirectory(at:state.appendingPathComponent("logs"), withIntermediateDirectories:true)
+        defer { try? fm.removeItem(at:state) }
+        let big = "label token=" + String(repeating:"q", count:4 * 1024 * 1024) + "\nkept-last-line\n"
+        try big.write(to:state.appendingPathComponent("logs/companion.log"), atomically:true, encoding:.utf8)
+        let zip = fm.temporaryDirectory.appendingPathComponent("diag-\(UUID().uuidString).zip")
+        defer { try? fm.removeItem(at:zip) }
+        let ok = await Diagnostics.export(state:state, to:zip) { CompanionDiagnostics(files:[], notes:[]) }
+        XCTAssertTrue(ok)
+        let out = try unzip(zip)
+        defer { try? fm.removeItem(at:out) }
+        XCTAssertEqual(everything(in:out).first { $0.key.hasSuffix("logs/companion.log") }?.value, "kept-last-line\n")
+    }
+
     func testExportStillSucceedsWhenTheCompanionDoesNotAnswer() async throws {
         let fm = FileManager.default
         let state = fm.temporaryDirectory.appendingPathComponent("diag-state-\(UUID().uuidString)")
