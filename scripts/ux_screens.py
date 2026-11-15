@@ -747,6 +747,8 @@ def main() -> int:
                              "on a kept simulator of its own (stm-ux-<kind>-kept): run once with --keep-app-data start (a fresh install there), "
                              "then again with --condition away --keep-app-data to see what the phone shows from what it kept")
     parser.add_argument('--pages', type=int, help='at most this many scrolled pages per screen')
+    parser.add_argument('--text-size', choices=['default', 'largest'], default='default',
+                        help='largest: every screen at the largest accessibility text size (UIPreferredContentSizeCategoryName); one size per output folder')
     parser.add_argument('--redo', action='store_true', help='capture the selected screens again (with --devices/--screens)')
     args = parser.parse_args()
     out, work = args.out.resolve(), (args.work or args.out.resolve().parent / 'ux-screens-work').resolve()
@@ -852,6 +854,9 @@ def select(args, out: Path, keys: list[str], ctx: dict) -> tuple[list[dict], set
             items = [i for i in items if any(i['name'].endswith('-' + w.lstrip('=')) for w in args.screens.split(','))]
     if getattr(args, 'pages', None):  # --pages N: at most N scrolled pages per screen (the stage is on the first)
         items = [{**i, 'pages': min(i['pages'], args.pages)} for i in items]
+    if getattr(args, 'text_size', 'default') == 'largest':  # UIKit reads the size from the app's defaults, as a launch argument
+        items = [{**i, 'state': f"{i['state']}, largest text",
+                  'args': i['args'] + ['-UIPreferredContentSizeCategoryName', 'UICTContentSizeCategoryAccessibilityXXXL']} for i in items]
     # A screen is done only for the build that captured it: after a new commit the same folder captures it again.
     source = ctx['info'].get('source')
     done = {(d['device'], d['name']) for d in read_jsonl(out / 'done.jsonl') if not source or d.get('source') == source}

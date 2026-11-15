@@ -1716,6 +1716,75 @@ final class LayoutParityUITests: XCTestCase {
         shot.name = posterFails ? "stage-live-still-failed" : "stage-live"; shot.lifetime = .keepAlways; add(shot)
     }
 
+    // MARK: #844: nothing on a project page is wider than the screen
+
+    /// The elements of `app`'s first window that reach past its left or right edge, as one line each. A row that scrolls
+    /// sideways (the gallery's labels) may hold more than it shows; what it holds is skipped, the row itself is not.
+    private func overflowing(_ app: XCUIApplication) throws -> [String] {
+        let window = app.windows.firstMatch.frame
+        var found: [String] = []
+        func walk(_ element: XCUIElementSnapshot) {
+            let frame = element.frame
+            let visible = frame.width > 0 && frame.height > 0 && frame.maxY > window.minY && frame.minY < window.maxY
+            if visible && (frame.minX < window.minX - 1 || frame.maxX > window.maxX + 1) {
+                found.append("\(element.elementType.rawValue) \(element.identifier.isEmpty ? "-" : element.identifier) “\(element.label.prefix(40))” x \(Int(frame.minX))…\(Int(frame.maxX)) of \(Int(window.width))")
+            }
+            let sideways = element.elementType == .scrollView && frame.height < window.height / 3
+            if !sideways { element.children.forEach(walk) }
+        }
+        walk(try app.snapshot())
+        return found
+    }
+
+    /// #844 (found capturing #840): at the largest text size the result page was 614 pt wide on a 402 pt iPhone, so its
+    /// title, status, description and Print Another were cut off at both edges. The bottom bar's Print Another kept its
+    /// whole name on one line beside the ask field, and the stage's chips, the print tiles and the tabs took that width.
+    /// At accessibility text sizes nothing on any project page may reach past the screen's edges, on the iPhone and the
+    /// iPad: the result with its stage (part and scan), a project still working, one asking a question, a draft design,
+    /// a ready one and a print in progress, each on its first screen and scrolled once.
+    func testNothingOnAProjectPageIsWiderThanTheScreenAtTheLargestTextSize() throws {
+        executionTimeAllowance = 300  // seven launches at the largest text size
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try Self.boxSTL().write(to: folder.appendingPathComponent("mic.stl"))
+        let pages: [(name: String, args: [String], tap: String?)] = [
+            ("the printed part's stage", ["-CounterpartFixtures", folder.path, "-CounterpartFixtureSet", "ar-stage", "-CounterpartScreen", "printed"], nil),
+            ("the printed project's scan", ["-CounterpartFixtures", folder.path, "-CounterpartFixtureSet", "ar-stage", "-CounterpartScreen", "printed"], "gallery-scan"),
+            ("a ready project", ["-CounterpartFixtures", NSTemporaryDirectory() + "no-assets", "-CounterpartFixtureSet", "all", "-CounterpartScreen", "ready"], nil),
+            ("a project the Mac is working on", ["-CounterpartFixtures", NSTemporaryDirectory() + "no-assets", "-CounterpartFixtureSet", "all", "-CounterpartScreen", "working"], nil),
+            ("a project asking a question", ["-CounterpartFixtures", NSTemporaryDirectory() + "no-assets", "-CounterpartFixtureSet", "all", "-CounterpartScreen", "ask"], nil),
+            ("a print in progress", ["-CounterpartFixtures", NSTemporaryDirectory() + "no-assets", "-CounterpartFixtureSet", "all", "-CounterpartScreen", "printing"], nil),
+            ("a draft design", ["-CounterpartFixtures", NSTemporaryDirectory() + "no-assets", "-CounterpartFixtureSet", "draft-design",
+                                "-CounterpartOpen", "counterpart://project/7a1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01"], nil),
+        ]
+        var failures: [String] = []
+        for page in pages {
+            let app = XCUIApplication()
+            app.launchArguments = page.args + ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+            app.launch()
+            XCTAssertTrue(app.scrollViews.firstMatch.waitForExistence(timeout: 30), "\(page.name): \(app.debugDescription)")
+            if let tap = page.tap {
+                let entry = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", tap)).firstMatch
+                if entry.waitForExistence(timeout: 10) { entry.tap() } else { failures.append("\(page.name): no \(tap) to tap") }
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(3))
+            for screen in ["first screen", "scrolled"] {
+                let past = try overflowing(app)
+                if !past.isEmpty {
+                    let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "844 \(page.name), \(screen)"; shot.lifetime = .keepAlways; add(shot)
+                    failures.append("\(page.name), \(screen):\n  " + past.prefix(12).joined(separator: "\n  "))
+                }
+                let scroll = app.scrollViews.firstMatch
+                scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.85))
+                    .press(forDuration: 0.05, thenDragTo: scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.25)))
+                RunLoop.current.run(until: Date().addingTimeInterval(1))
+            }
+            app.terminate()
+        }
+        XCTAssertTrue(failures.isEmpty, "Past the screen's edge at the largest text size:\n" + failures.joined(separator: "\n"))
+    }
+
     static func boxSTL() -> Data {
         let size = SIMD3<Float>(146, 40, 20)
         let c: [SIMD3<Float>] = (0..<8).map { i in SIMD3(Float(i & 1), Float((i >> 1) & 1), Float((i >> 2) & 1)) * size }
