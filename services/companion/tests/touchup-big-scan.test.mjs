@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {readFile, stat} from 'node:fs/promises';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {execFile} from 'node:child_process';
+import {execFile, spawnSync} from 'node:child_process';
 import {promisify} from 'node:util';
 import {runTouchup} from '../dist/touchup/touchup.js';
 import {DEFAULT_CAPTURE_LIMITS} from '../dist/capture-import.js';
@@ -13,6 +13,8 @@ import {tempDir} from './support/temp.mjs';
 // big scan went to Fusion or Blender. These run the real converter (python with usd-core, as capture-converter-real
 // does) on the same object packaged small and over the limit.
 const python = process.env.CAPTURE_TEST_PYTHON ?? 'python3';
+// The real converter needs usd-core (pxr); without it this is skipped, not failed (review of #853, P3-1).
+const hasPxr = spawnSync(python, ['-c', 'import pxr, PIL'], {stdio: 'ignore'}).status === 0;
 const makeRebuild = fileURLToPath(new URL('../../../tools/capture-mesh-convert/make_rebuild_fixture.py', import.meta.url));
 const handoff = {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true'}};
 const text = value => ({content: [{type: 'text', text: JSON.stringify(value)}]});
@@ -36,7 +38,11 @@ async function meshFromPass(inv, pass) {
   // In the printer's frame: millimetres, Z up (a Y-up scan's Y is the height).
   const zUp = points.map(([x, y, z]) => (up === 'Y' ? [x, -z, y] : [x, y, z]).map(value => value * unitMm));
   const low = [0, 1, 2].map(axis => Math.min(...zUp.map(point => point[axis]))), high = [0, 1, 2].map(axis => Math.max(...zUp.map(point => point[axis])));
-  return {size: high.map((value, axis) => value - low[axis]), files: pass.scanPaths.map(path => path.split('/').at(-1)).sort(), triangles: (await readFile(obj, 'utf8')).split('\n').filter(line => line.startsWith('f ')).length};
+  const lines = (await readFile(obj, 'utf8')).split('\n');
+  // The converted mesh itself (review of #853, P2-5): its corners and faces, never just its box.
+  const vertices = lines.filter(line => line.startsWith('v '));
+  const faces = lines.filter(line => line.startsWith('f ')).map(line => line.split(/\s+/).map(token => token.split('/')[0]).join(' '));
+  return {size: high.map((value, axis) => value - low[axis]), low, vertices, faces, files: pass.scanPaths.map(path => path.split('/').at(-1)).sort(), triangles: faces.length};
 }
 
 async function codePass(scan, root) {
@@ -51,7 +57,7 @@ async function codePass(scan, root) {
   return {result, seen, activity};
 }
 
-test('a Mac rebuild over the converter\'s limit is designed on the code engine, at the same size as a small scan of the same object (#852)', async t => {
+test('a Mac rebuild over the converter\'s limit is designed on the code engine, at the same size as a small scan of the same object (#852)', {skip: hasPxr ? false : 'usd-core (pxr) is not installed for CAPTURE_TEST_PYTHON'}, async t => {
   const root = await tempDir('touchup-big-scan-');
   const small = join(root, 'small', 'scan.usdz'), big = join(root, 'big', 'scan.usdz');
   await promisify(execFile)('mkdir', ['-p', join(root, 'small'), join(root, 'big')]);
@@ -73,6 +79,12 @@ test('a Mac rebuild over the converter\'s limit is designed on the code engine, 
   for (const axis of [0, 1, 2]) assert.ok(Math.abs(a.seen.size[axis] - b.seen.size[axis]) < 0.01, `axis ${axis}: ${a.seen.size} vs ${b.seen.size}`);
   assert.deepEqual(b.seen.size.map(value => Math.round(value * 10) / 10), [195.7, 22.7, 107], 'millimetres, Z up, as the object is');
   assert.equal(a.seen.triangles, b.seen.triangles, 'the same triangles');
+  // Exactly the same mesh, through the real Node path: every corner, where it was placed, and every face in its winding.
+  assert.deepEqual(b.seen.vertices, a.seen.vertices, 'the same vertices, line for line');
+  assert.deepEqual(b.seen.faces, a.seen.faces, 'the same faces and winding');
+  // Placed off the origin (31, 12, -44 mm, Y up): in millimetres, Z up, the low corner is (31, 44 - 22.7, 12), never re-centred.
+  assert.deepEqual(b.seen.low.map(value => Math.round(value * 100) / 100), [31, 21.3, 12]);
+  assert.deepEqual(a.seen.low.map(value => Math.round(value * 100) / 100), [31, 21.3, 12]);
   // The big one comes as its mesh alone: its textures (the bytes over the limit) are never read.
   assert.deepEqual(b.seen.files, ['mesh.obj']);
   assert.ok(a.seen.files.includes('mesh.obj') && a.seen.files.some(name => name.endsWith('.png')), 'a small scan keeps its texture, as before');

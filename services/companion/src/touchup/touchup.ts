@@ -4,11 +4,11 @@ import {randomUUID} from 'node:crypto';
 import {homedir} from 'node:os';
 import {basename, dirname, join, resolve} from 'node:path';
 import {PrinterMcpClient, type PrinterHandoffConfig} from '@scan-to-make/printer-handoff';
-import {BlenderNotInstalledError, BlenderNotReadyError, defaultBlenderLaunch, ensureBlenderMcp, resetBlenderScene, stopOwnedBlender} from './blender.js';
+import {defaultBlenderLaunch, ensureBlenderMcp, resetBlenderScene, stopOwnedBlender} from './blender.js';
 import {prepareTouchupPass, type TouchupPass} from './inputs.js';
 import {buildTouchupInvocation, type DesignEngine, type DesignGuidance, type ScanFrame, type TouchupInvocation} from './invocation.js';
 import {codeEngineNotSetUp, codeEngineState, codeEngineUnreadableScan, copyDesign, FUSION_NOT_RESPONDING, isCodeDesign, passCadDir, passDesignDir, type CodeEngineState, type DesignSource} from './code-engine.js';
-import {CaptureConversionError, convertScanMesh, createCaptureConverter} from '../capture-converter.js';
+import {CaptureConversionError, convertScanMesh, createCaptureConverter, publicConversionReason} from '../capture-converter.js';
 import {toolErrorText} from './blender.js';
 import {runTouchupWorker, publicTouchupText, type TouchupProgress, type TouchupResult} from './runner.js';
 import {DESIGNER_FILE_REBUILT, designerEditProblem} from './designer-file.js';
@@ -75,6 +75,8 @@ export interface TouchupDeps {
   fusionLockPath?: string;
   /** Code passes take turns across companion processes: the printer MCP's engine runs one job at a time. */
   codeLockPath?: string;
+  /** How long a pass with no Blender waits before looking at a not-responding Fusion once more (tests set 0). */
+  fusionRecheckMs?: number;
   /** Turns a capture (USDZ) into a mesh the code engine reads, with its unit and up axis from the conversion report. */
   convertCapture?: (source: string, outDir: string, signal?: AbortSignal) => Promise<{files: string[]; frame: ScanFrame}>;
 }
@@ -285,12 +287,23 @@ const isCapture = (path: string) => /\.(usdz|usdc|usda)$/i.test(path);
 
 /** A conversion's reason in plain words, with its technical detail (#852). */
 function conversionReason(error: unknown): string {
+  // Without this computer's file paths (review of #853, P2-4): the full line is in the companion's log only.
   if (error instanceof CaptureConversionError) {
-    if (error.kind === 'too-large') return `it is larger than this computer reads: ${error.reason}`;
-    if (error.kind === 'timed-out') return `converting it took too long: ${error.reason}`;
-    return error.reason ? `it couldn't be converted: ${error.reason}` : "it couldn't be converted";
+    const reason = publicConversionReason(error.reason);
+    if (error.kind === 'too-large') return `it is larger than this computer reads: ${reason}`;
+    if (error.kind === 'timed-out') return `converting it took too long: ${reason}`;
+    return reason ? `it couldn't be converted: ${reason}` : "it couldn't be converted";
   }
-  return `it couldn't be converted: ${(error instanceof Error ? error.message : String(error)).slice(0, 300)}`;
+  return `it couldn't be converted: ${publicConversionReason((error instanceof Error ? error.message : String(error)).slice(0, 300))}`;
+}
+
+/** Waits `ms`, or until the pass is stopped. */
+function wait(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((done, stopped) => {
+    if (signal?.aborted) { stopped(signal.reason); return; }
+    const timer = setTimeout(done, ms);
+    signal?.addEventListener('abort', () => { clearTimeout(timer); stopped(signal.reason); }, {once: true});
+  });
 }
 
 /** The capture converter the companion already uses for imports, writing the mesh and its material files to `outDir`. */
@@ -360,40 +373,63 @@ async function touchUp(input: TouchupInput, deps: TouchupDeps): Promise<TouchupR
   // stopped responding. Nothing ran, so there is nothing to continue: Try Again starts it again.
   const cause = code === 'unreadable' ? codeEngineUnreadableScan(undefined, unreadable) : choice.fusionUnresponsive ? FUSION_NOT_RESPONDING : undefined;
   // Fusion passes don't touch Blender: no Blender lock, no launch, no scene reset.
-  if (choice.engine === 'fusion') {
+  const fusionPass = async (fusion: EngineChoice, releaseIt?: () => Promise<void>) => {
     try {
-      const result = await touchUpLocked(input, deps, choice);
-      if ((result.status === 'done' || result.status === 'unchanged') && result.model && result.design && !isCodeDesign(result.design) && choice.documentId) {
-        const checked = await closeCompletedFusionDocument(input, deps, choice.documentId, result.design.f3d);
+      const result = await touchUpLocked(input, deps, fusion);
+      if ((result.status === 'done' || result.status === 'unchanged') && result.model && result.design && !isCodeDesign(result.design) && fusion.documentId) {
+        const checked = await closeCompletedFusionDocument(input, deps, fusion.documentId, result.design.f3d);
         if (!checked.valid) {
           const {design: _invalidArchive, ...savedMesh} = result;
-          return {...savedMesh, ...choice, status: 'failed', reason: checked.note};
+          return {...savedMesh, ...fusion, status: 'failed' as const, reason: checked.note};
         }
-        return {...result, ...choice, ...(checked.note ? {note: checked.note} : {})};
+        return {...result, ...fusion, ...(checked.note ? {note: checked.note} : {})};
       }
-      return {...result, ...choice};
+      return {...result, ...fusion};
     }
-    finally { await releaseFusion?.(); }
-  }
+    finally { await releaseIt?.(); }
+  };
+  if (choice.engine === 'fusion') return fusionPass(choice, releaseFusion);
   await releaseFusion?.();
+  const started = {blender: false};
+  let unavailable: unknown;
   const release = await acquireBlenderLock(deps.lockPath);
-  try { const {activity: _shown, fusionUnresponsive: _down, ...made} = choice; return {...await touchUpLocked(input, deps, choice), ...made}; }
+  try { const {activity: _shown, fusionUnresponsive: _down, ...made} = choice; return {...await touchUpLocked(input, deps, choice, undefined, started), ...made}; }
   catch (error) {
-    if (!cause || !(error instanceof BlenderNotInstalledError || error instanceof BlenderNotReadyError)) throw error;
-    // Thrown like any pass that couldn't start: the project fails with this sentence, never resumable, and its
-    // `pass.failed` event carries it to the event log.
-    console.error(`touch-up ${input.objectId}: Blender couldn't take the pass either: ${error.message}`);
-    throw new Error(cause);
+    // Blender couldn't start, for any reason (not installed, not ready, its bridge, its scene: review of #853, P2-2):
+    // with a cause, the cause is what the pass fails with. An error once Blender is running is the pass's own.
+    if (!cause || started.blender || input.signal?.aborted) throw error;
+    unavailable = error;
   }
   finally { await release(); }
+  console.error(`touch-up ${input.objectId}: Blender couldn't take the pass either: ${unavailable instanceof Error ? unavailable.message : String(unavailable)}`);
+  // A Fusion still starting (a sign-in or update dialog) isn't hung: one more look after a short wait (review of #853, P2-1).
+  if (choice.fusionUnresponsive) {
+    await wait(deps.fusionRecheckMs ?? FUSION_RECHECK_MS, input.signal);
+    const releaseAgain = await acquireBlenderLock(deps.fusionLockPath ?? FUSION_LOCK_PATH);
+    let again: EngineChoice;
+    try { again = await appEngine(input, deps); }
+    catch (error) { await releaseAgain(); throw error; }
+    if (again.engine === 'fusion') {
+      const said = code === 'unreadable' ? codeEngineUnreadableScan('fusion', unreadable) : undefined;
+      return fusionPass(said ? {...withNote(again, said), activity: said} : again, releaseAgain);
+    }
+    await releaseAgain();
+  }
+  // Thrown like any pass that couldn't start: the project fails with this sentence, never resumable, and its
+  // `pass.failed` event carries it to the event log.
+  throw new Error(cause);
 }
 
-async function touchUpLocked(input: TouchupInput, deps: TouchupDeps, choice: EngineChoice, frame?: ScanFrame): Promise<TouchupResult & {passDir: string}> {
+/** How long a pass with no Blender waits before looking at a not-responding Fusion once more (review of #853, P2-1). */
+const FUSION_RECHECK_MS = 20_000;
+
+async function touchUpLocked(input: TouchupInput, deps: TouchupDeps, choice: EngineChoice, frame?: ScanFrame, started?: {blender: boolean}): Promise<TouchupResult & {passDir: string}> {
   if (choice.engine === 'blender') {
     idleBlender = {input, deps};
     await (deps.ensureBlender ?? (() => ensureBlenderMcp({launch: defaultBlenderLaunch()})))();
     const client = (deps.client ?? (handoff => new PrinterMcpClient(handoff)))(input.handoff);
     await (deps.resetScene ?? resetBlenderScene)(client, input.signal);
+    if (started) started.blender = true;
   }
   const pass = await (deps.prepare ?? prepareTouchupPass)({root: input.root, objectId: input.objectId, scan: input.scan, photos: input.photos,
     requirePhotos: !input.locate && !(input.instructions?.trim() || input.note?.trim())});

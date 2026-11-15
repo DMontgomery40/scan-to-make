@@ -45,15 +45,18 @@ export function createCaptureConverter(options:CaptureConverterOptions={}):Local
   const drain=(bytes:Buffer)=>{total+=bytes.length;if(total>64*1024){overflow=true;kill();}};
   child.stdout.on('data',drain);
   child.stderr.on('data',(bytes:Buffer)=>{drain(bytes);said=Buffer.concat([said,bytes]).subarray(-1024);});
-  const done=new Promise<number|null>(resolve=>{child.once('error',()=>{spawnFailed=true;});child.once('close',resolve);});
+  let killedBy:NodeJS.Signals|null=null;
+  const done=new Promise<number|null>(resolve=>{child.once('error',()=>{spawnFailed=true;});child.once('close',(code,signalName)=>{killedBy=signalName;resolve(code);});});
   signal?.addEventListener('abort',kill,{once:true});if(signal?.aborted)kill();
   try {
    const code=await done;
    if(signal?.aborted)throw new CaptureConversionError('Capture conversion aborted','', 'aborted');
    if(expired)throw new CaptureConversionError('Capture conversion timed out',`no mesh after ${Math.round(timeout/1000)} s`,'timed-out');
+   const last=said.toString('utf8').trim().split('\n').at(-1)?.replace(/^capture conversion rejected:\s*/,'').slice(0,300)??'';
+   // A converter stopped by the system says nothing: name the signal (SIGXFSZ: the 64 MiB output limit; SIGXCPU: its CPU limit).
    const reason=spawnFailed?`${executable} could not be started`:overflow?'the converter said too much':
     code===4?'the scan has no authored unit, or features the converter does not export':
-    said.toString('utf8').trim().split('\n').at(-1)?.replace(/^capture conversion rejected:\s*/,'').slice(0,300)??'';
+    last||(killedBy?`the converter was stopped by ${killedBy}${killedBy==='SIGXFSZ'?' (its output passed 64 MiB)':killedBy==='SIGXCPU'?' (its CPU time ran out)':''}`:`the converter exited with ${code}`);
    if(spawnFailed||overflow||code!==0)throw new CaptureConversionError('Capture conversion failed or was unqualified',reason,/byte limit|limit \d+/.test(reason)?'too-large':'failed');
   } finally {clearTimeout(timer);signal?.removeEventListener('abort',kill);}
  }
@@ -111,5 +114,32 @@ export async function convertScanMesh(converter:LocalScanConverter,path:string,s
   const converted=await converter.convert(await readFile(path),signal);
   return {...converted,assets:converted.assets??{},geometryOnly:false};
  }
- return {...await converter.convertLocalScan(path,signal),geometryOnly:true};
+ // One at a time across this companion, a touch-up's and a seat check's alike (review of #853, P1-1).
+ return {...await oneAtATime(()=>converter.convertLocalScan(path,signal),signal),geometryOnly:true};
+}
+
+/** Geometry-only conversions, one at a time: each holds a big scan's mesh and its converter's memory. */
+let localTurn:Promise<unknown>=Promise.resolve();
+let localWaiting=0;
+/** How many geometry-only conversions are running or waiting (tests). */
+export function localConversionsPending():number{return localWaiting;}
+async function oneAtATime<T>(work:()=>Promise<T>,signal?:AbortSignal):Promise<T>{
+ const previous=localTurn;
+ let done!:()=>void;
+ localTurn=new Promise<void>(resolve=>{done=resolve;});
+ localWaiting++;
+ try {
+  await previous.catch(()=>undefined);
+  if(signal?.aborted)throw new CaptureConversionError('Capture conversion aborted','','aborted');
+  return await work();
+ } finally {localWaiting--;done();}
+}
+
+/**
+ * A converter's reason for people to read (review of #853, P2-4): file paths go, since they name this computer's
+ * folders and its user. The full line stays in the companion's log. A USD prim path (/Root/Mesh) stays: it says where.
+ */
+export function publicConversionReason(reason:string):string{
+ return reason.replace(/(^|[\s'"(\[:=,])(?:~\/|\/(?:Users|home|private|var|tmp|Volumes|Library|System|Applications|opt|usr|mnt|root|etc|srv|run|media|snap)\/)[^'"\n\])]*/g,'$1<file>')
+  .replace(/\s+/g,' ').trim();
 }

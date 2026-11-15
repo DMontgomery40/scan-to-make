@@ -5,8 +5,8 @@ import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {runTouchup, chooseEngine, printerDesignGuidance, slicingGuidanceUnavailable, slicingGuidanceUnreachable} from '../dist/touchup/touchup.js';
 import {prepareTouchupPass} from '../dist/touchup/inputs.js';
-import {BlenderNotInstalledError} from '../dist/touchup/blender.js';
-import {CaptureConversionError} from '../dist/capture-converter.js';
+import {BlenderNotInstalledError, BlenderBridgeUnavailableError} from '../dist/touchup/blender.js';
+import {CaptureConversionError, publicConversionReason} from '../dist/capture-converter.js';
 import {systemRules, RULE_SECTIONS, TOUCHUP_RESULT_SCHEMA, buildTouchupInvocation} from '../dist/touchup/invocation.js';
 import {runTouchupWorker} from '../dist/touchup/runner.js';
 import {passEstimate, PassTimings, STAGE_DEFAULT_SEC} from '../dist/touchup/stages.js';
@@ -615,12 +615,52 @@ test('a Fusion that is running but doesn\'t answer is not responding: Blender if
   const stl = join(root, 'scan.stl');
   await writeFile(stl, 'solid x\nendsolid x\n');
   const started = Date.now(), log = [];
+  const asked = bridge({fusion_mcp_status: text(live)});
   const result = runTouchup({root, objectId: 'obj', scan: [stl], photos: [], handoff, claudePath: '/c', instructions: 'A holder', kind: 'fit'}, {
-    lockPath: join(root, 'blender.lock'), fusionLockPath: join(root, 'fusion.lock'), codeLockPath: join(root, 'code.lock'),
-    client: bridge({fusion_mcp_status: text(live)}).client,
+    lockPath: join(root, 'blender.lock'), fusionLockPath: join(root, 'fusion.lock'), codeLockPath: join(root, 'code.lock'), fusionRecheckMs: 0,
+    client: asked.client,
     ensureBlender: async () => { log.push('ensureBlender'); throw new BlenderNotInstalledError(); },
     run: async () => { log.push('run'); throw new Error('no worker runs'); }});
   await assert.rejects(result, {message: "Fusion isn't responding on your Mac. Restart Fusion, then Try Again."});
+  assert.equal(asked.calls.filter(call => call.name === 'fusion_mcp_status').length, 2, 'looked at once more before saying it (review of #853, P2-1)');
+
+  // Still starting the first time (a sign-in dialog), connected the second: the pass runs on Fusion, not "Restart Fusion".
+  let looks = 0;
+  const waking = bridge({fusion_mcp_status: () => text(++looks === 1 ? live : {configured: true, connected: true, fusionRunning: true})});
+  const woke = await runTouchup({root, objectId: 'obj2', scan: [stl], photos: [], handoff, claudePath: '/c', instructions: 'A holder', kind: 'fit'}, {
+    lockPath: join(root, 'blender.lock'), fusionLockPath: join(root, 'fusion.lock'), codeLockPath: join(root, 'code.lock'), fusionRecheckMs: 0,
+    client: waking.client, guidance: async () => ({design: 'D', slicing: 'S'}),
+    ensureBlender: async () => { throw new BlenderNotInstalledError(); },
+    run: async (inv, pass) => { assert.equal(inv.engine, 'fusion'); return {status: 'done', model: join(pass.outDir, 'touched.stl'), renders: [], checkpoints: [], stats: {seconds: 1, toolCalls: 1}}; }});
+  assert.equal(woke.engine, 'fusion');
+  assert.equal(woke.documentId, 'owned-token');
   assert.equal(log.includes('run'), false);
   assert.ok(Date.now() - started < 5000, 'fast');
+});
+
+test('the cause stays first whatever stops Blender, and never names a file on this computer (review of #853, P2-2, P2-4)', async () => {
+  const root = await tempDir('touchup-unreadable-bridge-');
+  const usdz = join(root, 'scan.usdz');
+  await writeFile(usdz, 'usdz');
+  const ready = bridge({cad_status: cadStatus(true)}, [...CAD_TOOLS, ...LEGACY_TOOLS]);
+  const where = '/Users/david/Library/Application Support/Scan to Make/capture/objects/b8/scan/scan.usdz';
+  const activity = [];
+  for (const blender of [
+    {resetScene: async () => { throw new BlenderBridgeUnavailableError(); }},
+    {ensureBlender: async () => { throw new Error('Blender quit while starting'); }},
+  ]) {
+    const failure = await runTouchup({root, objectId: 'obj', scan: [usdz], photos: [], handoff, claudePath: '/c', instructions: 'A replica', kind: 'copy',
+      onProgress: progress => activity.push(...(progress.activity ?? []).map(entry => entry.text))}, {
+      lockPath: join(root, 'blender.lock'), fusionLockPath: join(root, 'fusion.lock'), codeLockPath: join(root, 'code.lock'), client: ready.client,
+      convertCapture: async () => { throw new CaptureConversionError('Capture conversion failed or was unqualified', `could not open USD stage: ${where}`, 'failed'); },
+      ensureBlender: async () => {}, resetScene: async () => {}, ...blender,
+      run: async () => { throw new Error('no worker runs'); }}).then(() => undefined, error => error);
+    assert.match(failure.message, /^The code design engine couldn't read this scan \(it couldn't be converted: could not open USD stage: <file>\)/);
+    assert.doesNotMatch(failure.message, /Users|david|Application Support|blender|Blender/i);
+  }
+  assert.ok(activity.length >= 2 && activity.every(line => !/\/Users|~\//.test(line)), 'nor does the activity');
+  // A USD prim path says where in the scan, so it stays; every kind of file path goes.
+  assert.equal(publicConversionReason('/Root/Mesh: invalid topology'), '/Root/Mesh: invalid topology');
+  assert.equal(publicConversionReason("unresolved dependencies: ['/private/var/folders/x/y.png', '~/scan.usdz']"), "unresolved dependencies: ['<file>', '<file>']");
+  assert.equal(publicConversionReason('dependency outside source: /home/tester/scans/a.usdz'), 'dependency outside source: <file>');
 });

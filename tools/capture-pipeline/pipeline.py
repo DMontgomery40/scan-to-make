@@ -47,16 +47,19 @@ def _normalize(text, roots):
 
 
 def check_input(data, name, max_bytes, max_entries, max_uncompressed):
+    """`data`: the input's bytes, or its path, so a big local scan is checked from disk, never copied into memory (#852)."""
+    from_path = isinstance(data, (str, Path))
+    size = Path(data).stat().st_size if from_path else len(data)
     suffix = Path(name).suffix.lower()
     if suffix not in ALLOWED_SUFFIXES:
         raise Rejected("rejected-input", f"unsupported input suffix {suffix!r}")
-    if len(data) > max_bytes:
-        raise Rejected("rejected-input", f"input is {len(data)} bytes, limit {max_bytes}")
+    if size > max_bytes:
+        raise Rejected("rejected-input", f"input is {size} bytes, limit {max_bytes}")
     info = {"suffix": suffix}
     if suffix == ".usdz":
         import io
         try:
-            z = zipfile.ZipFile(io.BytesIO(data))
+            z = zipfile.ZipFile(data if from_path else io.BytesIO(data))
         except zipfile.BadZipFile as e:
             raise Rejected("rejected-input", f"not a zip package: {e}") from None
         entries = z.infolist()

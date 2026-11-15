@@ -3829,7 +3829,12 @@ export class ObjectService {
     const info = await stat(path).catch(() => undefined);
     if (!info) return undefined;
     const key = `${path}#${info.mtimeMs}#${info.size}`;
-    if (!this.#scanBoxes.has(key)) this.#scanBoxes.set(key, await (this.#deps.scanBounds ?? defaultScanBounds)(path).catch(() => undefined));
+    // A box that couldn't be read isn't remembered: the next check tries again (review of #853, P3-3).
+    if (!this.#scanBoxes.has(key)) {
+      const box = await (this.#deps.scanBounds ?? defaultScanBounds)(path).catch(() => undefined);
+      if (box) this.#scanBoxes.set(key, box);
+      return box;
+    }
     return this.#scanBoxes.get(key);
   }
 

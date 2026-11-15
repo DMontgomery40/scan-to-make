@@ -79,7 +79,7 @@ test('a fit pass with a scan is told where the object sits and how to say it; a 
 });
 
 /** A scripted worker that answers with the outcome given, writing a model unless told not to. */
-async function setup(t, outcomes, {scanBox = BOTTLE} = {}) {
+async function setup(t, outcomes, {scanBox = BOTTLE, scanBounds} = {}) {
   const root = await tempDir('objects-seats-');
   t.after(() => rm(root, {recursive: true, force: true, maxRetries: 10, retryDelay: 20}));
   const store = new ObjectStore(join(root, 'objects')), inputs = [];
@@ -98,7 +98,7 @@ async function setup(t, outcomes, {scanBox = BOTTLE} = {}) {
   const timings = new PassTimings(join(root, 'timings.json')), recorded = [];
   const passTimings = {typical: (...args) => timings.typical(...args), record: async (...args) => { recorded.push(args); }};
   const service = new ObjectService({store, runTouchup, stlInfo: async () => [213, 43, 82], claudePath: '/unused', handoff: {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true'}},
-    events: {emit: async () => {}}, passTimings, scanBounds: async () => scanBox});
+    events: {emit: async () => {}}, passTimings, scanBounds: scanBounds ?? (async () => scanBox)});
   t.after(() => service.close());
   const object = await service.create('A wall holder for three of these', 'fit');
   await store.addFile(object.id, 'scan', 'scan.usdz', Buffer.from('usdz'));
@@ -263,4 +263,15 @@ test('locate is refused for a part that already has its seats', async t => {
   await f.service.start(f.object.id);
   await f.service.settled(f.object.id);
   await assert.rejects(f.service.locate(f.object.id), /already knows where the object sits/);
+});
+
+test('a scan box that couldn\'t be read is tried again by the next pass, never remembered as missing (review of #853, P3-3)', async t => {
+  let calls = 0;
+  const f = await setup(t, [{result: {summary: 'Three pockets.', seats: SEATS}}, {result: {summary: 'Taller.', seats: SEATS}}],
+    {scanBounds: async () => { calls++; if (calls === 1) throw new Error('converter busy'); return BOTTLE; }});
+  await f.service.start(f.object.id);
+  await f.service.settled(f.object.id);
+  await f.service.correct(f.object.id, 'Make it 1 mm taller');
+  await f.service.settled(f.object.id);
+  assert.equal(calls, 2, 'the first failure is not cached');
 });
