@@ -992,10 +992,14 @@ final class CompanionClientTests: XCTestCase {
             seen.method = request.httpMethod ?? ""; seen.path = request.url!.path; seen.body = request.httpBody
             return json(200, ["object": ["id": id, "createdAtMs": 1, "updatedAtMs": 1, "state": "new", "photos": [], "passes": []]])
         }
-        _ = try await try client(fake).forgetCapture(id)
+        let run = "0c7d2e9b-3f10-4b5e-8a47-2d9e1b6c5a02"
+        _ = try await try client(fake).forgetCapture(id, run: run, images: ["0001.heic", "0002.heic"])
         XCTAssertEqual(seen.method, "DELETE")
         XCTAssertEqual(seen.path, "/v1/objects/\(id)/capture-manifest")
-        XCTAssertNil(seen.body)
+        // The run and its list name the scan, so the Mac never takes off another phone's (review of #819).
+        let body = try XCTUnwrap(JSONSerialization.jsonObject(with: try XCTUnwrap(seen.body)) as? [String: Any])
+        XCTAssertEqual(body["run"] as? String, run)
+        XCTAssertEqual(body["images"] as? [String], ["0001.heic", "0002.heic"])
     }
 
     /// Apple's Object Capture names become the Mac's capture frame names, NNNN in capture order; anything else stops the send.

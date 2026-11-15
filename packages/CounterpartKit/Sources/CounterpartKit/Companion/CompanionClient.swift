@@ -318,8 +318,9 @@ public final class CompanionClient: @unchecked Sendable {
     }
     /// Takes a walk-around off before its touch-up starts: the Mac drops the declared list and every frame of it that
     /// came. Sent by Remove on a stopped scan, and before a different run is declared (runs share frame names).
-    public func forgetCapture(_ id: String) async throws -> Project {
-        try await request("DELETE", "/v1/objects/\(id)/capture-manifest", as: One.self).object
+    /// Names the run and its list, so it never takes off another phone's scan (409) or capture data nobody declared.
+    public func forgetCapture(_ id: String, run: String, images: [String]) async throws -> Project {
+        try await request("DELETE", "/v1/objects/\(id)/capture-manifest", json: ["run": run, "images": images], as: One.self).object
     }
     /// Ask for changes: a new pass with your text. Upload new photos first.
     /// `messageId` is this note's own id (`NoteAttempts`, `CorrectionQueue.Message.id`): the Mac records it once.
