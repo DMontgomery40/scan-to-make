@@ -31,6 +31,23 @@ data class ProjectGallery(val entries: List<Entry>) {
     ) {
         /** "Part · 213 × 43 × 82 mm" when the size is known. */
         fun sizeText(measured: List<Double>? = null): String? = sizeWords(measured ?: sizeMm)?.let { "$measures · $it" }
+
+        /**
+         * What the stage's AR opens for this entry, as a project path (CounterpartKit `ProjectGallery.Entry.ar`, #840): the
+         * one rule every client derives from the project's own state. A part that turns in 3D offers the STL its stage turns,
+         * a scan its own USDZ; Together, a plate, a part shown as a picture and a handheld STL scan offer none. Android shows
+         * no AR control (PRD §6.1); the value is the same as on the iPhone, from the shared cases.
+         */
+        val ar: String?
+            get() {
+                val path = (drawing as? Drawing.Model)?.path ?: return null
+                val lower = path.lowercase(Locale.ROOT)
+                return when (kind) {
+                    Kind.Part -> path.takeIf { lower.endsWith(".stl") }
+                    Kind.Scan -> path.takeIf { lower.endsWith(".usdz") }
+                    else -> null
+                }
+            }
     }
 
     val first: Entry? get() = entries.firstOrNull()
@@ -82,7 +99,8 @@ data class ProjectGallery(val entries: List<Entry>) {
          */
         fun partMesh(project: Project): String? {
             val model = project.current?.model ?: return null
-            if (!model.lowercase(Locale.ROOT).endsWith(".3mf")) return if (model.startsWith("versions/")) model else "model.stl"
+            // Neither an STL nor a 3MF (#840): `model.stl` would serve bytes no stage can turn, so its picture stands for it.
+            if (!model.lowercase(Locale.ROOT).endsWith(".3mf")) return if (!model.lowercase(Locale.ROOT).endsWith(".stl")) null else if (model.startsWith("versions/")) model else "model.stl"
             if (project.kind == "published" || !(model.startsWith("current/") || model.startsWith("versions/"))) return null
             return versionMesh(model).takeIf { it == project.current?.mergedMesh }
         }

@@ -123,11 +123,15 @@ extension Project {
     /// - for a multi-part design, the merged mesh beside its 3MF (`current/model.stl`, `versions/<id>/model.stl`), only
     ///   when the Mac lists it (`Result.mergedMesh`, there only while the file is: review of #770).
     /// Nil for a designer's published 3MF, and for a 3MF whose merged mesh isn't listed (none was written, or an older Mac
-    /// that doesn't say): the stage shows its picture, as before #769, never a 3D model that can't come.
+    /// that doesn't say): the stage shows its picture, as before #769, never a 3D model that can't come. Nil too for a
+    /// result that is neither an STL nor a 3MF (#840): `model.stl` would serve its bytes, which no stage can turn.
     /// `model.stl` stays the route for the file that prints (the 3MF itself for a multi-part design): Share and Print use it.
     public var partMesh: String? {
         guard let model = current?.model else { return nil }
-        guard preservesPublishedFilaments else { return model.hasPrefix("versions/") ? model : "model.stl" }
+        guard preservesPublishedFilaments else {
+            guard model.lowercased().hasSuffix(".stl") else { return nil }
+            return model.hasPrefix("versions/") ? model : "model.stl"
+        }
         guard kind != "published", model.hasPrefix("current/") || model.hasPrefix("versions/"),
               let mesh = current?.mergedMesh, mesh == Self.versionMesh(model) else { return nil }
         return mesh
@@ -267,13 +271,26 @@ extension Project {
 }
 
 extension ProjectGallery.Entry {
-    /// The STL the part's AR file is written from (#769): the mesh its stage turns, whatever the design's file is called (an
-    /// earlier design's `versions/<id>/touched.stl`, a multi-part design's merged mesh). None for a picture, a plate or
-    /// Together; a scan's AR is its own USDZ, decided by the stage.
-    public var arMesh: String? {
-        guard kind == .part, case .model(let path) = drawing else { return nil }
-        return path
+    /// What the stage's AR opens for this entry, as a project path: the one rule for whether AR is offered and what it
+    /// shows, from the project's own state, read by every client and layout (#840, David, Nov 15: "how we manage state and
+    /// attach properties to projects so wildly inconsistently"; the shared cases carry it as each entry's `ar`).
+    /// - A part that turns in 3D: the STL its stage turns (`Project.partMesh`): a one-colour design's `model.stl`, an
+    ///   earlier design's own file, a multi-part design's merged mesh. The phone writes it as a USDZ on tap (`PartUSDZ`).
+    /// - A scan: its own USDZ (Object Capture's). A handheld STL scan is in another frame and has none.
+    /// - None for Together, a plate, or a part shown as a picture (a designer's published 3MF, a 3MF whose merged mesh
+    ///   isn't listed): no mesh comes with it, so there is nothing to place in the room.
+    /// Mac, Android and Linux show no AR control (PRD §6.1) but derive the same value from the same cases.
+    public var ar: String? {
+        guard case .model(let path) = drawing else { return nil }
+        switch kind {
+        case .part: return path.lowercased().hasSuffix(".stl") ? path : nil
+        case .scan: return path.lowercased().hasSuffix(".usdz") ? path : nil
+        case .together, .plate: return nil
+        }
     }
+
+    /// The STL the part's AR file is written from (#769): `ar` for a part. None for a picture, a plate, Together or a scan.
+    public var arMesh: String? { kind == .part ? ar : nil }
 
     /// The size chip: what it measures and its size ("Part · 213 × 43 × 82 mm"), when the size is known.
     public func sizeText(_ measured: [Double]? = nil) -> String? {

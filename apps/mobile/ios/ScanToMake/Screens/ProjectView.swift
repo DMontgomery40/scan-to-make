@@ -514,7 +514,7 @@ struct ProjectView: View {
     private func demandModel(_ object: Project) {
         store.models.setActive(scenePhase == .active)
         if object.current != nil, scenePhase == .active { store.models.want(object, "model.stl") }
-        let context = store.models.traceContext(object, "model.stl") ?? MediaTrace.Context(project: object.id, version: String(Int64(object.mediaVersion)))
+        let context = store.models.traceContext(object, "model.stl") ?? MediaTrace.Context(project: object.id, version: object.mediaVersionTag)
         MediaTrace.record("page.model-begin", ["key": object.current?.model ?? "none", "scene": String(describing: scenePhase), "page": instance], context: context)
         MediaTrace.record(Task.isCancelled ? "page.model-cancelled" : "page.model-demanded", ["scene": String(describing: scenePhase)], context: context)
     }
@@ -525,7 +525,7 @@ struct ProjectView: View {
         let url = modelURL(object)
         guard modelTrace.claim("\(url?.path ?? "")#\(object.spoolColour ?? "")") else { return }
         MediaTrace.record("page.model-published", ["file": String(url != nil), "scene": String(describing: scenePhase), "page": instance],
-                          context: store.models.traceContext(object, "model.stl") ?? MediaTrace.Context(project: object.id, version: String(Int64(object.mediaVersion))))
+                          context: store.models.traceContext(object, "model.stl") ?? MediaTrace.Context(project: object.id, version: object.mediaVersionTag))
     }
 
     // MARK: Answering a card

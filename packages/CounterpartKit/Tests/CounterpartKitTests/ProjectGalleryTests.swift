@@ -37,6 +37,9 @@ final class ProjectGalleryTests: XCTestCase {
                     }
                     XCTAssertEqual(got, still, "\(name): \(entry.id)'s stage")
                 }
+                // #840: what the stage's AR opens, the one rule every client derives (null: none).
+                XCTAssertTrue(want.keys.contains("ar"), "\(name): \(entry.id) says what its AR opens")
+                XCTAssertEqual(entry.ar, want["ar"] as? String, "\(name): \(entry.id)'s AR")
                 let drawing = want["drawing"] as! [String: Any]
                 switch entry.drawing {
                 case .model(let path): XCTAssertEqual(drawing["model"] as? String, path, name)
@@ -49,6 +52,70 @@ final class ProjectGalleryTests: XCTestCase {
                 }
             }
         }
+    }
+
+    /// #840: the AR rule as a table. Each row is a project as the companion keeps it, and what its first entry's AR opens.
+    func testWhetherARIsOfferedAndWhatItOpensIsOneRule() {
+        let rows: [(String, [String: Any], String?)] = [
+            ("Mic mount: a one-colour STL design", ["state": "confirmed", "current": ["model": "current/model.stl", "renders": []]], "model.stl"),
+            ("Pink snap-lid box: a pass's 3MF with its merged mesh listed",
+             ["state": "confirmed", "kind": "fit", "current": ["model": "current/model.3mf", "renders": [], "mergedMesh": "current/model.stl"]], "current/model.stl"),
+            ("the same 3MF when the Mac lists no merged mesh", ["state": "confirmed", "kind": "fit", "current": ["model": "current/model.3mf", "renders": ["current/renders/1.png"]]], nil),
+            ("a merged mesh listed beside another file", ["state": "confirmed", "kind": "fit", "current": ["model": "current/model.3mf", "renders": [], "mergedMesh": "elsewhere/model.stl"]], nil),
+            ("Bike-oil bottle holder: a designer's published 3MF plate",
+             ["state": "confirmed", "kind": "published", "current": ["model": "original/6c1f-first-plate.3mf", "renders": []]], nil),
+            ("a designer's published 3MF that claims a merged mesh", ["state": "confirmed", "kind": "published", "current": ["model": "current/model.3mf", "renders": [], "mergedMesh": "current/model.stl"]], nil),
+            ("bag clip: a designer's published STL", ["state": "confirmed", "kind": "published", "current": ["model": "original/111c-BAG CLIP.stl", "renders": []]], "model.stl"),
+            ("an earlier design sealed as touched.stl", ["state": "confirmed", "current": ["model": "versions/31cc/touched.stl", "renders": []]], "versions/31cc/touched.stl"),
+            ("a result in another format", ["state": "ready", "current": ["model": "current/model.obj", "renders": []]], nil),
+            ("a scan alone, Object Capture's USDZ", ["state": "ready", "kind": "fit", "scan": "scan.usdz"], "scan/scan.usdz"),
+            ("a scan alone, a handheld STL", ["state": "ready", "kind": "fit", "scan": "scan.stl"], nil),
+            ("no result and no scan", ["state": "new"], nil),
+        ]
+        for (name, json, want) in rows {
+            XCTAssertEqual(ProjectGallery(project: project(json)).first?.ar, want, name)
+        }
+    }
+
+    /// #840, the sweep: every combination of missing, extra and odd model, merged mesh, scan, print and plates. The gallery
+    /// never stops the app, and the rule holds for each entry: a part offers only an STL it turns, a scan only its own USDZ,
+    /// Together and a plate nothing.
+    func testEveryCombinationOfProjectMediaDerivesWithoutCrashingAndKeepsTheRule() {
+        let models: [String?] = [nil, "current/model.stl", "current/model.3mf", "versions/a/touched.stl", "versions/a/touched.3mf",
+                                 "original/x.3mf", "original/x.stl", "current/model.obj", "", "model.STL", "current/"]
+        let merged: [String?] = [nil, "current/model.stl", "versions/a/model.stl", "", "../model.stl"]
+        let scans: [String?] = [nil, "scan.usdz", "scan.stl", "scan.usdc", "scan.3mf", "", "SCAN.USDZ"]
+        let kinds: [String?] = [nil, "fit", "copy", "published", "describe"]
+        let prints: [[String: Any]?] = [nil, ["bundleId": "b"], ["bundleId": "b", "spools": [["colour": "#F5547C", "material": "PLA", "name": "Pink"]]],
+                                       ["bundleId": "b", "spools": [["colour": "#F5547C"], ["colour": "#000000"]]]]
+        let plates: [[[String: Any]]?] = [nil, [], [["id": "p:0", "name": "", "thumbnail": "renders/p0.png"], ["id": "p:1", "name": "Lid"]]]
+        var checked = 0
+        for model in models { for mesh in merged { for scan in scans { for kind in kinds { for print in prints { for plate in plates {
+            var json: [String: Any] = ["state": model == nil ? "new" : "confirmed"]
+            if let model {
+                var current: [String: Any] = ["model": model, "renders": [], "seats": [["name": "s", "rotationDeg": [0, 0, 0], "translationMm": [0, 0, 0]]]]
+                if let mesh { current["mergedMesh"] = mesh }
+                json["current"] = current
+            }
+            if let scan { json["scan"] = scan }
+            if let kind { json["kind"] = kind }
+            if let print { json["print"] = print }
+            if let plate { json["plates"] = plate }
+            let p = project(json)
+            for onDevice in [false, true] {
+                for entry in ProjectGallery(project: p, scanOnThisDevice: onDevice).entries {
+                    switch entry.kind {
+                    case .part: if let ar = entry.ar { XCTAssertTrue(ar.lowercased().hasSuffix(".stl"), "\(json): \(ar)"); XCTAssertEqual(entry.drawing, .model(ar)) }
+                    case .scan: if let ar = entry.ar { XCTAssertTrue(ar.lowercased().hasSuffix(".usdz"), "\(json): \(ar)") }
+                    case .together, .plate: XCTAssertNil(entry.ar, "\(json)")
+                    }
+                    XCTAssertEqual(entry.arMesh, entry.kind == .part ? entry.ar : nil)
+                }
+            }
+            _ = p.arTint; _ = p.partMesh; _ = p.mediaVersion
+            checked += 1
+        } } } } } }
+        XCTAssertEqual(checked, models.count * merged.count * scans.count * kinds.count * prints.count * plates.count)
     }
 
     func testOneEntryShowsAloneAndTheResultShowsFirst() {

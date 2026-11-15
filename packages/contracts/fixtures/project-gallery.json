@@ -1,5 +1,5 @@
 {
- "about": "ProjectGallery (PRD §5.4 Pictures): the pictures at the top of a project page, derived from its data. CounterpartKit ProjectGallery.swift, Android ProjectGallery.kt and Linux gallery.ts each read every case. drawing.assembly.seats is the seat count; colour is neutral, own, or the spool's #RRGGBB. photoPicture, when present, is the page's picture while the gallery is empty (photos sent, no model yet): the subject the computer cut out of the first photo. canLocate, when present, is whether See it together is offered (a fit with a USDZ scan, a result and no seats). still, when present on an entry, is what the stage shows while no model is drawn (docs/operations.md, \"Waiting, failed and empty are screens too\"): the entry's own picture (a project path), \"waiting\" (none yet and one is coming: the computer is drawing it or will), or \"not available\" (none is coming: pictureStates says its drawing failed, or a designer's plate came without its picture). A picture of something else never stands in.",
+ "about": "ProjectGallery (PRD §5.4 Pictures): the pictures at the top of a project page, derived from its data. CounterpartKit ProjectGallery.swift, Android ProjectGallery.kt and Linux gallery.ts each read every case. drawing.assembly.seats is the seat count; colour is neutral, own, or the spool's #RRGGBB. photoPicture, when present, is the page's picture while the gallery is empty (photos sent, no model yet): the subject the computer cut out of the first photo. canLocate, when present, is whether See it together is offered (a fit with a USDZ scan, a result and no seats). still, when present on an entry, is what the stage shows while no model is drawn (docs/operations.md, \"Waiting, failed and empty are screens too\"): the entry's own picture (a project path), \"waiting\" (none yet and one is coming: the computer is drawing it or will), or \"not available\" (none is coming: pictureStates says its drawing failed, or a designer's plate came without its picture). A picture of something else never stands in. ar is what the stage's AR opens for the entry, as a project path, or null for none (#840, the one rule on every client: a part that turns in 3D offers the STL its stage turns, a scan its own USDZ; Together, a plate, a part shown as a picture and a handheld STL scan offer none). Only iPhone and iPad show an AR control (PRD §6.1); every client derives the same value.",
  "stage": {
   "about": "The stage is the dark stage (#22242B) for every colour, on every layout (David, Nov 11: no entering light mode). drawnColours is the colour the stage's material draws a spool in: its hue at a minimum brightness of 0.20 (the Mac's still pictures' floor), so a black part is charcoal, never a silhouette; neutral draws the stage's neutral material and own keeps the model's own colours. The spool's real colour (colour, above) is unchanged for swatches and names.",
   "drawnColours": {
@@ -106,7 +106,8 @@
       213,
       43,
       82
-     ]
+     ],
+     "ar": "model.stl"
     },
     {
      "id": "together",
@@ -120,7 +121,8 @@
       }
      },
      "colour": "#000000",
-     "measures": "Together"
+     "measures": "Together",
+     "ar": null
     },
     {
      "id": "scan-0",
@@ -134,7 +136,8 @@
      "photos": [
       "capture/0001.heic",
       "capture/0002.heic"
-     ]
+     ],
+     "ar": "scan/scan.usdz"
     }
    ]
   },
@@ -179,7 +182,8 @@
       213,
       43,
       82
-     ]
+     ],
+     "ar": "model.stl"
     },
     {
      "id": "scan-0",
@@ -193,7 +197,8 @@
      "photos": [
       "capture/0001.heic",
       "capture/0002.heic"
-     ]
+     ],
+     "ar": "scan/scan.usdz"
     }
    ],
    "canLocate": true
@@ -227,7 +232,8 @@
      "photos": [
       "capture/0001.heic",
       "capture/0002.heic"
-     ]
+     ],
+     "ar": "scan/scan.usdz"
     }
    ]
   },
@@ -276,7 +282,8 @@
       20,
       30,
       5
-     ]
+     ],
+     "ar": "model.stl"
     }
    ]
   },
@@ -315,7 +322,8 @@
      "measures": "Scan",
      "photos": [
       "photos/front.jpg"
-     ]
+     ],
+     "ar": "scan/scan.usdz"
     },
     {
      "id": "result",
@@ -330,7 +338,8 @@
       65,
       28,
       145
-     ]
+     ],
+     "ar": "model.stl"
     }
    ]
   },
@@ -395,7 +404,8 @@
       157.4,
       48.4
      ],
-     "still": "renders/1_overview.png"
+     "still": "renders/1_overview.png",
+     "ar": "current/model.stl"
     }
    ]
   },
@@ -493,7 +503,8 @@
      },
      "colour": "own",
      "measures": "Plate",
-     "still": "renders/x-0.png"
+     "still": "renders/x-0.png",
+     "ar": null
     },
     {
      "id": "plate-x:1",
@@ -504,7 +515,8 @@
      },
      "colour": "own",
      "measures": "Plate",
-     "still": "renders/x-1.png"
+     "still": "renders/x-1.png",
+     "ar": null
     },
     {
      "id": "plate-x:2",
@@ -515,7 +527,8 @@
      },
      "colour": "own",
      "measures": "Plate",
-     "still": "renders/x-2.png"
+     "still": "renders/x-2.png",
+     "ar": null
     },
     {
      "id": "plate-x:3",
@@ -526,7 +539,8 @@
      },
      "colour": "own",
      "measures": "Plate",
-     "still": "not available"
+     "still": "not available",
+     "ar": null
     },
     {
      "id": "plate-x:4",
@@ -537,7 +551,8 @@
      },
      "colour": "own",
      "measures": "Plate",
-     "still": "renders/x-4.png"
+     "still": "renders/x-4.png",
+     "ar": null
     },
     {
      "id": "plate-x:5",
@@ -548,7 +563,8 @@
      },
      "colour": "own",
      "measures": "Plate",
-     "still": "renders/x-5.png"
+     "still": "renders/x-5.png",
+     "ar": null
     }
    ]
   },
@@ -588,7 +604,8 @@
       10,
       20,
       30
-     ]
+     ],
+     "ar": "model.stl"
     }
    ]
   },
@@ -621,7 +638,8 @@
      },
      "colour": "neutral",
      "measures": "Part",
-     "still": "renders/1_overview.png"
+     "still": "renders/1_overview.png",
+     "ar": "current/model.stl"
     }
    ]
   },
@@ -670,7 +688,8 @@
       65,
       28,
       145
-     ]
+     ],
+     "ar": "model.stl"
     },
     {
      "id": "scan-0",
@@ -683,7 +702,8 @@
      "measures": "Scan",
      "photos": [
       "photos/front.jpg"
-     ]
+     ],
+     "ar": "scan/scan.usdz"
     }
    ]
   },
@@ -779,7 +799,8 @@
       213,
       43,
       82
-     ]
+     ],
+     "ar": "model.stl"
     },
     {
      "id": "scan-0",
@@ -793,7 +814,8 @@
      "photos": [
       "capture/0001.heic",
       "capture/0002.heic"
-     ]
+     ],
+     "ar": null
     }
    ],
    "canLocate": false
@@ -856,7 +878,8 @@
       213,
       43,
       82
-     ]
+     ],
+     "ar": "model.stl"
     },
     {
      "id": "scan-0",
@@ -866,7 +889,8 @@
       "model": "scan/scan.stl"
      },
      "colour": "own",
-     "measures": "Scan"
+     "measures": "Scan",
+     "ar": null
     }
    ],
    "canLocate": false
@@ -936,7 +960,8 @@
       157.4,
       48.4
      ],
-     "still": "pictures/part-0123456789abcdef.png"
+     "still": "pictures/part-0123456789abcdef.png",
+     "ar": "current/model.stl"
     }
    ]
   },
@@ -981,7 +1006,8 @@
      },
      "colour": "own",
      "measures": "Part",
-     "still": "pictures/part-89abcdef01234567.png"
+     "still": "pictures/part-89abcdef01234567.png",
+     "ar": null
     }
    ]
   },
@@ -1022,7 +1048,8 @@
      },
      "colour": "own",
      "measures": "Part",
-     "still": "waiting"
+     "still": "waiting",
+     "ar": null
     }
    ]
   },
@@ -1066,7 +1093,8 @@
      },
      "colour": "own",
      "measures": "Part",
-     "still": "waiting"
+     "still": "waiting",
+     "ar": null
     }
    ]
   },
@@ -1110,7 +1138,8 @@
      },
      "colour": "own",
      "measures": "Part",
-     "still": "not available"
+     "still": "not available",
+     "ar": null
     }
    ]
   },
@@ -1156,7 +1185,8 @@
      },
      "colour": "own",
      "measures": "Part",
-     "still": "renders/1_overview.png"
+     "still": "renders/1_overview.png",
+     "ar": null
     }
    ]
   },
@@ -1205,7 +1235,8 @@
       26,
       1.2
      ],
-     "still": "waiting"
+     "still": "waiting",
+     "ar": "versions/31ccd811-bb96-8763-b4da-d9806f1a90ab/touched.stl"
     }
    ]
   },
@@ -1252,7 +1283,8 @@
      },
      "colour": "neutral",
      "measures": "Part",
-     "still": "versions/64cb716c-5fea-89b0-a10b-d163ebfca3bc/pictures/part.png"
+     "still": "versions/64cb716c-5fea-89b0-a10b-d163ebfca3bc/pictures/part.png",
+     "ar": "versions/64cb716c-5fea-89b0-a10b-d163ebfca3bc/model.stl"
     }
    ]
   },
@@ -1283,7 +1315,8 @@
      },
      "colour": "own",
      "measures": "Part",
-     "still": "renders/1_overview.png"
+     "still": "renders/1_overview.png",
+     "ar": null
     }
    ]
   },
@@ -1329,7 +1362,8 @@
      },
      "colour": "own",
      "measures": "Part",
-     "still": "versions/64cb716c-5fea-89b0-a10b-d163ebfca3bc/pictures/part.png"
+     "still": "versions/64cb716c-5fea-89b0-a10b-d163ebfca3bc/pictures/part.png",
+     "ar": null
     }
    ]
   },
@@ -1393,7 +1427,130 @@
       157.4,
       48.4
      ],
-     "still": "renders/1_overview.png"
+     "still": "renders/1_overview.png",
+     "ar": null
+    }
+   ]
+  },
+  {
+   "name": "a printed one-colour design (David's Mic mount, #840): it turns from model.stl and offers AR from it",
+   "project": {
+    "createdAtMs": 1,
+    "updatedAtMs": 2,
+    "photos": [],
+    "passes": [],
+    "id": "7f157a66-0000-4000-8000-000000000001",
+    "state": "confirmed",
+    "current": {
+     "model": "current/model.stl",
+     "renders": [
+      "current/renders/1_overview.png"
+     ],
+     "sizeMm": [
+      51.9,
+      50,
+      54.4
+     ]
+    },
+    "print": {
+     "bundleId": "b"
+    }
+   },
+   "entries": [
+    {
+     "id": "result",
+     "kind": "part",
+     "label": "Your part",
+     "drawing": {
+      "model": "model.stl"
+     },
+     "colour": "neutral",
+     "measures": "Part",
+     "sizeMm": [
+      51.9,
+      50,
+      54.4
+     ],
+     "ar": "model.stl"
+    }
+   ]
+  },
+  {
+   "name": "a designer's published STL (David's bag clip, #840): it turns from model.stl and offers AR, as any one-colour part",
+   "project": {
+    "createdAtMs": 1,
+    "updatedAtMs": 2,
+    "photos": [],
+    "passes": [],
+    "id": "e852090e-0000-4000-8000-000000000002",
+    "state": "confirmed",
+    "kind": "published",
+    "current": {
+     "model": "original/111c692d-BAG CLIP.stl",
+     "renders": [],
+     "sizeMm": [
+      80,
+      20,
+      12
+     ]
+    }
+   },
+   "entries": [
+    {
+     "id": "result",
+     "kind": "part",
+     "label": "Model",
+     "drawing": {
+      "model": "model.stl"
+     },
+     "colour": "neutral",
+     "measures": "Part",
+     "sizeMm": [
+      80,
+      20,
+      12
+     ],
+     "ar": "model.stl"
+    }
+   ]
+  },
+  {
+   "name": "a result in a format no stage turns (#840): its picture, and no AR, never a model.stl that serves other bytes",
+   "project": {
+    "createdAtMs": 1,
+    "updatedAtMs": 2,
+    "photos": [],
+    "passes": [],
+    "id": "00000000-0000-4000-8000-000000000003",
+    "state": "ready",
+    "current": {
+     "model": "current/model.obj",
+     "renders": [
+      "current/renders/1_overview.png"
+     ],
+     "sizeMm": [
+      10,
+      10,
+      10
+     ]
+    }
+   },
+   "entries": [
+    {
+     "id": "result",
+     "kind": "part",
+     "label": "Your part",
+     "drawing": {
+      "picture": "renders/1_overview.png"
+     },
+     "colour": "own",
+     "measures": "Part",
+     "sizeMm": [
+      10,
+      10,
+      10
+     ],
+     "ar": null
     }
    ]
   }

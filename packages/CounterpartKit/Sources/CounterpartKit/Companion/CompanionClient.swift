@@ -649,7 +649,7 @@ public final class CompanionClient: @unchecked Sendable {
 
     /// Downloads one project file into the cache, once per project version, and returns where it is.
     public func download(_ project: Project, _ name: String) async throws -> URL {
-        let context = MediaTrace.context ?? MediaTrace.Context(project: project.id, version: String(Int64(project.mediaVersion)))
+        let context = MediaTrace.context ?? MediaTrace.Context(project: project.id, version: project.mediaVersionTag)
         return try await MediaTrace.$context.withValue(context) { try await downloadFile(project, name) }
     }
 
@@ -662,7 +662,7 @@ public final class CompanionClient: @unchecked Sendable {
     private func downloadFile(_ project: Project, _ name: String) async throws -> URL {
         let allowed = Pattern(#"original/[0-9]+|model\.stl|current/model\.stl|renders/[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.png|asks/[a-f0-9-]{36}\.(jpg|png)|prints/[a-f0-9-]{36}/frames/[a-f0-9-]{36}\.jpg|(?:photos|capture|scan)/[A-Za-z0-9][A-Za-z0-9._ -]{0,127}|pictures/[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.png|versions/[a-f0-9-]{36}/(?:(?:renders|pictures)/)?[A-Za-z0-9][A-Za-z0-9._-]{0,120}"#)
         guard Pattern(Self.uuid).matches(project.id), allowed.matches(name), !name.contains("..") else { throw CompanionError.transport("invalid-request") }
-        let version = String(Int64(project.mediaVersion))
+        let version = project.mediaVersionTag
         let folder = cache.appending(path: project.id, directoryHint: .isDirectory).appending(path: version, directoryHint: .isDirectory)
         var filename = name.replacingOccurrences(of: "/", with: "_")
         var resource = name
@@ -681,7 +681,7 @@ public final class CompanionClient: @unchecked Sendable {
             filename += "_" + URL(fileURLWithPath: path).lastPathComponent
         }
         // The library first: its copy of this version is the file, with no network and no Keychain read.
-        let mediaVersion = Int64(project.mediaVersion)
+        let mediaVersion = project.mediaVersionNumber
         let kept = library.isActive && OnDeviceLibrary.Keep.chosen.keeps(OnDeviceLibrary.Kind.of(name))
         if kept, let hit = library.file(project: project.id, name: name, version: mediaVersion, file: filename) {
             MediaTrace.record("file.hit", ["bytes": String((try? FileManager.default.attributesOfItem(atPath: hit.path)[.size] as? Int) ?? 0), "store": "library"])

@@ -16,7 +16,7 @@ import CounterpartKit
         for project in projects where !running.contains(project.id) {
             guard let path = project.thumbnailPath else { continue }
             // Download again only when the picture itself changed, not on every progress update.
-            let source = "\(path)#\(Int64(project.mediaVersion))"
+            let source = "\(path)#\(project.mediaVersionNumber)"
             if store.entry(for: project.id)?.source == source { continue }
             running.insert(project.id)
             // Optional LAN I/O must not consume a background activity update's runtime. Each project
