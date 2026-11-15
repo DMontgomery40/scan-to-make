@@ -537,7 +537,7 @@ export function createObjectRoutes(service: ObjectService, options: {printerSetu
         if (action === 'capture-manifest' && method === 'DELETE') {
           // A walk-around taken off before its touch-up starts: its list and its frames go (forgetCapture).
           await authorize(WRITE);
-          return send(response, 200, {object: shown(await service.forgetCapture(id))});
+          return send(response, 200, {object: shown(await service.forgetCapture(id, await json<unknown>(request, 256 * 1024)))});
         }
         if (method !== (action === 'scan' ? 'PUT' : 'POST')) throw new HttpFailure(405, 'method-not-allowed');
         await authorize(['print', 'printer', 'print-confirmation'].includes(action) ? PRINT : WRITE);

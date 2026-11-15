@@ -181,7 +181,12 @@ test('a walk-around declares its images before any frame, marks its preview, and
   assert.equal((await call('POST', `${path}/capture?name=0001.heic`, Buffer.from('a'))).status, 200);
   assert.equal((await call('POST', `${path}/capture?name=0003.heic`, Buffer.from('c'))).status, 409, 'not one of the declared images');
   // Remove on the phone, or a different run about to be named: the list and its frames go, then it is named again.
-  const forgotten = await call('DELETE', `${path}/capture-manifest`);
+  const run = '6b1f5a52-6a8f-4d43-9a4e-0f6f6f2a1c01';
+  assert.equal((await call('POST', `${path}/capture-manifest`, {...manifest, run})).status, 200, 'a manifest may name its run');
+  assert.equal((await call('POST', `${path}/capture-manifest`, {...manifest, run: 'RUN'})).status, 400);
+  assert.equal((await call('DELETE', `${path}/capture-manifest`)).status, 400, 'a forget names its run and list');
+  assert.equal((await call('DELETE', `${path}/capture-manifest`, {run: '0c7d2e9b-3f10-4b5e-8a47-2d9e1b6c5a02', images: manifest.images})).status, 409, "another run's forget leaves it");
+  const forgotten = await call('DELETE', `${path}/capture-manifest`, {run, images: manifest.images});
   assert.equal(forgotten.status, 200);
   assert.equal(forgotten.json.object.captureDeclared, undefined);
   assert.deepEqual(forgotten.json.object.capture ?? [], []);
@@ -198,7 +203,7 @@ test('a walk-around declares its images before any frame, marks its preview, and
   assert.equal((await service.settled(id)).state, 'ready');
   assert.equal(builds.length, 1);
   assert.equal(builds[0].objectCapture, true);
-  assert.equal((await call('DELETE', `${path}/capture-manifest`)).status, 409, 'once the touch-up started, the scan stays');
+  assert.equal((await call('DELETE', `${path}/capture-manifest`, {run, images: manifest.images})).status, 409, 'once the touch-up started, the scan stays');
 
   // A computer without Apple's rebuild (Linux) refuses an iPhone walk-around in words.
   const linux = await fixture(t);
@@ -206,6 +211,8 @@ test('a walk-around declares its images before any frame, marks its preview, and
   const refused = await linux.call('POST', `/v1/objects/${other}/capture-manifest`, manifest);
   assert.equal(refused.status, 409);
   assert.equal(refused.json.error.message, 'Scans from iPhone are rebuilt on a Mac. Pair this iPhone with a Mac to use Scan it.');
+  // …and has no walk-around to forget: its capture data is never touched by one (review of #819).
+  assert.equal((await linux.call('DELETE', `/v1/objects/${other}/capture-manifest`, {run, images: manifest.images})).status, 409);
 });
 
 test('start validates the bounded manifest and requires capture import scope', async t => {

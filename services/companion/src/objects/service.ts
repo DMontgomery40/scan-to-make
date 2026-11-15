@@ -217,6 +217,27 @@ function parseCaptureManifest(value: unknown): CaptureManifest {
     ...(source ? {source} : {})};
 }
 
+const RUN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+/** A different scan is waiting for this project: another phone's, or a newer one from this phone. */
+const NOT_THIS_SCAN = 'A different scan is waiting for this project, so this one was left as it is.';
+
+/** The phone's run a walk-around manifest names (`run`, optional: phones before #819 send none). */
+function captureRun(value: unknown): string | undefined {
+  const run = (value as Record<string, unknown>).run;
+  if (run === undefined) return undefined;
+  if (typeof run !== 'string' || !RUN.test(run)) throw new InvalidCaptureManifestError();
+  return run;
+}
+
+/** Which walk-around a forget means: `{run, images}`, the run and its list as the phone declared them. */
+function forgetIdentity(value: unknown): {run: string; images: string[]} {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new InvalidCaptureManifestError();
+  const {run, images} = value as Record<string, unknown>;
+  if (typeof run !== 'string' || !RUN.test(run) || !Array.isArray(images) || images.length > 10000
+      || images.some(name => typeof name !== 'string' || !/^[0-9]{4}\.(heic|jpe?g|png)$/.test(name))) throw new InvalidCaptureManifestError();
+  return {run, images: [...images as string[]].sort()};
+}
+
 function captureDigest(object: StmObject, depthRequired: boolean, cameraMetadataRequired = false, scaleQualificationRequired = false, source?: CaptureSource): string {
   return createHash('sha256').update(JSON.stringify({version: 1, depthRequired,
     // Only present fields bind, so digests of older image-only captures are unchanged.
@@ -1518,7 +1539,8 @@ export class ObjectService {
       if (object.state !== 'new' && object.captureCompletion?.source === 'object-capture'
           && JSON.stringify([...(object.capture ?? [])].sort()) === JSON.stringify(manifest.images)) return object;
       if (object.state !== 'new') throw new InvalidStateError('The scan can only be added before the touch-up starts.');
-      return this.#changed(await this.#deps.store.update(id, o => ({...o, captureDeclared: {source: 'object-capture' as const, images: manifest.images}})));
+      const run = captureRun(value);
+      return this.#changed(await this.#deps.store.update(id, o => ({...o, captureDeclared: {source: 'object-capture' as const, images: manifest.images, ...(run ? {run} : {})}})));
     });
   }
 
@@ -1526,12 +1548,21 @@ export class ObjectService {
    * A walk-around taken off before its touch-up starts: the declared list and every frame of it that came are dropped,
    * so the project designs from its words, or a newer scan arrives clean. The phone skips frames the Mac already has by
    * name, and every run names them alike (0000.heic…), so a newer scan must never meet an older one's frames.
+   * Only the walk-around named (review of #819): its run, or, declared by a phone before runs were named, its exact
+   * list. Another device's newer one is refused, and capture data nobody declared (an in-hand or Android scan still
+   * arriving) is never touched.
    */
-  forgetCapture(id: string): Promise<StmObject> {
+  forgetCapture(id: string, identity: unknown): Promise<StmObject> {
     return this.#gate(id, async () => {
+      if (!this.objectCaptureImages) throw new InvalidStateError(SCANS_NEED_A_MAC);
+      const named = forgetIdentity(identity);
       const object = await this.get(id);
       if (object.state !== 'new' || object.scan) throw new InvalidStateError('The scan can only be changed before the touch-up starts.');
-      if (!object.captureDeclared && !object.capture?.length && !object.captureDepth?.length && !object.captureCamera) return object;
+      const declared = object.captureDeclared;
+      if (!declared) return object;
+      if (declared.run ? declared.run !== named.run : JSON.stringify(declared.images) !== JSON.stringify(named.images)) {
+        throw new InvalidStateError(NOT_THIS_SCAN);
+      }
       await rm(join(this.dir(id), 'capture'), {recursive: true, force: true});
       await clearReconstructionInputs(this.dir(id));
       return this.#changed(await this.#deps.store.update(id, o => ({...o, captureDeclared: undefined, capture: undefined,
