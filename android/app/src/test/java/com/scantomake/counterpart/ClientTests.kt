@@ -296,6 +296,9 @@ class CompanionClientTests {
         try { old.control(id, CompanionClient.PrintControl.Pause); fail() } catch (e: CompanionException) { assertTrue(e.isUnsupported) }
         val gone = client(FakeTransport { _, _ -> throw TransportException("timeout") })
         try { gone.health(); fail() } catch (e: CompanionException) { assertTrue(e.isUnreachable) }
+        // #827: an older computer with no printer refuses the list; say what's missing, not "isn't ready".
+        assertEquals("Add your printer on your computer first: in Counterpart, open Settings › Printers.",
+            CompanionClient.refusal(json(404, mapOf("error" to mapOf("code" to "not-found", "message" to "Not found"))), "/v1/objects").message)
         // Nov 6: the computer's own sentence shows whatever the status, once it says it's written for the person.
         for ((status, code) in listOf(400 to "invalid-request", 503 to "unavailable", 404 to "not-found", 500 to "internal")) {
             val said = client(FakeTransport { _, _ -> json(status, mapOf("error" to mapOf("code" to code, "message" to "Update bambu-printer-mcp in Settings → Printers.",

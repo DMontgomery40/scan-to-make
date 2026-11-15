@@ -605,6 +605,9 @@ final class CompanionClientTests: XCTestCase {
         XCTAssertEqual(events.code, "not-supported")
         let missing = try await refusal(404)
         XCTAssertEqual(missing.code, "not-found")
+        // #827: an older Mac with no printer refuses the list; the phone says what's missing, not "isn't ready".
+        let noPrinter = try await refusal(404, ["error": ["code": "not-found", "message": "Not found"]], path: "/v1/objects")
+        XCTAssertEqual(noPrinter.message, "Add your printer on your Mac first: in Counterpart, open Settings › Printers.")
         let unpaired = try await refusal(401)
         XCTAssertTrue(unpaired.needsPairing)
         let camera = try await refusal(503, path: "/v1/objects/\(id)/camera.jpg")
