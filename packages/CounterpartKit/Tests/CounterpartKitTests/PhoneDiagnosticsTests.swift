@@ -358,6 +358,64 @@ final class PhoneDiagnosticsTests: XCTestCase {
         }
     }
 
+    /// The combined re-review of #813/#814/#816 (https://github.com/DMontgomery40/scan-to-make/pull/813#issuecomment-6886880432).
+    /// N1: a secret one level down in JSON, or in a name/value pair, goes, and the JSON stays JSON.
+    func testN1NestedAndNamedSecretsGoAndTheJSONStaysValid() throws {
+        let cases: [(String, String)] = [
+            (#"{"password":{"value":"nestedsecret99"}}"#, "nestedsecret99"),
+            (#"{"tokens":["arraysecret99value"]}"#, "arraysecret99value"),
+            (#"{"apiKeys":[{"value":"apikeysecret99"}],"next":1}"#, "apikeysecret99"),
+            (#"{"name":"BAMBU_ACCESS_CODE","value":"pairsecret99"}"#, "pairsecret99"),
+            (#"{"value":"pairsecret98","name":"BAMBU_ACCESS_CODE"}"#, "pairsecret98"),
+            (#"{"env":[{"key":"session_key","value":"s3ss10n99"},{"key":"HOST","value":"printer.local"}]}"#, "s3ss10n99"),
+            (#"{"secret":{"a":[1,{"b":"}"}],"c":"deepsecret99"},"kept":"yes"}"#, "deepsecret99"),
+            (#"{"name":"API_TOKEN","value":4815162342}"#, "4815162342"),
+        ]
+        for (input, secret) in cases {
+            let out = DiagnosticsRedaction.redact(input, home: nil)
+            XCTAssertFalse(out.contains(secret), "\(input) → \(out)")
+            XCTAssertNoThrow(try JSONSerialization.jsonObject(with: Data(out.utf8)), "\(input) → \(out) is not JSON")
+        }
+        // What isn't secret stays: the other pair's value, and the key after a redacted container.
+        let env = DiagnosticsRedaction.redact(#"{"env":[{"key":"session_key","value":"s3ss10n99"},{"key":"HOST","value":"printer.local"}]}"#, home: nil)
+        XCTAssertTrue(env.contains(#""value":"printer.local""#), env)
+        XCTAssertTrue(DiagnosticsRedaction.redact(#"{"secret":{"a":[1,{"b":"}"}],"c":"deepsecret99"},"kept":"yes"}"#, home: nil).hasSuffix(#""kept":"yes"}"#))
+    }
+
+    /// N3, N5, N6, N7, N8.
+    func testTheReReviewsOtherShapes() {
+        let r = { DiagnosticsRedaction.redact($0, home: nil) }
+        // N3: a Digest header's whole line goes, username included.
+        for header in [#"Authorization: Digest username="taylorperson", realm="x", response="6629fae49393a05397450978507c4ef1""#,
+                       #"proxy-authorization: digest username="taylorperson", response="6629fae4""#,
+                       #"{"Authorization":"Digest username=\"taylorperson\", response=\"6629fae4\""}"#] {
+            let out = r(header)
+            XCTAssertFalse(out.contains("taylorperson") || out.contains("6629fae4"), "\(header) → \(out)")
+        }
+        XCTAssertNoThrow(try JSONSerialization.jsonObject(with: Data(r(#"{"Authorization":"Digest username=\"taylorperson\", response=\"6629fae4\""}"#).utf8)))
+        // N5: a pairing code under a bare "code", 24 or more mixed characters; error codes and serials stay.
+        XCTAssertFalse(r(#"{"code":"Ab3dEf6hJk9mNpQrStUvWxYz012345"}"#).contains("Ab3dEf6hJk9mNpQr"))
+        XCTAssertFalse(r("code Ab3dEf6hJk9mNpQr-StUvWxYz01 sent").contains("Ab3dEf6hJk9mNpQr"))
+        for kept in [#"{"code":"timeout"}"#, #"{"code":"-1001"}"#, #"{"code":"needs-pairing"}"#, "serial 01P00A123456789", "HMS code 05004043 (heatbreak fan)",
+                     #"{"generation":"0C4F6B0E-7E0A-4B8C-9F0A-1A2B3C4D5E6F","run":"5b7c1f0e-8a8d-4b8e-9f4c-0d2a1e3b4c5d"}"#] {
+            XCTAssertEqual(r(kept), kept)
+        }
+        // N6: lowercase schemes outside a header, and Negotiate.
+        XCTAssertFalse(r("sent basic dXNlcjpodW50ZXIyMg== to host").contains("dXNlcjpodW50ZXIyMg"))
+        XCTAssertFalse(r("negotiate TlRMTVNTUAABAAA12345").contains("TlRMTVNTUAABAAA12345"))
+        XCTAssertFalse(r("Negotiate YIIGhgYGKwYBBQUCoIIGejCCBnag").contains("YIIGhgYGKwYBBQUC"))
+        XCTAssertFalse(r("DIGEST abcdef0123456789").contains("abcdef0123456789"))
+        XCTAssertTrue(r("sent basic dXNlcjpodW50ZXIyMg== to host").hasSuffix("to host"))
+        // N7: `sid`, word-bounded, and a Google key of any length.
+        XCTAssertFalse(r("sid=sessionsecret99").contains("sessionsecret99"))
+        XCTAssertFalse(r(#"{"sid":"sessionsecret98"}"#).contains("sessionsecret98"))
+        XCTAssertFalse(r("AIzaSyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8s9T end").contains("8s9T"))
+        XCTAssertEqual(r("outside: yes, consider: no"), "outside: yes, consider: no")
+        // N8: a firmware version with leading zeros stays; an address goes.
+        XCTAssertEqual(r(#"{"firmware":"01.07.00.00","model":"P1S"}"#), #"{"firmware":"01.07.00.00","model":"P1S"}"#)
+        XCTAssertFalse(r("Mac at 10.0.0.5 refused").contains("10.0.0.5"))
+    }
+
     func testMarkersAndOrdinaryWordsStay() {
         let r = { DiagnosticsRedaction.redact($0, home: "/var/mobile/Containers/Data/Application/AAAA") }
         XCTAssertEqual(r(#"{"BAMBU_PRINTER_ACCESS_CODE":"[set]","token":"","auth":true,"key":null}"#),

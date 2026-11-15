@@ -17,7 +17,7 @@ public enum DiagnosticsRedaction {
     // `auth`, `key`, `pin` and `otp` only as a word of their own (`AUTH_TOKEN`, `session_key`, `PAIRING_PIN`, `pinCode`), so
     // "Failed to authenticate", "keyboard", "colourMapping", "shipping" and "pinnedBaseURL" keep their letters. `key` needs
     // something before it (`privateKey`, `SCAN_TO_MAKE_MODEL_KEY`): the media trace's own `"key"` field is a model's path.
-    static let secretWord = #"(?:password|passwd|passphrase|passcode|pwd|secret|token|api[_-]?key|apikey|access[_-]?code|accesscode|authorization|auth(?:[_-]?key)?(?![a-z])|(?<=[A-Za-z0-9_.-])key(?![a-z])|pin(?:[_-]?code)?(?![a-z])|pairing[_-]?code|lan[_-]?code|otp(?![a-z])|sha256|session|cookie|credential|signature|ticket|login|email|user[_-]?info)"#
+    static let secretWord = #"(?:password|passwd|passphrase|passcode|pwd|secret|token|api[_-]?key|apikey|access[_-]?code|accesscode|authorization|auth(?:[_-]?key)?(?![a-z])|(?<=[A-Za-z0-9_.-])key(?![a-z])|pin(?:[_-]?code)?(?![a-z])|pairing[_-]?code|lan[_-]?code|otp(?![a-z])|(?<![a-z])sid(?![a-z])|sha256|session|cookie|credential|signature|ticket|login|email|user[_-]?info)"#
     static let secretKey = "[A-Za-z0-9_.-]*" + secretWord + "[A-Za-z0-9_.-]*"
     /// A value that is safe as a whole: a marker, empty, true, false or null, followed by the value's end.
     static let safe = #"(?!(?:"(?:\[set\]|\[redacted[^"\]]*\])?"|\[set\]|\[redacted[^\]\s"]*\]|true|false|null)(?=[\s,;&}\]"']|$))"#
@@ -34,10 +34,17 @@ public enum DiagnosticsRedaction {
         // scheme://user:password@host keeps its host.
         rule(#"\b([a-z][a-z0-9+.-]*:(?://|\\/\\/))[^/\\\s:@"'<>]+(?::[^/\\\s@"'<>]*)?@"#, "$1[redacted]@", .caseInsensitive),
         // An Authorization header's whole value (`basic`, `digest`, `bearer`, anything), in any case and in JSON.
+        // An Authorization or Proxy-Authorization header: the rest of its line, so a Digest header's username goes too.
+        rule(#"\b((?:Proxy-)?Authorization[ \t]*:)[^\r\n]*"#, "$1 [redacted]", .caseInsensitive),
+        // The same header as a JSON string: the whole string.
+        rule(#"("(?:proxy-)?authorization"\s*:\s*)"(?:[^"\\]|\\.)*""#, #"$1"[redacted]""#, .caseInsensitive),
+        // `authorization=…` and other forms: the value up to its end.
         rule(#"(authorization["']?[ \t]*[:=][ \t]*["']?)[^\r\n"',}]+"#, "$1[redacted]", .caseInsensitive),
         // A bearer credential anywhere, in any case; `Basic`/`Digest`/`Token` as written in headers.
         rule(#"\b(bearer)\s+[A-Za-z0-9._~+/=-]{6,}"#, "$1 [redacted]", .caseInsensitive),
-        rule(#"\b(Basic|Digest|Token)\s+[A-Za-z0-9._~+/=-]{6,}"#, "$1 [redacted]"),
+        // `Basic`/`Digest`/`Negotiate`/`Token` credentials in any case. A credential has a digit or a base64 sign, or is 12 or
+        // more characters of mixed case, so prose ("basic settings", "token expired") keeps its words.
+        rule(#"\b(Basic|Digest|Negotiate|Token)\s+(?=[A-Za-z0-9._~+/=-]*[0-9=+/]|(?=[A-Za-z0-9._~+/=-]*[A-Z])(?=[A-Za-z0-9._~+/=-]*[a-z])[A-Za-z0-9._~+/=-]{12})[A-Za-z0-9._~+/=-]{6,}"#, "$1 [redacted]", .caseInsensitive),
         // A PIN or pairing code in prose: "The pairing code is 482913", "Enter PIN 482913".
         rule(#"\b((?:pairing\s+code|access\s+code|lan\s+code|passcode|pin)(?:\s+(?:is|was))?[\s:=#]+)\d{4,8}\b"#, "$1[redacted]", .caseInsensitive),
         // Escaped JSON inside a string: \"accessCode\":\"1234\".
@@ -55,7 +62,7 @@ public enum DiagnosticsRedaction {
         rule(#"\bgithub_pat_[A-Za-z0-9_]{20,}"#, "[redacted token]"),
         rule(#"\bgh[pousr]_[A-Za-z0-9]{20,}"#, "[redacted token]"),
         rule(#"\bA(?:KIA|SIA)[0-9A-Z]{16}\b"#, "[redacted key]"),
-        rule(#"\bAIza[0-9A-Za-z_-]{35}"#, "[redacted key]"),
+        rule(#"\bAIza[0-9A-Za-z_-]{30,}"#, "[redacted key]"),
         rule(#"\bxox[abprs]-[A-Za-z0-9-]{10,}"#, "[redacted token]"),
         // DER (a certificate or key in base64 without its PEM lines).
         rule(#"\bMII[A-Za-z0-9+/]{20,}={0,2}"#, "[redacted DER]"),
@@ -70,6 +77,10 @@ public enum DiagnosticsRedaction {
         rule(#"(?<![A-Za-z0-9+])[A-Za-z0-9+/]{43}="#, "[redacted hash]"),
         // Pairing codes (32) and pairing tokens (43): exact base64url runs; a 36-character UUID is never one.
         rule(#"(?<![A-Za-z0-9_-])(?:[A-Za-z0-9_-]{43}|[A-Za-z0-9_-]{32})(?![A-Za-z0-9_-])"#, "[redacted token]"),
+        // #813's rule (diagnostics.ts): any run of 24 or more with upper case, lower case and a digit (a pairing code under a
+        // bare "code", an unlabelled key). Serials (no lower case), hashes and UUIDs as written here (no upper case) and
+        // error codes stay.
+        rule(#"(?<![A-Za-z0-9_-])(?=[A-Za-z0-9_-]*[A-Z])(?=[A-Za-z0-9_-]*[a-z])(?=[A-Za-z0-9_-]*[0-9])[A-Za-z0-9_-]{24,}(?![A-Za-z0-9_-])"#, "[redacted token]"),
         // Any app's container on a phone is `~`; another /var/mobile path keeps only its start.
         rule(#"(?:\\?/private)?\\?/var\\?/mobile\\?/Containers\\?/(?:Data|Shared)\\?/(?:Application|AppGroup|PluginKitPlugin)\\?/[A-Fa-f0-9-]{36}"#, "~"),
         rule(#"(\\?/var\\?/mobile)(?:\\?/[^\n"',;]*)?"#, "$1/[redacted path]"),
@@ -79,7 +90,8 @@ public enum DiagnosticsRedaction {
         rule(#"([A-Za-z]:\\{1,2}Users\\{1,2})[^\\/\n"',;]+"#, "$1[redacted]"),
         rule(#"(?<![A-Za-z0-9])~[A-Za-z][A-Za-z0-9._-]*(?=/)"#, "~[redacted]"),
         // IPv4 addresses in free text: the pairing state says only what kind of address the phone uses.
-        rule(#"\b(?:\d{1,3}\.){3}\d{1,3}\b"#, "[redacted address]"),
+        // Octets have no leading zero, so a firmware version written `01.07.00.00` stays.
+        rule(#"\b(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\b"#, "[redacted address]"),
     ]
 
     /// Every form a known secret might be written in: as is, either case, base64 of a hex value's bytes, colon hex, and
@@ -102,6 +114,54 @@ public enum DiagnosticsRedaction {
             forms += [pairs.joined(separator: ":").lowercased(), pairs.joined(separator: ":").uppercased()]
         }
         return forms
+    }
+
+    static let containerKey = try! NSRegularExpression(pattern: #"""# + secretKey + #""\s*:\s*(?=[\[{])"#, options: .caseInsensitive)
+
+    /// A secret-named key whose value is an object or an array (`{"password":{"value":…}}`, `{"tokens":[…]}`): the whole
+    /// value, to its matching bracket, becomes `"[redacted]"`, so the JSON stays JSON.
+    static func redactJSONContainers(_ text: String) -> String {
+        var out = text
+        while true {
+            let ns = out as NSString
+            guard let match = containerKey.firstMatch(in: out, range: NSRange(location: 0, length: ns.length)) else { return out }
+            let start = match.range.location + match.range.length
+            let units = Array(out.utf16)
+            var depth = 0, index = start, inString = false, escaped = false, end = units.count
+            scan: while index < units.count {
+                let unit = units[index]
+                if inString {
+                    if escaped { escaped = false } else if unit == 0x5C { escaped = true } else if unit == 0x22 { inString = false }
+                } else {
+                    switch unit {
+                    case 0x22: inString = true
+                    case 0x7B, 0x5B: depth += 1
+                    case 0x7D, 0x5D: depth -= 1; if depth == 0 { end = index + 1; break scan }
+                    default: break
+                    }
+                }
+                index += 1
+            }
+            out = ns.replacingCharacters(in: NSRange(location: start, length: end - start), with: #""[redacted]""#)
+        }
+    }
+
+    static let flatObject = try! NSRegularExpression(pattern: #"\{[^{}]*\}"#)
+    static let namesASecret = try! NSRegularExpression(pattern: #""(?:name|key)"\s*:\s*"\#(secretKey)""#, options: .caseInsensitive)
+    static let valueField = try! NSRegularExpression(pattern: #"("value"\s*:\s*)(?:"(?:[^"\\]|\\.)*"|[^\s,}\]]+)"#)
+
+    /// `{"name":"BAMBU_ACCESS_CODE","value":"…"}`: an object that names a secret has its `"value"` redacted, in either order.
+    static func redactNamedValues(_ text: String) -> String {
+        let ns = text as NSString
+        var out = "", last = 0
+        for match in flatObject.matches(in: text, range: NSRange(location: 0, length: ns.length)) {
+            let object = ns.substring(with: match.range)
+            guard namesASecret.firstMatch(in: object, range: NSRange(location: 0, length: (object as NSString).length)) != nil else { continue }
+            out += ns.substring(with: NSRange(location: last, length: match.range.location - last))
+            out += valueField.stringByReplacingMatches(in: object, range: NSRange(location: 0, length: (object as NSString).length), withTemplate: #"$1"[redacted]""#)
+            last = match.range.location + match.range.length
+        }
+        return out + ns.substring(from: last)
     }
 
     static let wordEscape = try! NSRegularExpression(pattern: #"\\u00([3-7][0-9A-Fa-f])"#)
@@ -128,6 +188,8 @@ public enum DiagnosticsRedaction {
         }
         // `\u0070assword` is `password`: letters and digits written as JSON escapes are read as themselves first.
         out = unescapeWordCharacters(out)
+        out = redactJSONContainers(out)
+        out = redactNamedValues(out)
         for (regex, template) in rules {
             out = regex.stringByReplacingMatches(in: out, range: NSRange(out.startIndex..., in: out), withTemplate: template)
         }
