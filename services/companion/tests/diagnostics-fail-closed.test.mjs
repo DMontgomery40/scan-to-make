@@ -187,3 +187,90 @@ test('property: a secret under any secret word, in any syntax, never comes out o
     }
   }
 });
+
+// ---------------------------------------------------------------------------------------------------------------------
+// The adversarial review of #841 (C-1 to C-6): narrow breaks around R-1 to R-7. Each failed before its fix.
+
+const C_LEAKS = [
+  // C-1: a rescued line that leaves a quote open, or is followed by an indented line, keeps its continuation withheld.
+  ['C-1 rescued line with an open quote', 'password: "true\nzq482910x"', 'zq482910x'],
+  ['C-1 rescued line with an indented continuation', 'token: true\n  zq482910y', 'zq482910y'],
+  // C-2: name/value shapes: a spaced name, a setting field, Object.entries pairs (as a whole JSON file and as one line).
+  ['C-2 spaced name', '{"name":"Access Code","value":"zq2spaced"}', 'zq2spaced'],
+  ['C-2 setting field', '{"setting":"PRINTER_TOKEN","value":"zq2setting"}', 'zq2setting'],
+  ['C-2 pairs in a document', '{"env":[["PRINTER_TOKEN","zq2tuple"],["MODEL","p1s"]]}', 'zq2tuple'],
+  ['C-2 a pair as a line', 'first line\n["PRINTER_TOKEN","zq2line"]', 'zq2line'],
+  // C-5: continuations that are not indented, and open structures past the 200-line cap.
+  ['C-5 multipart part named like a secret', '--b1\nContent-Disposition: form-data; name="password"\n\nzq5multi\n--b1--', 'zq5multi'],
+  ['C-5 single quotes across lines', "password='zq48\n2910x'", '2910x'],
+  ['C-5 an open bracket past 200 lines', 'dump {"tokens":[\n' + '  "x",\n'.repeat(250) + '  "zq5deep"\n]}', 'zq5deep'],
+  ['C-5 Authorization wrapped unindented', 'Authorization: Bearer\nzq5wrapped', 'zq5wrapped'],
+  ['C-5 YAML block with a blank line', 'password: >\n  zq5first\n\n  zq5second\nnext: 1', 'zq5second'],
+  // C-6: HTML entities and \u{…} in a secret's name.
+  ['C-6 HTML entity', 'passw&#111;rd=zq6html', 'zq6html'],
+  ['C-6 hex HTML entity', 'passw&#x6f;rd=zq6hexent', 'zq6hexent'],
+  ['C-6 Rust \\u{…}', String.raw`\u{70}assword=zq6rust`, 'zq6rust'],
+];
+for (const [kind, text, secret] of C_LEAKS) {
+  test(`review: ${kind}`, async t => {
+    const out = JSON.stringify(await bundleOf(t, text));
+    assert.ok(!out.includes(secret), `${kind}: ${out.length > 800 ? `${out.slice(0, 800)}…` : out}`);
+  });
+}
+
+test('review C-2: a pair whose name is no secret stays, and the secret\'s name stays readable', async t => {
+  const bundle = await bundleOf(t, '{"env":[["PRINTER_TOKEN","zq2tuple"],["MODEL","p1s"]]}');
+  const env = JSON.parse(bundle.files.find(file => file.name.endsWith('/any.log')).content).env;
+  assert.deepEqual(env, [['PRINTER_TOKEN', '[redacted]'], ['MODEL', 'p1s']]);
+});
+
+test('review C-3: a configured secret goes in other encoders\' spellings, by decoding each line and searching it', async t => {
+  for (const [secret, carrier] of [['hun ter+9', 'q=hun+ter%2B9&x=1'], ['ab/cd9z', 'path=ab%2fcd9z'], ['ab<cd9z', String.raw`{"v":"ab<cd9z"}`],
+    ['zq482910x', String.raw`got zq482910x ok`], ['ab/cd9z', String.raw`{"p":"ab\/cd9z"}`], ['ab<cd9z', 'v=ab&#60;cd9z;'], ['ab<cd9z', String.raw`v=ab\u{3c}cd9z`]]) {
+    const out = JSON.stringify(await bundleOf(t, `innocent line\n${carrier}\nnext`, {env: {PRINTER_PASSWORD: secret}}));
+    assert.ok(!out.includes(carrier), `${secret} in ${carrier}: ${out.slice(0, 600)}`);
+    assert.match(out, /innocent line/);
+  }
+});
+
+test('review C-4: a short configured secret in base64 at each offset leaves no decodable part', async t => {
+  const secret = 'Kx9!pq2';
+  for (const before of ['', 'x', 'xx', 'xxx:']) {
+    const carrier = Buffer.from(`${before}${secret}`).toString('base64');
+    const out = JSON.stringify(await bundleOf(t, `blob ${carrier} end`, {env: {PRINTER_PASSWORD: secret}}));
+    for (const run of out.match(/[A-Za-z0-9+/]{4,}={0,2}/g) ?? []) {
+      const decoded = Buffer.from(run, 'base64').toString('latin1');
+      for (const piece of ['Kx9', 'x9!', '9!p', '!pq', 'pq2']) assert.ok(!decoded.includes(piece), `offset ${before.length}: ${run} decodes to ${JSON.stringify(decoded)}`);
+    }
+  }
+});
+
+test('property: the review\'s syntaxes (multipart, single-quote splits, form-url, Go escapes, pairs, spaced names) never leak', async t => {
+  let seed = 0x841;
+  const rand = n => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed % n; };
+  const pick = list => list[rand(list.length)];
+  const WORDS = ['password', 'Access Code', 'api key', 'token', 'Pairing Code', 'secret', 'passphrase', 'session'];
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+  const SYNTAX = [
+    (w, s) => ['--xyz', `Content-Disposition: form-data; name="${w}"`, '', s, '--xyz--'].join('\n'),
+    (w, s) => `${w.replace(/ /g, '_')}='${s.slice(0, 5)}\n${s.slice(5)}'`,
+    (w, s) => `${encodeURIComponent(w).replace(/%20/g, '+')}=${s}&next=1`,
+    (w, s) => String.raw`{"<${w}>":"${s}"}`,
+    (w, s) => JSON.stringify({env: [[w, s], ['model', 'p1s']]}),
+    (w, s) => JSON.stringify({name: w, note: 'n', value: s}),
+    (w, s) => JSON.stringify([w, s]),
+    (w, s) => `${w}: |\n  ${s.slice(0, 6)}\n\n  ${s.slice(6)}\nafter: 1`,
+  ];
+  const cases = Array.from({length: 160}, (_, i) => {
+    const secret = Array.from({length: 12}, () => alphabet[rand(alphabet.length)]).join('');
+    const syntax = rand(SYNTAX.length);
+    return {i, syntax, secret, text: `before ${i}\n${SYNTAX[syntax](pick(WORDS), secret)}\nafter ${i}`};
+  });
+  for (let at = 0; at < cases.length; at += 8) {
+    const group = cases.slice(at, at + 8);
+    const out = JSON.stringify(await bundleOf(t, group.map(item => item.text).join('\n'), {notes: group.map(item => item.text)}));
+    for (const {i, syntax, secret, text} of group) {
+      for (const piece of [secret, secret.slice(0, 5), secret.slice(6)]) assert.ok(!out.includes(piece), `case ${i} (syntax ${syntax}) leaked ${piece}: ${JSON.stringify(text)}`);
+    }
+  }
+});
