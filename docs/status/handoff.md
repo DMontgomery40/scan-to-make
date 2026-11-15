@@ -6,6 +6,30 @@ Updated in place; git history keeps the rest. This is the only handoff: no dated
 
 **What is running and owed this hour is the pinned issue [#610](https://github.com/DMontgomery40/scan-to-make/issues/610), which the lead updates at every wake. Read it first.**
 
+## Update (2026-11-15, 21:00Z): beta 7 is published
+
+- **Released:** [`v2.0-beta.7`](https://github.com/DMontgomery40/scan-to-make/releases/tag/v2.0-beta.7), a pre-release from main `473ba920`, carrying trains #836, #849 and #855.
+  - **Mac:** 2.0 (202611151935), notarized, on the production appcast. It updates itself from here on; beta 6 must be replaced by hand, as `beta.html` says.
+  - **Android:** version code 4.
+  - **Linux:** `.deb` and AppImage.
+  - **MCPs:** bambu-printer-mcp 1.1.95 and mcp-3d-printer-server 1.2.77, published with diagnostics.
+- **iPhone and iPad:** TestFlight 2.0 (6) is processed and in Counterpart Team. **Public distribution waits for David:** one Apple Account sign-in with 2FA through the secrets manager, because the ASC API key gets 403 on writes.
+- **The clean-Mac gate** (macOS 27.2 tart VM; the base `stm-clean-27-base` is never run, so test on clones; see `~/stm-clean-27/README.md` and `~/scan-to-make-work/release-v2.0/clean-mac/REPORT.md` on the Mac) passed:
+  - download and Gatekeeper;
+  - npm-only printer software for both MCPs, and again with an old Homebrew npm;
+  - the no-printer and no-AI screens;
+  - beta 6 → new by hand, including the ctime trap (#850);
+  - another installed copy is named, not restarted;
+  - Sparkle A → B′;
+  - big-scan conversion with the bundled Python (#852);
+  - diagnostics with a plant: 0 hits.
+- **Not yet on a clean Mac:** Add printer, an estimate and a print. That needs David's P1S access code through the secrets manager; `~/stm-clean-27/add-printer.sh stm-npm-probe` takes it on stdin. The clone `stm-npm-probe` is kept for it, and is on B, so it needs Check for Updates first.
+- **Known issues (in the release notes):**
+  - a frozen Fusion can make a pass wait minutes; the proper status belongs in the MCP ([bambu-printer-mcp #167](https://github.com/DMontgomery40/bambu-printer-mcp/issues/167));
+  - Linux scans need `python3 -m pip install --user --break-system-packages usd-core` until #856 bundles Python.
+- **David's DAD scan (#825)** was recovered on his devices at 17:16Z. Its pass then hit #852. Try Again on a build with #853 (main `473ba920` or later) runs it on the code engine.
+- **Second opinions are Fable 5.2** (docs/operations.md). The release plan, its holds and its order were all set with a Fable advisor today.
+
 ## Update (2026-11-14, 23:30Z): train 2026-11-14 landed and is installed
 
 Lead: Claude Opus 5.5 (T3 thread on agents-173, took over at 17:53Z). The live list is the pinned [#610](https://github.com/DMontgomery40/scan-to-make/issues/610).
