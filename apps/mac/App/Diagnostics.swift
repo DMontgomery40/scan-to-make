@@ -94,7 +94,19 @@ enum Diagnostics {
 
     /// `companion` is `diagnostics.bundle` on the companion's control socket. The export never fails as a whole for one
     /// file: a companion that doesn't answer, or a file that can't be written, is a line in `notes.txt`.
-    static func export(state: URL, to destination: URL, companion: @Sendable () async throws -> CompanionDiagnostics) async -> Bool {
+    /// The folder inside the ZIP, named by date as Settings names the ZIP ("Counterpart Diagnostics 2026-11-15"), not by a UUID (#829).
+    static func folderName(_ date: Date) -> String { "Counterpart Diagnostics \(date.formatted(.iso8601.year().month().day()))" }
+
+    /// `ditto` without resource forks or extended attributes, so the ZIP has no AppleDouble `._` files (#829).
+    static func zip(_ folder: URL, to destination: URL) throws -> Bool {
+        let zip = Process()
+        zip.executableURL = URL(fileURLWithPath:"/usr/bin/ditto")
+        zip.arguments = ["-c", "-k", "--norsrc", "--keepParent", folder.path, destination.path]
+        try zip.run(); zip.waitUntilExit()
+        return zip.terminationStatus == 0
+    }
+
+    static func export(state: URL, to destination: URL, now: Date = Date(), companion: @Sendable () async throws -> CompanionDiagnostics) async -> Bool {
         var bundle: CompanionDiagnostics?
         var problem: String?
         do { bundle = try await companion() }
@@ -102,8 +114,10 @@ enum Diagnostics {
         let answered = bundle, unanswered = problem
         return await Task.detached {
             let fm = FileManager.default
-            let folder = fm.temporaryDirectory.appendingPathComponent("Counterpart Diagnostics \(UUID().uuidString)", isDirectory:true)
-            defer { try? fm.removeItem(at:folder) }
+            // A private parent keeps two exports apart; the folder itself carries the date.
+            let parent = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory:true)
+            let folder = parent.appendingPathComponent(folderName(now), isDirectory:true)
+            defer { try? fm.removeItem(at:parent) }
             var notes = unanswered.map { [$0] } ?? []
             /// One file: written, or a note saying why not, and the export carries on.
             func save(_ relative: String, _ write: (URL) throws -> Void) {
@@ -147,11 +161,7 @@ enum Diagnostics {
                 let notesText = notes.isEmpty ? "Everything answered.\n" : notes.map { "- \($0)" }.joined(separator:"\n") + "\n"
                 try notesText.write(to:folder.appendingPathComponent("notes.txt"), atomically:true, encoding:.utf8)
                 try? fm.removeItem(at:destination)
-                let zip = Process()
-                zip.executableURL = URL(fileURLWithPath:"/usr/bin/ditto")
-                zip.arguments = ["-c", "-k", "--keepParent", folder.path, destination.path]
-                try zip.run(); zip.waitUntilExit()
-                return zip.terminationStatus == 0
+                return try zip(folder, to:destination)
             } catch { return false }
         }.value
     }
