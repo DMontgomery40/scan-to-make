@@ -226,7 +226,9 @@ test('secret names by their words: the codebase\'s own keys count, ordinary word
   const {isSecretName} = await import('../dist/diagnostics.js');
   for (const name of ['SCAN_TO_MAKE_MODEL_KEY', 'SCAN_TO_MAKE_AI_KEY', 'SCAN_TO_MAKE_LAN_TLS_KEY', 'session_key', 'PAIRING_PIN', 'passphrase', 'X-Api-Key', 'accessToken', 'otp', '\\u0070assword', 'lan_code'])
     assert.ok(isSecretName(name), name);
-  for (const name of ['mapping', 'keyboard', 'authenticate', 'passIndex', 'spinning', 'hotplate', 'model', 'serial', 'host', 'code'])
+  assert.ok(isSecretName('apiKeys'));
+  assert.equal(redact('{"type":"settings.updated","data":{"keys":["general.autoUpdateMcps"]}}'), '{"type":"settings.updated","data":{"keys":["general.autoUpdateMcps"]}}');
+  for (const name of ['keys', 'mapping', 'keyboard', 'authenticate', 'passIndex', 'spinning', 'hotplate', 'model', 'serial', 'host', 'code'])
     assert.ok(!isSecretName(name), name);
 });
 

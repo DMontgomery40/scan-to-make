@@ -60,8 +60,9 @@ export interface SoftwarePackage {
 
 // Whether a key names a secret, by its words: `accessCode`, `BAMBU_ACCESS_CODE`, `X-Api-Key`, `SCAN_TO_MAKE_MODEL_KEY`,
 // `session_key`, `PAIRING_PIN`, `password`. Short words (`key`, `pin`, `otp`, `auth`) count only as a whole word,
-// so `mapping`, `keyboard` and "Failed to authenticate:" keep their values.
-const SECRET_WORDS = new Set(['password', 'passwd', 'passcode', 'passphrase', 'pwd', 'secret', 'secrets', 'token', 'tokens', 'key', 'keys',
+// so `mapping`, `keyboard` and "Failed to authenticate:" keep their values. Plain `keys` (settings.updated's list of
+// changed setting names) isn't a secret; `apiKeys` is, by `apikey` inside it.
+const SECRET_WORDS = new Set(['password', 'passwd', 'passcode', 'passphrase', 'pwd', 'secret', 'secrets', 'token', 'tokens', 'key',
   'apikey', 'accesscode', 'accesskey', 'privatekey', 'authorization', 'auth', 'cookie', 'cookies', 'credential', 'credentials', 'signature',
   'ticket', 'login', 'email', 'userinfo', 'session', 'sessionid', 'sid', 'pin', 'otp', 'jwt', 'bearer', 'certificate']);
 const SECRET_PAIRS = new Set(['access code', 'lan code', 'pair code', 'pairing code', 'user info', 'id token']);
