@@ -1114,19 +1114,19 @@ private actor HeldDownload {
 
         await MacConnection.retryDeclares(defaults, kept: { kept[$0] }, declare: { _, _ in throw CompanionError.unreachable })
         XCTAssertEqual(MacConnection.pendingDeclares(defaults), ["dad": run], "the Mac didn't answer: kept for next time")
-        await MacConnection.retryDeclares(defaults, kept: { kept[$0] }, declare: { project, run in declared.append("\(project) \(run)") })
+        await MacConnection.retryDeclares(defaults, kept: { kept[$0] }, declare: { project, run in declared.append("\(project) \(run)"); return true })
         XCTAssertEqual(declared, ["dad \(run)"])
         XCTAssertEqual(MacConnection.pendingDeclares(defaults), [:], "acknowledged")
         XCTAssertEqual(MacConnection.declaredRuns(defaults), ["dad": run], "and recorded as the run the Mac has")
 
         MacConnection.setPendingDeclare(project: "dad", run: run, defaults)
         kept["dad"] = .stopped(run: other, photos: 30)
-        await MacConnection.retryDeclares(defaults, kept: { kept[$0] }, declare: { _, _ in XCTFail("superseded: not declared") })
+        await MacConnection.retryDeclares(defaults, kept: { kept[$0] }, declare: { _, _ in XCTFail("superseded: not declared"); return false })
         XCTAssertEqual(MacConnection.pendingDeclares(defaults), [:])
 
         MacConnection.setPendingDeclare(project: "dad", run: run, defaults)
         kept["dad"] = .stopped(run: run, photos: 5)
-        await MacConnection.retryDeclares(defaults, kept: { kept[$0] }, declare: { _, _ in XCTFail("too few: waits for Send") })
+        await MacConnection.retryDeclares(defaults, kept: { kept[$0] }, declare: { _, _ in XCTFail("too few: waits for Send"); return false })
         XCTAssertEqual(MacConnection.pendingDeclares(defaults), [:])
 
         MacConnection.setPendingDeclare(project: "dad", run: run, defaults)
@@ -1134,10 +1134,23 @@ private actor HeldDownload {
         await MacConnection.retryDeclares(defaults, kept: { kept[$0] }, declare: { _, _ in
             throw CompanionError(code: "invalid-state", message: "The scan can only be added before the touch-up starts.") })
         XCTAssertEqual(MacConnection.pendingDeclares(defaults), [:], "the Mac refused: the project has moved on")
+
+        // Review of #819 (F5): a Mac that can't rebuild from photos isn't told, so the run is never recorded as its scan,
+        // and Remove later has nothing to forget there (it never asks that Mac to update).
+        MacConnection.setPendingDeclare(project: "dad", run: run, defaults)
+        MacConnection.setDeclaredRun(project: "dad", run: run, defaults)  // as recordStoppedDeclare leaves it
+        await MacConnection.retryDeclares(defaults, kept: { kept[$0] }, declare: { _, _ in false })
+        XCTAssertEqual(MacConnection.pendingDeclares(defaults), [:])
+        XCTAssertNil(MacConnection.declaredRuns(defaults)["dad"], "not the scan that Mac waits for")
+        XCTAssertNil(MacConnection.macRun("dad", defaults))
+        try await MacConnection.removeStoppedScan(project: "dad", run: run, defaults, forget: { _, _ in
+            throw CompanionError(code: "needs-update", message: "Update Counterpart on your Mac to remove a scan it already knows about.") })
+        XCTAssertTrue(MacConnection.removedStoppedScans(defaults).contains(run), "Remove goes through")
     }
 
     /// A new scan clears a stopped one's line and its Remove (regression watcher on e8de25fe): a 12-photo stop offers
-    /// Remove; once a scan finishes in its place, `scan-use-remove` is gone and the line with it. 20 or more never offer it.
+    /// Remove; once a scan finishes in its place, `scan-use-remove` is gone and the line with it. 20 or more offer it too
+    /// (David, Nov 15).
     func testANewScanClearsAStoppedScansRemove() {
         var stop = NewObjectView.ScanStop()
         XCTAssertNil(stop.removableRun, "no scan, no Remove")
@@ -1148,8 +1161,262 @@ private actor HeldDownload {
         XCTAssertNil(stop.removableRun, "Remove isn't shown beside the finished scan")
         XCTAssertNil(stop.photos, "nor the stopped line")
         stop.stopped(run: "run68", photos: 68)
-        XCTAssertNil(stop.removableRun, "enough photos are sent as they are: no Remove")
+        XCTAssertEqual(stop.removableRun, "run68", "enough photos can be taken off too")
         XCTAssertEqual(stop.photos, 68)
+    }
+
+    /// David, Nov 15 ("are you kidding me"): a 68-photo stop the Mac was told about could never be taken off. Remove now
+    /// takes it off the phone at once, and the Mac forgets it: then, or when it next answers (review of #819, F1). Only
+    /// a Mac too old to forget a scan it was told about keeps it, and says to update (F5).
+    func testRemoveTakesAStoppedScanOffAndTheMacForgetsIt() async throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "remove-\(UUID().uuidString)"))
+        let run = "3b072103-c190-41b9-8158-03177424d0c5"
+        let mac = FakeMac()
+        let told = try await MacConnection.declare(project: "dad", run: run, defaults, forget: mac.forget, declare: mac.declare(run))
+        XCTAssertTrue(told)
+        MacConnection.setDeclaredRun(project: "dad", run: run, defaults)
+        mac.away = true
+        try await MacConnection.removeStoppedScan(project: "dad", run: run, defaults, forget: mac.forget)
+        XCTAssertTrue(MacConnection.removedStoppedScans(defaults).contains(run), "the Mac is away: Remove still goes through")
+        XCTAssertEqual(MacConnection.pendingForgets(defaults), ["dad": [run]], "and the forget waits for the Mac")
+        XCTAssertEqual(mac.declared, run)
+        XCTAssertEqual(MacConnection.declaredRuns(defaults), [:], "no longer the scan the Mac waits for")
+        XCTAssertEqual(MacConnection.acknowledgedRuns(defaults), [:])
+        mac.away = false
+        await MacConnection.retryForgets(defaults, forget: mac.forget)
+        XCTAssertNil(mac.declared, "the Mac answered and forgot it: its draft can start from its words")
+        XCTAssertEqual(MacConnection.pendingForgets(defaults), [:])
+        XCTAssertEqual(mac.heard, ["declare \(run)", "forget \(run)"])
+
+        // Declared while the Mac was asleep, never acknowledged: the declare may have landed, so it's forgotten too.
+        let pending = "bbbbbbbb-0000-4000-8000-000000000002"
+        MacConnection.setPendingDeclare(project: "hook", run: pending, defaults)
+        try await MacConnection.removeStoppedScan(project: "hook", run: pending, defaults, forget: mac.forget)
+        XCTAssertEqual(mac.heard.last, "forget \(pending)")
+        XCTAssertEqual(MacConnection.pendingDeclares(defaults), [:], "and is never declared later")
+        XCTAssertTrue(MacConnection.removedStoppedScans(defaults).contains(pending))
+
+        // Review of #819 (F6): Remove on a stale run never clears a newer run's pending declare.
+        let newer = "dddddddd-0000-4000-8000-000000000004"
+        MacConnection.setPendingDeclare(project: "hook", run: newer, defaults)
+        try await MacConnection.removeStoppedScan(project: "hook", run: pending, defaults, forget: { _, _ in XCTFail("not the Mac's") })
+        XCTAssertEqual(MacConnection.pendingDeclares(defaults), ["hook": newer])
+
+        // A Mac too old to forget: a scan it was told about stays, and Remove says to update; one it may never have
+        // heard of (only pending) comes off (F5).
+        let old = "ffffffff-0000-4000-8000-000000000006"
+        let tooOld: (String, String) async throws -> Void = { _, _ in
+            throw CompanionError(code: "needs-update", message: "Update Counterpart on your Mac to remove a scan it already knows about.") }
+        MacConnection.setAcknowledgedRun(project: "pin", run: old, defaults)
+        do {
+            try await MacConnection.removeStoppedScan(project: "pin", run: old, defaults, forget: tooOld)
+            XCTFail("told, and the Mac can't forget: Remove says so")
+        } catch let failure as CompanionError { XCTAssertEqual(failure.code, "needs-update") }
+        XCTAssertFalse(MacConnection.removedStoppedScans(defaults).contains(old), "still the project's scan")
+        MacConnection.setPendingDeclare(project: "cup", run: old, defaults)
+        try await MacConnection.removeStoppedScan(project: "cup", run: old, defaults, forget: tooOld)
+        XCTAssertTrue(MacConnection.removedStoppedScans(defaults).contains(old))
+        XCTAssertEqual(MacConnection.pendingForgets(defaults)["cup"], [old], "kept in case it landed, for after the update")
+
+        // Under 20, never declared: nothing to tell the Mac.
+        let few = "cccccccc-0000-4000-8000-000000000003"
+        try await MacConnection.removeStoppedScan(project: "clip", run: few, defaults, forget: { _, _ in XCTFail("never told") })
+        XCTAssertTrue(MacConnection.removedStoppedScans(defaults).contains(few))
+    }
+
+    /// Review of #819 (F1): a declare that landed but whose reply was lost looks exactly like one that never arrived.
+    /// Remove with the Mac away then still has it forgotten, when the Mac comes back, and its draft starts from its words.
+    func testRemoveAfterALostReplyStillHasTheMacForgetIt() async throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "lost-\(UUID().uuidString)"))
+        let run = "3b072103-c190-41b9-8158-03177424d0c5", newer = "eeeeeeee-0000-4000-8000-000000000005"
+        let mac = FakeMac()
+        MacConnection.setPendingDeclare(project: "dad", run: run, defaults)
+        MacConnection.setDeclaredRun(project: "dad", run: run, defaults)  // as recordStoppedDeclare leaves it
+        mac.dropReply = true
+        await MacConnection.retryDeclares(defaults, kept: { _ in .stopped(run: run, photos: 68) }, declare: { project, run in
+            try await MacConnection.declare(project: project, run: run, defaults, forget: mac.forget, declare: mac.declare(run)) })
+        XCTAssertEqual(mac.declared, run, "the declare landed")
+        XCTAssertEqual(MacConnection.pendingDeclares(defaults), ["dad": run], "but its reply was lost")
+        mac.dropReply = false
+        mac.away = true
+        try await MacConnection.removeStoppedScan(project: "dad", run: run, defaults, forget: mac.forget)
+        XCTAssertTrue(MacConnection.removedStoppedScans(defaults).contains(run), "Remove goes through")
+        XCTAssertEqual(MacConnection.pendingForgets(defaults), ["dad": [run]])
+        XCTAssertTrue(MacConnection.isRemoved("dad", run, defaults))
+        mac.away = false
+        await MacConnection.retryForgets(defaults, forget: mac.forget)
+        XCTAssertEqual(mac.heard.last, "forget \(run)", "the last thing the Mac hears is the forget")
+        XCTAssertNil(mac.declared, "the draft can start from its words")
+        XCTAssertEqual(MacConnection.pendingForgets(defaults), [:])
+
+        // A forget still waiting goes before the project's next declare.
+        mac.away = true
+        MacConnection.addPendingForget(project: "dad", run: run, defaults)
+        mac.declared = run
+        mac.away = false
+        let named = try await MacConnection.declare(project: "dad", run: newer, defaults, forget: mac.forget, declare: mac.declare(newer))
+        XCTAssertTrue(named)
+        XCTAssertEqual(Array(mac.heard.suffix(2)), ["forget \(run)", "declare \(newer)"])
+        XCTAssertEqual(MacConnection.pendingForgets(defaults), [:])
+    }
+
+    /// Review of #819 (N1): every Remove made while the Mac is away is kept, not only the last, and a Mac too old to
+    /// forget keeps it for after its update. When the Mac answers, it hears each forget, oldest first.
+    func testEveryRemoveWhileTheMacIsAwayIsForgottenInOrder() async throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "forgets-\(UUID().uuidString)"))
+        let first = "3b072103-c190-41b9-8158-03177424d0c5", second = "eeeeeeee-0000-4000-8000-000000000005"
+        let mac = FakeMac()
+        _ = try await MacConnection.declare(project: "dad", run: first, defaults, forget: mac.forget, declare: mac.declare(first))
+        mac.away = true
+        try await MacConnection.removeStoppedScan(project: "dad", run: first, defaults, forget: mac.forget)
+        MacConnection.setPendingDeclare(project: "dad", run: second, defaults)   // a newer stop, recorded while away
+        try await MacConnection.removeStoppedScan(project: "dad", run: second, defaults, forget: mac.forget)
+        try await MacConnection.removeStoppedScan(project: "dad", run: second, defaults, forget: mac.forget)
+        XCTAssertEqual(MacConnection.pendingForgets(defaults), ["dad": [first, second]], "both kept, once each")
+        mac.away = false
+        await MacConnection.retryForgets(defaults, forget: mac.forget)
+        XCTAssertEqual(mac.heard, ["declare \(first)", "forget \(first)", "forget \(second)"])
+        XCTAssertNil(mac.declared)
+        XCTAssertEqual(MacConnection.pendingForgets(defaults), [:])
+
+        // A Mac too old to forget keeps the forget for after its update; a refusal as no longer matching ends it.
+        MacConnection.addPendingForget(project: "pin", run: first, defaults)
+        await MacConnection.retryForgets(defaults, forget: { _, _ in
+            throw CompanionError(code: "needs-update", message: "Update Counterpart on your Mac to remove a scan it already knows about.") })
+        XCTAssertEqual(MacConnection.pendingForgets(defaults), ["pin": [first]], "still pending")
+        await MacConnection.retryForgets(defaults, forget: { _, _ in
+            throw CompanionError(code: "invalid-state", message: "A different scan is waiting for this project, so this one was left as it is.") })
+        XCTAssertEqual(MacConnection.pendingForgets(defaults), [:])
+    }
+
+    /// Regression watcher on e6a975db: Remove right after Stop, while the stopped scan's declare is still on its way to the
+    /// Mac. The Remove waits for that declare, and its forget is the last thing the Mac hears; nothing is left recorded
+    /// as the Mac's, so the draft is never stranded "still on the phone".
+    func testRemoveDuringAnInFlightDeclareForgetsAfterIt() async throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "race-\(UUID().uuidString)"))
+        let run = "3b072103-c190-41b9-8158-03177424d0c5"
+        let mac = FakeMac()
+        mac.holdDeclare = true
+        MacConnection.setPendingDeclare(project: "dad", run: run, defaults)
+        MacConnection.setDeclaredRun(project: "dad", run: run, defaults)  // as recordStoppedDeclare leaves it
+        let retry = Task { @MainActor in
+            await MacConnection.retryDeclares(defaults, kept: { _ in .stopped(run: run, photos: 68) }, declare: { project, run in
+                try await MacConnection.declare(project: project, run: run, defaults, forget: mac.forget, declare: mac.declare(run)) })
+        }
+        while mac.held == nil { await Task.yield() }
+        let remove = Task { @MainActor in
+            try await MacConnection.removeStoppedScan(project: "dad", run: run, defaults, forget: mac.forget)
+        }
+        for _ in 0..<50 { await Task.yield() }
+        XCTAssertEqual(mac.heard, [], "the Remove waits for the declare's turn")
+        mac.held?.resume()
+        await retry.value
+        try await remove.value
+        XCTAssertEqual(mac.heard, ["declare \(run)", "forget \(run)"], "the forget comes after the declare it raced")
+        XCTAssertNil(mac.declared)
+        XCTAssertEqual(MacConnection.acknowledgedRuns(defaults), [:], "the declare's acknowledgement is cleared by the Remove")
+        XCTAssertNil(MacConnection.macRun("dad", defaults), "nothing left recorded as the Mac's")
+        XCTAssertEqual(MacConnection.pendingDeclares(defaults), [:])
+        XCTAssertTrue(MacConnection.removedStoppedScans(defaults).contains(run))
+    }
+
+    /// Review of #819 (F2): a send's declare and its upload each take the project's turn. A Remove that asked during the
+    /// declare goes between them, so nothing is uploaded or started; one that asked during the upload goes after it, and
+    /// its forget takes off every frame that came. Either way the forget is the last thing the Mac hears.
+    func testARemoveDuringASendStopsItAndIsTheLastThingTheMacHears() async throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "send-\(UUID().uuidString)"))
+        let run = "3b072103-c190-41b9-8158-03177424d0c5"
+        let mac = FakeMac()
+        mac.holdDeclare = true
+        let send = Task { @MainActor in
+            try await MacConnection.declareThenUpload(project: "dad", run: run, defaults,
+                declare: { try await MacConnection.declare(project: "dad", run: run, defaults, forget: mac.forget, declare: mac.declare(run)) },
+                upload: { mac.heard.append("upload") })
+        }
+        while mac.held == nil { await Task.yield() }
+        let remove = Task { @MainActor in try await MacConnection.removeStoppedScan(project: "dad", run: run, defaults, forget: mac.forget) }
+        for _ in 0..<50 { await Task.yield() }
+        mac.held?.resume()
+        let sending = try await send.value
+        try await remove.value
+        XCTAssertFalse(sending)
+        XCTAssertEqual(mac.heard, ["declare \(run)", "forget \(run)"], "no upload")
+        XCTAssertThrowsError(try MacConnection.ensureStillSending("dad", run: run, defaults), "and no start")
+        XCTAssertNil(mac.declared)
+        XCTAssertNil(MacConnection.declaredRuns(defaults)["dad"])
+        let again = try await MacConnection.declare(project: "dad", run: run, defaults, forget: mac.forget, declare: mac.declare(run))
+        XCTAssertFalse(again, "a removed run is never named again")
+        XCTAssertEqual(mac.heard.count, 2)
+
+        // Removed during the upload: the forget waits for it, then takes it all off; the send never starts.
+        let later = "eeeeeeee-0000-4000-8000-000000000005"
+        mac.heard = []
+        mac.held = nil
+        let second = Task { @MainActor in
+            try await MacConnection.declareThenUpload(project: "hook", run: later, defaults,
+                declare: { try await MacConnection.declare(project: "hook", run: later, defaults, forget: mac.forget, declare: mac.declare(later)) },
+                upload: { mac.heard.append("upload"); await withCheckedContinuation { mac.held = $0 } })
+        }
+        while mac.held == nil { await Task.yield() }
+        let removeLater = Task { @MainActor in try await MacConnection.removeStoppedScan(project: "hook", run: later, defaults, forget: mac.forget) }
+        for _ in 0..<50 { await Task.yield() }
+        XCTAssertEqual(mac.heard, ["declare \(later)", "upload"], "the forget waits for the upload")
+        mac.held?.resume()
+        let uploaded = try await second.value
+        XCTAssertTrue(uploaded)
+        try await removeLater.value
+        XCTAssertEqual(mac.heard, ["declare \(later)", "upload", "forget \(later)"])
+        XCTAssertThrowsError(try MacConnection.ensureStillSending("hook", run: later, defaults), "removed before its start: never started")
+    }
+
+    /// Scans the build before this one (202611142311) declared recorded only `declaredRuns`, set once the Mac answered.
+    /// After the update they are still the Mac's: Remove forgets them, and a newer run forgets them first.
+    func testScansDeclaredByTheEarlierBuildAreStillForgotten() async throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "earlier-\(UUID().uuidString)"))
+        let dad = "3b072103-c190-41b9-8158-03177424d0c5", newer = "eeeeeeee-0000-4000-8000-000000000005"
+        var forgotten: [String] = []
+        MacConnection.setDeclaredRun(project: "dad", run: dad, defaults)
+        XCTAssertEqual(MacConnection.macRun("dad", defaults), dad)
+        try await MacConnection.removeStoppedScan(project: "dad", run: dad, defaults, forget: { forgotten.append("\($0) \($1)") })
+        XCTAssertEqual(forgotten, ["dad \(dad)"], "the Mac had it: told to forget")
+
+        MacConnection.setDeclaredRun(project: "hook", run: dad, defaults)
+        _ = try await MacConnection.declare(project: "hook", run: newer, defaults, forget: { forgotten.append("\($0) \($1)") }, declare: { _ in })
+        XCTAssertEqual(forgotten, ["dad \(dad)", "hook \(dad)"], "a newer run forgets the earlier build's first")
+
+        MacConnection.setDeclaredRun(project: "clip", run: dad, defaults)
+        MacConnection.setPendingDeclare(project: "clip", run: dad, defaults)
+        XCTAssertNil(MacConnection.macRun("clip", defaults), "still pending: the Mac may never have had it")
+    }
+
+    /// A newer run is never rebuilt with an older run's photos: runs name their photos alike (0001.heic…) and a send skips
+    /// names the Mac already has, so a different run the Mac acknowledged is forgotten before the newer one is named.
+    /// Defence only: the scan guard already refuses a new capture once the Mac has a project's photos.
+    func testANewerRunIsDeclaredOnlyAfterTheMacForgetsTheOlderOne() async throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "redeclare-\(UUID().uuidString)"))
+        let older = "3b072103-c190-41b9-8158-03177424d0c5", newer = "eeeeeeee-0000-4000-8000-000000000005"
+        var calls: [String] = []
+        let forget: (String, String) async throws -> Void = { calls.append("forget \($0) \($1)") }
+        _ = try await MacConnection.declare(project: "dad", run: older, defaults, forget: forget, declare: { calls.append("declare \($0)") })
+        _ = try await MacConnection.declare(project: "dad", run: older, defaults, forget: forget, declare: { calls.append("declare \($0)") })
+        XCTAssertEqual(calls, ["declare dad", "declare dad"], "the same run again (a resumed send): its photos stay")
+        calls = []
+        _ = try await MacConnection.declare(project: "dad", run: newer, defaults, forget: forget, declare: { calls.append("declare \($0)") })
+        XCTAssertEqual(calls, ["forget dad \(older)", "declare dad"])
+        XCTAssertEqual(MacConnection.acknowledgedRuns(defaults), ["dad": newer])
+        do {
+            _ = try await MacConnection.declare(project: "dad", run: older, defaults, forget: { _, _ in throw CompanionError.unreachable },
+                                                declare: { _ in XCTFail("never named over the newer run's photos") })
+            XCTFail("the Mac didn't answer")
+        } catch {}
+        XCTAssertEqual(MacConnection.acknowledgedRuns(defaults), ["dad": newer], "unchanged until the Mac forgets it")
+        // The Mac refuses the forget (another phone's scan is waiting there): nothing of the older run is left, so the
+        // newer one is named.
+        calls = []
+        _ = try await MacConnection.declare(project: "dad", run: older, defaults, forget: { _, _ in
+            throw CompanionError(code: "invalid-state", message: "A different scan is waiting for this project, so this one was left as it is.")
+        }, declare: { calls.append("declare \($0)") })
+        XCTAssertEqual(calls, ["declare dad"])
     }
 
     /// What the New sheet says under a stopped scan's question (#795): enough photos are simply sent; a few are sent
@@ -1165,5 +1432,34 @@ private actor HeldDownload {
                        "Stopped at 12 photos, which may be too few. Remove it, or your Mac will try.")
         XCTAssertEqual(MacConnection.stoppedScanWords(photos: 1),
                        "Stopped at 1 photo, which may be too few. Remove it, or your Mac will try.")
+    }
+}
+
+/// A Mac as the phone's declares and forgets see it (review of #819): the run whose list it holds, what it heard, and
+/// whether it answers. `dropReply`: a declare lands but its reply is lost, so the phone sees the Mac as unreachable.
+@MainActor final class FakeMac {
+    var declared: String?
+    var heard: [String] = []
+    var away = false, dropReply = false, holdDeclare = false
+    var held: CheckedContinuation<Void, Never>?
+
+    func declare(_ run: String) -> (String) async throws -> Void {
+        { [self] _ in
+            if holdDeclare { holdDeclare = false; await withCheckedContinuation { held = $0 } }
+            if away { throw CompanionError.unreachable }
+            declared = run
+            heard.append("declare \(run)")
+            if dropReply { throw CompanionError.unreachable }
+        }
+    }
+
+    func forget(_ project: String, _ run: String) async throws {
+        if away { throw CompanionError.unreachable }
+        guard let declared else { heard.append("forget \(run)"); return }
+        guard declared == run else {
+            throw CompanionError(code: "invalid-state", message: "A different scan is waiting for this project, so this one was left as it is.")
+        }
+        self.declared = nil
+        heard.append("forget \(run)")
     }
 }

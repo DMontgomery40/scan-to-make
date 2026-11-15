@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {chmod, mkdir, readdir, readFile, rm, stat, symlink, writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {ObjectStore} from '../dist/objects/store.js';
-import {ObjectService, InvalidStateError, scanSummary, tooFewPhotos, SCANS_NEED_A_MAC, KEEP_SCAN_UNAVAILABLE, PREVIEW_ONLY} from '../dist/objects/service.js';
+import {ObjectService, InvalidStateError, InvalidCaptureManifestError, scanSummary, tooFewPhotos, SCANS_NEED_A_MAC, KEEP_SCAN_UNAVAILABLE, PREVIEW_ONLY} from '../dist/objects/service.js';
 import {macReconstructArgs, macReconstructRunner, macScanToStl, linuxReconstructRunner, progressWords, NEEDS_MACOS_27, OBJECT_CAPTURE_NEEDS_MAC, RECONSTRUCTION_FAILED} from '../dist/objects/reconstruct.js';
 import {tempDir} from './support/temp.mjs';
 
@@ -11,6 +11,7 @@ const STL = 'solid m\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0
 const manifest = images => ({version: 1, images, depthRequired: true});
 /** What the phone sends with every image of an Object Capture session (MacConnection.sendCapture). */
 const objectCaptureManifest = images => ({version: 1, images, depthRequired: false, source: 'object-capture'});
+const RUN_A = '6b1f5a52-6a8f-4d43-9a4e-0f6f6f2a1c01', RUN_B = '0c7d2e9b-3f10-4b5e-8a47-2d9e1b6c5a02';
 /** A walk-around's frames as the phone names them (ProjectUploader.captureFrames): NNNN in capture order. */
 const APPLE = ['0001.heic', '0002.heic'];
 
@@ -183,6 +184,90 @@ test('a draft whose scan is still on the phone never starts from its words alone
   // Once part of it is here, the refusal is the resume one.
   await service.addCapturePhoto(object.id, '0001.heic', Buffer.from('a'));
   await assert.rejects(service.start(object.id), /Resume sending it from the phone that recorded it/);
+});
+
+test('a scan taken off before its touch-up starts is forgotten with its frames, and a newer one never meets them (Remove, #791)', async () => {
+  // David, Nov 15: a stopped scan of 20 or more photos was named to the Mac at once and could never be taken off.
+  // Remove now tells the Mac to forget it. The phone also forgets a run before naming a different one: runs share
+  // frame names (0001.heic…) and a send skips frames the Mac already has, so an older run's frames would be rebuilt.
+  const {service, object, builds} = await setup();
+  await service.updateInstructions(object.id, 'A replica of this DAD desk thing');
+  const older = ['0001.heic', '0002.heic', '0003.heic'];
+  await service.declareCapture(object.id, {...objectCaptureManifest(older), run: RUN_A});
+  assert.equal((await service.get(object.id)).captureDeclared.run, RUN_A, 'the run is kept with its list');
+  await service.addCapturePhoto(object.id, '0001.heic', Buffer.from('older run'));
+  await service.addCapturePhoto(object.id, '0003.heic', Buffer.from('older run'));
+  const forgotten = await service.forgetCapture(object.id, {run: RUN_A, images: older});
+  assert.equal(forgotten.captureDeclared, undefined);
+  assert.deepEqual(forgotten.capture ?? [], []);
+  assert.deepEqual(await readdir(join(service.dir(object.id), 'capture')).catch(() => []), [], 'the frames are gone from disk');
+  assert.equal(forgotten.state, 'new');
+  assert.equal((await service.forgetCapture(object.id, {run: RUN_A, images: older})).captureDeclared, undefined, 'nothing declared: unchanged');
+
+  // A newer, shorter run arrives clean and starts with exactly its own frames.
+  await service.declareCapture(object.id, {...objectCaptureManifest(APPLE), run: RUN_B});
+  for (const name of APPLE) await service.addCapturePhoto(object.id, name, Buffer.from('newer run'));
+  await service.start(object.id, objectCaptureManifest(APPLE));
+  await service.settled(object.id);
+  assert.equal(builds.length, 1);
+  for (const name of APPLE) assert.equal(await readFile(join(service.dir(object.id), 'capture', name), 'utf8'), 'newer run');
+  assert.equal(await stat(join(service.dir(object.id), 'capture', '0003.heic')).catch(() => undefined), undefined);
+
+  // Once the touch-up has started, the scan stays.
+  await assert.rejects(service.forgetCapture(object.id, {run: RUN_B, images: APPLE}), InvalidStateError);
+
+  // Taken off, the draft designs from its words.
+  const words = await service.create();
+  await service.updateInstructions(words.id, 'A hook');
+  await service.declareCapture(words.id, {...objectCaptureManifest(APPLE), run: RUN_A});
+  await service.forgetCapture(words.id, {run: RUN_A, images: APPLE});
+  assert.notEqual((await service.start(words.id)).state, 'new', 'no longer refused as still on the phone');
+});
+
+test("a forget takes off only the walk-around it names: never another phone's, an undeclared capture, or one with a model (review of #819)", async () => {
+  const {service, object} = await setup();
+  // F4: the iPhone removes its run after an iPad on the same project declared its own. The iPad's scan stays.
+  await service.declareCapture(object.id, {...objectCaptureManifest(APPLE), run: RUN_A});
+  await service.declareCapture(object.id, {...objectCaptureManifest(APPLE), run: RUN_B});
+  await service.addCapturePhoto(object.id, APPLE[0], Buffer.from('ipad'));
+  await assert.rejects(service.forgetCapture(object.id, {run: RUN_A, images: APPLE}), {name: 'InvalidStateError', message: /A different scan is waiting/});
+  const kept = await service.get(object.id);
+  assert.equal(kept.captureDeclared.run, RUN_B);
+  assert.deepEqual(kept.capture, [APPLE[0]]);
+
+  // Declared by a phone before runs were named: its exact list identifies it.
+  const legacy = await service.create();
+  await service.declareCapture(legacy.id, objectCaptureManifest(APPLE));
+  await assert.rejects(service.forgetCapture(legacy.id, {run: RUN_A, images: APPLE.slice(1)}), InvalidStateError);
+  assert.equal((await service.forgetCapture(legacy.id, {run: RUN_A, images: [...APPLE].reverse()})).captureDeclared, undefined);
+
+  // F3: an in-hand capture still arriving was never declared: its frames and depth survive any forget.
+  const inHand = await service.create();
+  const depth = Buffer.concat([Buffer.from('bplist00'), Buffer.from([0, 255, 1, 7, 0])]);
+  await service.addCapturePhoto(inHand.id, '0000.heic', Buffer.from('rgb'));
+  await service.addCaptureDepth(inHand.id, '0000.depth.plist', depth);
+  const untouched = await service.forgetCapture(inHand.id, {run: RUN_A, images: ['0000.heic']});
+  assert.deepEqual(untouched.capture, ['0000.heic']);
+  assert.deepEqual(untouched.captureDepth, ['0000.depth.plist']);
+  assert.deepEqual((await readdir(join(service.dir(inHand.id), 'capture'))).sort(), ['0000.depth.plist', '0000.heic']);
+
+  // A draft still `new` that already has a model (the phone's preview came) keeps its scan.
+  const preview = await service.create();
+  await service.declareCapture(preview.id, {...objectCaptureManifest(APPLE), run: RUN_A});
+  await service.addScan(preview.id, 'scan.usdz', Buffer.from('phone preview'), {preview: true});
+  assert.equal((await service.get(preview.id)).state, 'new');
+  await assert.rejects(service.forgetCapture(preview.id, {run: RUN_A, images: APPLE}), InvalidStateError);
+
+  // A forget names its run and list, or it is refused before anything is touched.
+  await assert.rejects(service.forgetCapture(object.id, {images: APPLE}), InvalidCaptureManifestError);
+  await assert.rejects(service.forgetCapture(object.id, {run: 'not-a-run', images: APPLE}), InvalidCaptureManifestError);
+});
+
+test("a computer that can't rebuild a walk-around has nothing to forget: it refuses (review of #819)", async () => {
+  const {service, object} = await setup({scanToStl: null});
+  await service.addCapturePhoto(object.id, '0000.heic', Buffer.from('rgb'));
+  await assert.rejects(service.forgetCapture(object.id, {run: RUN_A, images: ['0000.heic']}), {message: /rebuilt on a Mac/});
+  assert.deepEqual((await service.get(object.id)).capture, ['0000.heic']);
 });
 
 test("the phone's preview from a send without every photo is kept as a preview, and says the full rebuild wasn't available", async () => {

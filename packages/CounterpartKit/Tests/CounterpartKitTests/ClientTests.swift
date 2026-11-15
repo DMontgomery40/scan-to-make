@@ -983,6 +983,29 @@ final class CompanionClientTests: XCTestCase {
         XCTAssertEqual(seen.body["depthRequired"] as? Bool, false)
     }
 
+    /// Remove on a stopped scan, or a different run about to be named: the declared list is taken off with a bodiless DELETE.
+    func testAWalkAroundIsForgottenWithADeleteOfItsManifest() async throws {
+        let id = "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a02"
+        final class Seen: @unchecked Sendable { var method = ""; var path = ""; var body: Data? }
+        let seen = Seen()
+        let fake = FakeTransport { request, _ in
+            seen.method = request.httpMethod ?? ""; seen.path = request.url!.path; seen.body = request.httpBody
+            return json(200, ["object": ["id": id, "createdAtMs": 1, "updatedAtMs": 1, "state": "new", "photos": [], "passes": []]])
+        }
+        let run = "0c7d2e9b-3f10-4b5e-8a47-2d9e1b6c5a02"
+        _ = try await try client(fake).forgetCapture(id, run: run, images: ["0001.heic", "0002.heic"])
+        XCTAssertEqual(seen.method, "DELETE")
+        XCTAssertEqual(seen.path, "/v1/objects/\(id)/capture-manifest")
+        // The run and its list name the scan, so the Mac never takes off another phone's (review of #819).
+        let body = try XCTUnwrap(JSONSerialization.jsonObject(with: try XCTUnwrap(seen.body)) as? [String: Any])
+        XCTAssertEqual(body["run"] as? String, run)
+        XCTAssertEqual(body["images"] as? [String], ["0001.heic", "0002.heic"])
+        // Scoped as the Mac checks it (captures:import): an unscoped route never leaves the phone, so Remove would do
+        // nothing on the Mac (found on the Mac run of #819).
+        XCTAssertEqual(CompanionClient.scope("DELETE", "/v1/objects/\(id)/capture-manifest"), "captures:import")
+        XCTAssertNil(CompanionClient.scope("DELETE", "/v1/objects/\(id)/capture"))
+    }
+
     /// Apple's Object Capture names become the Mac's capture frame names, NNNN in capture order; anything else stops the send.
     func testObjectCaptureImagesBecomeNumberedFramesInCaptureOrder() throws {
         let frames = try ProjectUploader.captureFrames(["00393.886463125.HEIC", "00041.732011084.HEIC", ".hidden", "00049.698417084.HEIC"])

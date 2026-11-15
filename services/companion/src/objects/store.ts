@@ -198,7 +198,7 @@ export interface StmObject {
   captureDepth?: string[];
   /** The source phone confirmed the entire finished capture; the digest binds its retained file names. */
   /** A walk-around's images, declared by the phone before it sends any; cleared when its start completes the capture. */
-  captureDeclared?: {source: 'object-capture'; images: string[]};
+  captureDeclared?: {source: 'object-capture'; images: string[]; run?: string};
   captureCompletion?: {version: 1; depthRequired: boolean; cameraMetadataRequired?: boolean; scaleQualificationRequired?: boolean; source?: 'object-capture'; frameCount: number; sha256: string; completedAtMs: number};
   /** capture-camera v1 was supplied and bound to the saved photos; only its digest is public. */
   captureCamera?: {sha256: string; frameCount: number};

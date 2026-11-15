@@ -100,12 +100,13 @@ typealias MacError = CompanionError
             sent = try await sendHandheld(id)
         } else if let kept = keptScan(id) {
             // A stopped scan goes like a finished one, as its photos (#791): Send never leaves it on the phone.
-            let manifest: [String: Any]?
+            let manifest: [String: Any]?, run: String
             switch kept {
-            case .finished(let run): manifest = try await sendCapture(id, run: run)
-            case .stopped(let run, _): manifest = try await sendStoppedCapture(id, run: run)
+            case .finished(let finished): run = finished; manifest = try await sendCapture(id, run: finished)
+            case .stopped(let stopped, _): run = stopped; manifest = try await sendStoppedCapture(id, run: stopped)
             }
             try await sendChosen(id, chosen)
+            try Self.ensureStillSending(id, run: run)
             sent = try await start(id, captureManifest: manifest)
         } else {
             try await sendChosen(id, chosen)
@@ -346,7 +347,7 @@ typealias MacError = CompanionError
     static func declaredRuns(_ defaults: UserDefaults = .standard) -> [String: String] {
         (defaults.dictionary(forKey: declaredRunsKey) as? [String: String]) ?? [:]
     }
-    static func setDeclaredRun(project: String, run: String, _ defaults: UserDefaults = .standard) {
+    static func setDeclaredRun(project: String, run: String?, _ defaults: UserDefaults = .standard) {
         var runs = declaredRuns(defaults)
         runs[project] = run
         defaults.set(runs, forKey: declaredRunsKey)
@@ -360,16 +361,17 @@ typealias MacError = CompanionError
                              declared: Self.declaredRuns()[id], photos: Self.photoCount)
     }
 
-    /// Stopped runs taken off their project on New with Remove (review of #795): a stray few photos never lock a draft
-    /// or go with its Send. Kept on the phone; nothing deletes a capture.
-    static var removedStoppedScans: Set<String> { Set(UserDefaults.standard.stringArray(forKey: removedStoppedKey) ?? []) }
-    static func removeStoppedScan(run: String) {
-        UserDefaults.standard.set((removedStoppedScans.union([run])).sorted(), forKey: removedStoppedKey)
+    /// Stopped runs taken off their project on New with Remove (review of #795; every stopped scan since David, Nov 15):
+    /// they never lock a draft or go with its Send. Kept on the phone; nothing deletes a capture.
+    static var removedStoppedScans: Set<String> { removedStoppedScans(.standard) }
+    static func removedStoppedScans(_ defaults: UserDefaults) -> Set<String> { Set(defaults.stringArray(forKey: removedStoppedKey) ?? []) }
+    static func removeStoppedScan(run: String, _ defaults: UserDefaults = .standard) {
+        defaults.set((removedStoppedScans(defaults).union([run])).sorted(), forKey: removedStoppedKey)
     }
     private static let removedStoppedKey = "CounterpartRemovedStoppedScans"
 
     /// Whether a kept scan is named to the Mac as soon as it's attached: a stopped one with enough photos. One with
-    /// fewer waits for Send, so Remove can still take it off and the project designs from the words (review of #795).
+    /// fewer waits for Send (review of #795). Either can be taken off with Remove, which tells the Mac to forget it.
     static func declaresAtOnce(_ kept: KeptScan?) -> Bool {
         if case .stopped(_, let photos)? = kept { return isEnough(stoppedPhotos: photos) }
         return false
@@ -386,6 +388,9 @@ typealias MacError = CompanionError
     /// Whether a send cut short (Send was pressed, `sendRequested`) has a scan on this phone to finish with: an in-hand
     /// capture, or a kept walk-around scan, finished or stopped after it kept photos (#791, review of #795).
     static func resumesSend(handheldFinished: Bool, kept: KeptScan?) -> Bool { handheldFinished || kept != nil }
+
+    /// Under a stopped scan while its Remove waits for the Mac (#819).
+    static let removingWords = "Removing… If your Mac doesn't answer, it forgets this scan when it's back."
 
     /// A stopped scan with this many photos is sent as it is, like a finished one; fewer are still offered, with a
     /// warning, and the Mac says plainly if it can't build from them.
@@ -405,13 +410,176 @@ typealias MacError = CompanionError
     }
 
     /// Names a kept scan's photos to the Mac without sending any (#791), the same list `sendCapture` declares, so the
-    /// Mac starts the project only with them. Nothing on a Mac that can't rebuild from photos.
-    func declareKeptScan(_ id: String, run: String) async throws {
-        guard UUID(uuidString: run) != nil, run == run.lowercased() else { return }
+    /// Mac starts the project only with them. Whether the Mac was told: not when it can't rebuild from photos (there is
+    /// nothing to tell it, so the run is never recorded as the Mac's), nor when the scan was removed first.
+    func declareKeptScan(_ id: String, run: String) async throws -> Bool {
+        guard UUID(uuidString: run) != nil, run == run.lowercased() else { return false }
+        let frames = try Self.frameNames(run)
+        guard !frames.isEmpty, try await client.capabilities(timeout: 15).contains("objectCaptureImages") else { return false }
+        return try await declare(id, run: run, manifest: Self.captureManifest(frames))
+    }
+
+    /// The Mac's names for a run's photos (0001.heic…), as its declare and its forget list them.
+    static func frameNames(_ run: String) throws -> [String] {
         let images = URL.documentsDirectory.appending(path: "NativeCaptures/\(run)/Images", directoryHint: .isDirectory)
-        let frames = try ProjectUploader.captureFrames((try? FileManager.default.contentsOfDirectory(atPath: images.path)) ?? [])
-        guard !frames.isEmpty, try await client.capabilities().contains("objectCaptureImages") else { return }
-        _ = try await client.declareCapture(id, manifest: Self.captureManifest(frames.map(\.name)))
+        return try ProjectUploader.captureFrames((try? FileManager.default.contentsOfDirectory(atPath: images.path)) ?? []).map(\.name)
+    }
+
+    /// Names a run's photos to the Mac, with the run, so a forget can name exactly this scan (review of #819, F4).
+    /// A Mac older than `captureForget` (Mac beta 6) can't forget (`needs-update`): the newer run is declared as before.
+    private func declare(_ id: String, run: String, manifest: [String: Any]) async throws -> Bool {
+        var named = manifest
+        named["run"] = run
+        return try await Self.declare(project: id, run: run, forget: { [self] in try await forgetOnMac($0, run: $1) },
+                                      declare: { [client] in _ = try await client.declareCapture($0, manifest: named) })
+    }
+
+    /// Asks the Mac to forget one run of a project, by its run and photo list: never another phone's scan, or capture
+    /// data nobody declared (review of #819, F3/F4).
+    private func forgetOnMac(_ id: String, run: String) async throws {
+        // A short wait: Remove goes through without the Mac, and the forget waits on the phone for it (`pendingForgets`).
+        guard try await client.capabilities(timeout: 15).contains("captureForget") else {
+            throw CompanionError(code: "needs-update", message: "Update Counterpart on your Mac to remove a scan it already knows about.")
+        }
+        _ = try await client.forgetCapture(id, run: run, images: try Self.frameNames(run), timeout: 15)
+    }
+
+    /// Declares one run, in the project's turn (the caller holds `serially`). What the Mac still holds goes first: a
+    /// Remove it didn't hear yet, then a different run it acknowledged before, with any of its photos that came: every
+    /// run names its photos alike (0001.heic…) and a send skips names the Mac already has. That forget-first is defence
+    /// only: the scan guard already refuses a new capture once the Mac has a project's photos or model.
+    /// Whether the run is now the Mac's: false when it was removed before its turn came, and nothing was sent.
+    static func declare(project: String, run: String, _ defaults: UserDefaults = .standard,
+                        forget: (String, String) async throws -> Void, declare: (String) async throws -> Void) async throws -> Bool {
+        guard !isRemoved(project, run, defaults) else { return false }
+        for left in pendingForgets(defaults)[project] ?? [] {
+            do {
+                try await forget(project, left)
+                removePendingForget(project: project, run: left, defaults)
+            } catch let failure as CompanionError where keepsForgetPending(failure) {
+                // Too old to forget: kept for after its update, and this run is declared as before. Not answering: stop.
+                guard failure.code == "needs-update" else { throw failure }
+            } catch is CompanionError {
+                removePendingForget(project: project, run: left, defaults)   // refused: no longer what the Mac holds
+            }
+        }
+        if let earlier = macRun(project, defaults), earlier != run {
+            try await forgetUnlessAnswered(project, earlier, forget)
+            setAcknowledgedRun(project: project, run: nil, defaults)
+            if declaredRuns(defaults)[project] == earlier { setDeclaredRun(project: project, run: nil, defaults) }
+        }
+        try await declare(project)
+        setAcknowledgedRun(project: project, run: run, defaults)
+        return true
+    }
+
+    /// A forget the Mac refused leaves nothing of that run to forget there: the touch-up started, or a different scan
+    /// (another phone's) is waiting. Only a Mac that didn't answer, or a cancelled request, stops what follows.
+    private static func forgetUnlessAnswered(_ project: String, _ run: String, _ forget: (String, String) async throws -> Void) async throws {
+        do { try await forget(project, run) }
+        catch let failure as CompanionError where macAnswered(failure) {}
+    }
+    private static func macAnswered(_ failure: CompanionError) -> Bool {
+        !failure.isUnreachable && !failure.needsPairing && failure.code != "cancelled"
+    }
+    /// A pending forget stays until the Mac forgets that scan or refuses it as no longer matching: not while the Mac
+    /// doesn't answer, nor while it is too old to forget (review of #819, N1).
+    private static func keepsForgetPending(_ failure: CompanionError) -> Bool { !macAnswered(failure) || failure.code == "needs-update" }
+
+    /// The run whose photo list the Mac has, as far as this phone knows: the one it acknowledged, or, from a build before
+    /// `acknowledgedRuns` (202611142311), the declared run once no declare of it is pending (only an answered declare,
+    /// in `retryDeclares` or `sendCapture`, recorded it then).
+    static func macRun(_ project: String, _ defaults: UserDefaults = .standard) -> String? {
+        if let run = acknowledgedRuns(defaults)[project] { return run }
+        guard let run = declaredRuns(defaults)[project], pendingDeclares(defaults)[project] != run else { return nil }
+        return run
+    }
+
+    /// The run whose photo list the Mac last acknowledged, by project; nil once it was forgotten.
+    static func acknowledgedRuns(_ defaults: UserDefaults = .standard) -> [String: String] {
+        (defaults.dictionary(forKey: acknowledgedRunsKey) as? [String: String]) ?? [:]
+    }
+    static func setAcknowledgedRun(project: String, run: String?, _ defaults: UserDefaults = .standard) {
+        var runs = acknowledgedRuns(defaults)
+        runs[project] = run
+        defaults.set(runs, forKey: acknowledgedRunsKey)
+    }
+    private static let acknowledgedRunsKey = "CounterpartAcknowledgedScanRuns"
+
+    /// A run taken off its project: removed with Remove, or with its forget still to reach the Mac. Never sent.
+    static func isRemoved(_ project: String, _ run: String, _ defaults: UserDefaults = .standard) -> Bool {
+        removedStoppedScans(defaults).contains(run) || (pendingForgets(defaults)[project] ?? []).contains(run)
+    }
+
+    /// Remove on a stopped scan (David, Nov 15: a 20-photo-or-more stop could never be taken off): this phone stops
+    /// offering it, and the Mac forgets it if it may have been told. Kept on the phone; nothing deletes a capture.
+    func removeStoppedScan(_ id: String, run: String) async throws {
+        try await Self.removeStoppedScan(project: id, run: run, forget: { [self] in try await forgetOnMac($0, run: $1) })
+    }
+
+    /// A run the Mac acknowledged, or one whose declare is still pending, is forgotten: a declare that landed and whose
+    /// reply was lost looks exactly like one that never arrived (review of #819, F1). When the Mac doesn't answer,
+    /// Remove still goes through and the forget waits in `pendingForgets` for the next time it does. Only a run the Mac
+    /// was told about, on a Mac too old to forget it, keeps Remove from going through (F5).
+    static func removeStoppedScan(project: String, run: String, _ defaults: UserDefaults = .standard,
+                                  forget: (String, String) async throws -> Void) async throws {
+        try await serially(project) {
+            let told = macRun(project, defaults) == run, pending = pendingDeclares(defaults)[project] == run
+            if told || pending {
+                do { try await forget(project, run) }
+                catch let failure as CompanionError where failure.code == "needs-update" {
+                    if told { throw failure }
+                    addPendingForget(project: project, run: run, defaults)   // in case it landed: forgotten after the update
+                } catch let failure as CompanionError where failure.isUnreachable || failure.needsPairing {
+                    addPendingForget(project: project, run: run, defaults)
+                } catch let failure as CompanionError where macAnswered(failure) {
+                    // Refused: the touch-up started, or a different scan is waiting. Nothing of this run is left there.
+                }
+            }
+            if pendingDeclares(defaults)[project] == run { setPendingDeclare(project: project, run: nil, defaults) }
+            if acknowledgedRuns(defaults)[project] == run { setAcknowledgedRun(project: project, run: nil, defaults) }
+            if declaredRuns(defaults)[project] == run { setDeclaredRun(project: project, run: nil, defaults) }
+            removeStoppedScan(run: run, defaults)
+        }
+    }
+
+    /// Removed runs whose forget hasn't reached the Mac yet, by project, oldest first (review of #819, F1, N1): every
+    /// one is kept, so a second Remove while the Mac is away never loses the first. Tried again whenever the Mac
+    /// answers, and before any declare of that project.
+    static func pendingForgets(_ defaults: UserDefaults = .standard) -> [String: [String]] {
+        (defaults.dictionary(forKey: pendingForgetsKey) as? [String: [String]]) ?? [:]
+    }
+    static func addPendingForget(project: String, run: String, _ defaults: UserDefaults = .standard) {
+        var pending = pendingForgets(defaults)
+        if !(pending[project] ?? []).contains(run) { pending[project, default: []].append(run) }
+        defaults.set(pending, forKey: pendingForgetsKey)
+    }
+    static func removePendingForget(project: String, run: String, _ defaults: UserDefaults = .standard) {
+        var pending = pendingForgets(defaults)
+        let left = (pending[project] ?? []).filter { $0 != run }
+        pending[project] = left.isEmpty ? nil : left
+        defaults.set(pending, forKey: pendingForgetsKey)
+    }
+    private static let pendingForgetsKey = "CounterpartPendingScanForgets"
+
+    /// Tries every pending forget, oldest first. One is done when the Mac forgets it, or refuses it because that scan
+    /// no longer matches what it holds (the touch-up started, another scan is waiting). One the Mac didn't answer, or a
+    /// Mac too old to forget, keeps it, and that project's later ones, for the next try.
+    static func retryForgets(_ defaults: UserDefaults = .standard, forget: (String, String) async throws -> Void) async {
+        for project in pendingForgets(defaults).keys.sorted() {
+            await serially(project) {
+                for run in pendingForgets(defaults)[project] ?? [] {
+                    do {
+                        try await forget(project, run)
+                        removePendingForget(project: project, run: run, defaults)
+                    } catch let failure as CompanionError where keepsForgetPending(failure) {
+                        return
+                    } catch {
+                        removePendingForget(project: project, run: run, defaults)
+                    }
+                }
+            }
+        }
     }
 
     static func captureManifest(_ images: [String]) -> [String: Any] {
@@ -433,26 +601,83 @@ typealias MacError = CompanionError
     }
     private static let pendingDeclaresKey = "CounterpartPendingScanDeclares"
 
+    /// Whether a declare or a forget is still waiting for the Mac to answer.
+    static var hasPendingWithMac: Bool { !pendingDeclares().isEmpty || !pendingForgets().isEmpty }
+
     /// Tries every pending declare once. One is done when the Mac acknowledges it, when the Mac refuses it (the project
     /// has moved on), or when the project's kept scan is no longer that run with enough photos (sent, superseded,
-    /// removed); one the Mac didn't answer stays for the next try.
+    /// removed); one the Mac didn't answer stays for the next try. `declare` says whether the Mac was told: a Mac that
+    /// can't rebuild from photos isn't, and the run is then not recorded as the scan it waits for (review of #819, F5).
     static func retryDeclares(_ defaults: UserDefaults = .standard, kept: (String) -> KeptScan?,
-                              declare: (String, String) async throws -> Void) async {
-        for (project, run) in pendingDeclares(defaults).sorted(by: { $0.key < $1.key }) {
-            guard case .stopped(run, let photos)? = kept(project), isEnough(stoppedPhotos: photos) else {
-                setPendingDeclare(project: project, run: nil, defaults); continue
-            }
-            do {
-                try await declare(project, run)
-                setDeclaredRun(project: project, run: run, defaults)
-                setPendingDeclare(project: project, run: nil, defaults)
-            } catch let failure as CompanionError where !failure.isUnreachable && !failure.needsPairing {
-                setPendingDeclare(project: project, run: nil, defaults)
-            } catch {
-                // The Mac didn't answer: kept for the next time it does.
+                              declare: (String, String) async throws -> Bool) async {
+        for project in pendingDeclares(defaults).keys.sorted() {
+            await serially(project) {
+                // Read again inside the turn: a Remove that went first has already cleared it.
+                guard let run = pendingDeclares(defaults)[project] else { return }
+                guard case .stopped(run, let photos)? = kept(project), isEnough(stoppedPhotos: photos) else {
+                    setPendingDeclare(project: project, run: nil, defaults); return
+                }
+                do {
+                    let told = try await declare(project, run)
+                    setPendingDeclare(project: project, run: nil, defaults)
+                    if told { setDeclaredRun(project: project, run: run, defaults) }
+                    else if declaredRuns(defaults)[project] == run { setDeclaredRun(project: project, run: nil, defaults) }
+                } catch let failure as CompanionError where !failure.isUnreachable && !failure.needsPairing {
+                    setPendingDeclare(project: project, run: nil, defaults)
+                } catch {
+                    // The Mac didn't answer: kept for the next time it does.
+                }
             }
         }
     }
+
+    /// One declare, upload, forget or Remove at a time for each project, in the order they asked (regression watcher on
+    /// e6a975db, review of #819): a Remove tapped while a stopped scan's declare is on its way goes right after it, so
+    /// its forget is the last thing the Mac hears. The turn passes straight to the next in line, so nothing that asks
+    /// later, a send's upload included, can go ahead of a Remove already waiting.
+    static func serially<T>(_ project: String, _ body: () async throws -> T) async rethrows -> T {
+        if busyProjects.contains(project) {
+            await withCheckedContinuation { waiting[project, default: []].append($0) }   // resumed holding the turn
+        } else {
+            busyProjects.insert(project)
+        }
+        defer {
+            if var line = waiting[project], !line.isEmpty {
+                let next = line.removeFirst()
+                waiting[project] = line.isEmpty ? nil : line
+                next.resume()
+            } else {
+                busyProjects.remove(project)
+            }
+        }
+        return try await body()
+    }
+    private static var busyProjects = Set<String>()
+    private static var waiting: [String: [CheckedContinuation<Void, Never>]] = [:]
+
+    /// A send's declare and its upload, each in the project's turn, with a Remove that asked meanwhile going between
+    /// them (review of #819, F2): a run removed before its upload is never uploaded, and one removed during it is
+    /// forgotten after it, frames and all. Whether the run is still being sent; the caller checks again before `start`.
+    static func declareThenUpload(project: String, run: String, _ defaults: UserDefaults = .standard,
+                                  declare: () async throws -> Bool, upload: () async throws -> Void) async throws -> Bool {
+        let declared = try await serially(project) { () async throws -> Bool in
+            guard try await declare() else { return false }
+            setDeclaredRun(project: project, run: run, defaults)
+            return true
+        }
+        guard declared else { return false }
+        return try await serially(project) { () async throws -> Bool in
+            guard !isRemoved(project, run, defaults) else { return false }
+            try await upload()
+            return true
+        }
+    }
+
+    /// Stops a send whose scan was removed after its photos went: the Remove already had the Mac forget them.
+    static func ensureStillSending(_ project: String, run: String, _ defaults: UserDefaults = .standard) throws {
+        if isRemoved(project, run, defaults) { throw removedWhileSending }
+    }
+    static let removedWhileSending = MacError(code: "scan-removed", message: "You removed that scan, so it wasn't sent.")
 
     /// A stopped scan with enough photos was attached to this project: record it at once (it survives the app being
     /// suspended), then `retryPendingDeclares` tells the Mac. Whether there was one to record.
@@ -464,18 +689,23 @@ typealias MacError = CompanionError
         return true
     }
 
+    /// Whatever the Mac hasn't heard yet: Removes first, then stopped scans to declare.
     func retryPendingDeclares() async {
+        if !Self.pendingForgets().isEmpty { await Self.retryForgets(forget: { [self] in try await forgetOnMac($0, run: $1) }) }
         guard !Self.pendingDeclares().isEmpty else { return }
         await Self.retryDeclares(kept: { [self] in keptScan($0) }, declare: { [self] in try await declareKeptScan($0, run: $1) })
     }
 
     /// Sends a stopped scan's photos as they are; the Mac rebuilds from what's there and says plainly if it's too few.
     func sendStoppedScan(_ id: String, run: String) async throws -> StmObject {
-        try await start(id, captureManifest: try await sendStoppedCapture(id, run: run))
+        let manifest = try await sendStoppedCapture(id, run: run)
+        try Self.ensureStillSending(id, run: run)
+        return try await start(id, captureManifest: manifest)
     }
 
     func sendScan(_ id: String, run: String) async throws -> StmObject {
         let manifest = try await sendCapture(id, run: run)
+        try Self.ensureStillSending(id, run: run)
         return try await start(id, captureManifest: manifest)
     }
 
@@ -525,12 +755,13 @@ typealias MacError = CompanionError
         }
         let frames = try ProjectUploader.captureFrames(((try? FileManager.default.contentsOfDirectory(atPath: images.path)) ?? []))
         let manifest = Self.captureManifest(frames.map(\.name))
-        // Every image is named before any is sent: no client can start the Mac on part of them.
-        _ = try await client.declareCapture(id, manifest: manifest)
-        Self.setDeclaredRun(project: id, run: run)
-        // Then the images: the Mac takes capture frames only until a scan is there.
+        // Every image is named before any is sent: no client can start the Mac on part of them. Then the images: the
+        // Mac takes capture frames only until a scan is there.
         let files = frames.map { UploadFile.image(images.appending(path: $0.file), name: $0.name, kind: .capture) } + (hasModel ? [preview] : [])
-        try await uploader.send(files, to: id, progress: progress)
+        let sending = try await Self.declareThenUpload(project: id, run: run,
+            declare: { try await declare(id, run: run, manifest: manifest) },
+            upload: { try await uploader.send(files, to: id, progress: progress) })
+        guard sending else { throw Self.removedWhileSending }
         return manifest
     }
 
