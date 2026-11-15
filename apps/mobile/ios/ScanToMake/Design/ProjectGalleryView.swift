@@ -25,6 +25,7 @@ struct ProjectGalleryView: View {
     /// Entries whose stage picture didn't come either: then the stage's own line says both and its Try Again tries both.
     @State private var pictureFailed: Set<String> = []
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.dynamicTypeSize) private var typeSize
     @State private var measured: [String: [Double]] = [:]
     @State private var showingPhotos = false
     /// The part's AR file is being written (`ARModel.usdz`), or couldn't be.
@@ -383,7 +384,11 @@ struct ProjectGalleryView: View {
                     ForEach(gallery.entries) { item in
                         let chosen = item.id == entry?.id
                         Button { withAnimation(.snappy) { selected = item.id } } label: {
-                            Text(item.label).font(.subheadline.weight(.semibold)).lineLimit(1)
+                            // #844: at accessibility sizes one label ("What you scanned") was wider than the phone, so it
+                            // could never be seen whole even by scrolling: there each label has a width and two lines.
+                            Text(item.label).font(.subheadline.weight(.semibold)).lineLimit(typeSize.isAccessibilitySize ? 2 : 1)
+                                .multilineTextAlignment(.center).minimumScaleFactor(0.8)
+                                .frame(width: typeSize.isAccessibilitySize ? 240 : nil)
                                 .padding(.horizontal, 14).padding(.vertical, 8)
                                 .foregroundStyle(chosen ? Color.black : Color.primary)
                                 .background(chosen ? Color.white : Color.white.opacity(0.10), in: .capsule)

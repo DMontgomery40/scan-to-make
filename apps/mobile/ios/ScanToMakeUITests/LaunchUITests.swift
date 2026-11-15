@@ -1723,22 +1723,25 @@ final class LayoutParityUITests: XCTestCase {
     private func overflowing(_ app: XCUIApplication) throws -> [String] {
         let window = app.windows.firstMatch.frame
         var found: [String] = []
-        func walk(_ element: XCUIElementSnapshot) {
+        func walk(_ element: XCUIElementSnapshot, sideways inRow: Bool = false) {
             let frame = element.frame
             let visible = frame.width > 0 && frame.height > 0 && frame.maxY > window.minY && frame.minY < window.maxY
             // What a person reads or presses: it has words or a name. An unnamed container may extend past the edge by
             // design (the iPad's floating sidebar glass sits 16 pt past it); the bug's title, Print Another and chips were named.
             let named = !element.label.isEmpty || !element.identifier.isEmpty
-            if visible && named && (frame.minX < window.minX - 1 || frame.maxX > window.maxX + 1) {
+            // In a row that scrolls sideways a thing may sit past the edge, but never be wider than the screen: then it
+            // can't be seen whole even by scrolling (the gallery's "What you scanned" was 435 pt on a 402 pt phone).
+            let past = inRow ? frame.width > window.width + 1 : frame.minX < window.minX - 1 || frame.maxX > window.maxX + 1
+            if visible && named && past {
                 found.append("\(element.elementType.rawValue) \(element.identifier.isEmpty ? "-" : element.identifier) “\(element.label.prefix(40))” x \(Int(frame.minX))…\(Int(frame.maxX)) of \(Int(window.width))")
             }
-            let sideways = element.elementType == .scrollView && frame.height < window.height / 3
-            if !sideways { element.children.forEach(walkUnlessIndicator) }
+            let sideways = inRow || element.elementType == .scrollView && frame.height < window.height / 3
+            element.children.forEach { walkUnlessIndicator($0, sideways: sideways) }
         }
-        func walkUnlessIndicator(_ element: XCUIElementSnapshot) {
+        func walkUnlessIndicator(_ element: XCUIElementSnapshot, sideways: Bool = false) {
             // A scroll view's indicators sit a few points past its edge by design; they and theirs are not the page.
             if element.label.localizedCaseInsensitiveContains("scroll bar") { return }
-            walk(element)
+            walk(element, sideways: sideways)
         }
         walkUnlessIndicator(try app.snapshot())
         return found
