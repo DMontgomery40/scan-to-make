@@ -205,20 +205,36 @@ final class UpdateStagingTests: XCTestCase {
         /// What status.get answers, in order; the last repeats. A nil build: no `appBuild` (every companion before #850).
         var answers: [Result<CompanionBuildCheck.Reported, Error>] = [.success(.init(build: nil, payload: nil))]
         var decision = UpdateGate.Decision.install
+        /// Successive gate answers, when a test needs them to change; the last repeats.
+        var decisions: [UpdateGate.Decision] = []
+        func nextDecision() -> UpdateGate.Decision { decisions.isEmpty ? decision : decisions.count > 1 ? decisions.removeFirst() : decisions[0] }
         var events: [String] = [], said: [String] = [], notes: [String] = []
         var pauses = 0
         /// What launchctl says for each restart; nil: it worked.
         var kickstart: String? = nil, terminate: String? = nil
         var restarts: Int { events.filter { $0.hasPrefix("restart") }.count }
         func next() -> Result<CompanionBuildCheck.Reported, Error> { answers.count > 1 ? answers.removeFirst() : answers[0] }
+        /// What the LaunchAgent's process looks like, in order; the last repeats. nil: launchd runs none.
+        var agents: [CompanionBuildCheck.Agent?] = [nil]
+        func nextAgent() -> CompanionBuildCheck.Agent? { agents.count > 1 ? agents.removeFirst() : agents[0] }
     }
+    /// This app's bundle was put on disk at `installed` (its ctime).
+    static let installed = Date(timeIntervalSince1970: 1_794_700_800)
+    static let exe = "/Applications/Counterpart.app/Contents/MacOS/Counterpart"
+    /// beta 6's agent: started before the replace, running the replaced (now gone) file at this bundle's path.
+    static let staleAgent = CompanionBuildCheck.Agent(pid: 757, started: installed.addingTimeInterval(-60), executable: exe, executableExists: false)
+    /// The agent launchd started after the replace (or this build's own).
+    static let newAgent = CompanionBuildCheck.Agent(pid: 1239, started: installed.addingTimeInterval(300), executable: exe, executableExists: true)
+    static let refused = ControlRemoteError(code: "unavailable", message: "That isn’t available on your Mac right now.")
     private static func running(_ build: String?, _ payload: String? = ours) -> Result<CompanionBuildCheck.Reported, Error> {
         .success(.init(build: build, payload: payload))
     }
     private func check(_ fake: Fake) -> CompanionBuildCheck {
-        CompanionBuildCheck(appBuild: "202611151700", appPayload: Self.ours, effects: .init(
+        CompanionBuildCheck(appBuild: "202611151700", appPayload: Self.ours, appBundle: "/Applications/Counterpart.app",
+                            installedAt: Self.installed, effects: .init(
             status: { fake.events.append("status"); return fake.next() },
-            ask: { fake.decision },
+            agent: { fake.nextAgent() },
+            ask: { fake.nextDecision() },
             waitUntilIdle: { fake.events.append("wait") },
             restart: { method in
                 fake.events.append("restart \(method)")
@@ -303,10 +319,94 @@ final class UpdateStagingTests: XCTestCase {
         XCTAssertEqual(outcome, .restarted, "refused three times, then answered: restarted")
         let stubborn = Fake()
         stubborn.answers = Array(repeating: .failure(refused), count: CompanionBuildCheck.refusedAttempts) + [Self.running("202611151700")]
+        stubborn.agents = [Self.staleAgent]
         let restarted = await check(stubborn).run()
-        XCTAssertEqual(restarted, .restarted, "never answers status.get: a build from before #850, restarted")
+        XCTAssertEqual(restarted, .restarted, "never answers status.get, and its process predates this app: restarted")
         XCTAssertEqual(stubborn.restarts, 1)
-        XCTAssertTrue(stubborn.notes.contains { $0.contains("refuses status.get") }, stubborn.notes.joined(separator: "\n"))
+        XCTAssertTrue(stubborn.notes.contains { $0.contains("before this app's bundle ctime") }, stubborn.notes.joined(separator: "\n"))
+    }
+
+    /// Review of #854, F1a: before a fallback SIGTERM the gate is asked again; work that started since waits.
+    func testTheGateIsAskedAgainBeforeASIGTERM() async {
+        let fake = Fake()
+        fake.kickstart = "exit 1: Operation not permitted"
+        fake.decisions = [.install, .wait]
+        fake.answers = [Self.running(nil, nil), Self.running(nil, nil), Self.running("202611151700")]
+        _ = await check(fake).run()
+        XCTAssertEqual(fake.events.filter { $0 != "status" }, ["restart kickstart", "wait", "restart terminate"])
+    }
+
+    /// Review of #854, F1b: a new companion still starting after a good kickstart (no answer yet) is never sent SIGTERM.
+    func testNoSIGTERMOnAFailureAnswerAfterAGoodKickstart() async {
+        let fake = Fake()
+        fake.answers = [Self.running(nil, nil)] + Array(repeating: .failure(ControlClientError.unavailable), count: CompanionBuildCheck.kickstartAttempts + 5)
+            + [Self.running("202611151700")]
+        fake.agents = [Self.staleAgent, Self.newAgent]
+        let outcome = await check(fake).run()
+        XCTAssertEqual(outcome, .restarted)
+        XCTAssertEqual(fake.events.filter { $0 != "status" }, ["restart kickstart"], "only the kickstart")
+    }
+
+    /// Review of #854, F3: a refusing companion run by another installed copy is named, never restarted.
+    func testARefusingCompanionFromAnotherCopyIsNotRestarted() async {
+        let fake = Fake()
+        fake.answers = [.failure(Self.refused)]
+        let theirs = NSHomeDirectory() + "/Applications/Counterpart.app/Contents/MacOS/Counterpart"
+        fake.agents = [.init(pid: 900, started: Self.installed.addingTimeInterval(-3600), executable: theirs, executableExists: true)]
+        let outcome = await check(fake).run()
+        XCTAssertEqual(outcome, .otherCopy)
+        XCTAssertEqual(fake.restarts, 0)
+        XCTAssertEqual(fake.said, ["Another copy of Counterpart, in ~/Applications, runs in the background. Open that one, or remove the extra copy."])
+    }
+
+    /// Review of #854, F2: a refusal alone is no evidence. A current companion refusing under load (its process started after
+    /// this app was put on disk), or one that is busy or slow, is left alone.
+    func testARefusalAloneIsNoEvidence() async {
+        let loaded = Fake()
+        loaded.answers = [.failure(Self.refused)]
+        loaded.agents = [Self.newAgent]
+        let left = await check(loaded).run()
+        XCTAssertEqual(left, .notRunning)
+        XCTAssertEqual(loaded.restarts, 0)
+        let busy = Fake()
+        busy.answers = [.failure(ControlRemoteError(code: "busy", message: "Your Mac is answering too many requests at once."))]
+        busy.agents = [Self.newAgent]
+        let busyOutcome = await check(busy).run()
+        XCTAssertEqual(busyOutcome, .notRunning)
+        XCTAssertEqual(busy.events, ["status", "status"], "busy ends after two asks, like no answer")
+        let elsewhere = Fake()
+        elsewhere.answers = [.failure(Self.refused)]
+        elsewhere.agents = [.init(pid: 757, started: Self.installed.addingTimeInterval(-60), executable: nil, executableExists: false)]
+        let unknown = await check(elsewhere).run()
+        XCTAssertEqual(unknown, .notRunning, "older, but not known to run from this bundle's path: left alone")
+    }
+
+    /// The replaced copy may have been moved to the Trash: still this app's old copy, so a stale refusing one restarts.
+    func testAStaleProcessFromTheReplacedCopyInTheTrashIsRestarted() async {
+        let fake = Fake()
+        fake.answers = [.failure(Self.refused)] + Array(repeating: .failure(Self.refused), count: CompanionBuildCheck.refusedAttempts) + [Self.running("202611151700")]
+        fake.agents = [.init(pid: 757, started: Self.installed.addingTimeInterval(-60), executable: NSHomeDirectory() + "/.Trash/Counterpart.app/Contents/MacOS/Counterpart", executableExists: true)]
+        let outcome = await check(fake).run()
+        XCTAssertEqual(outcome, .restarted)
+    }
+
+    /// The regression watcher's trap: the bundle keeps the build's modification time (ditto, Archive Utility, Finder), the
+    /// old companion was restarted after that build time but before the install. Only ctime says it was installed later.
+    func testInstalledAtIsTheCtimeNotThePreservedModificationTime() throws {
+        let fm = FileManager.default
+        let bundle = fm.temporaryDirectory.appendingPathComponent("ctime-\(UUID().uuidString)/Counterpart.app")
+        defer { try? fm.removeItem(at: bundle.deletingLastPathComponent()) }
+        try fm.createDirectory(at: bundle.appendingPathComponent("Contents/MacOS"), withIntermediateDirectories: true)
+        let plist = bundle.appendingPathComponent("Contents/Info.plist"), exe = bundle.appendingPathComponent("Contents/MacOS/Counterpart")
+        try Data("<plist/>".utf8).write(to: plist); try Data("x".utf8).write(to: exe)
+        let built = Date().addingTimeInterval(-7200)
+        for file in [plist, exe] { try fm.setAttributes([.modificationDate: built, .creationDate: built], ofItemAtPath: file.path) }
+        let installed = try XCTUnwrap(CompanionBuildCheck.installedAt(bundle: bundle.path, executable: exe.path))
+        XCTAssertGreaterThan(installed, Date().addingTimeInterval(-60), "ctime is now, whatever the kept modification time says")
+        // The old companion was restarted after the build but before this install: stale by ctime, not by mtime.
+        let restartedAfterBuild = built.addingTimeInterval(1800)
+        XCTAssertLessThan(restartedAfterBuild, installed)
+        XCTAssertGreaterThan(restartedAfterBuild, built)
     }
 
     /// #850, clean-Mac re-verify of B: launchctl refusing kickstart ends the agent instead; launchd's KeepAlive starts it
@@ -314,7 +414,7 @@ final class UpdateStagingTests: XCTestCase {
     func testAKickstartThatFailsEndsTheAgentInstead() async {
         let fake = Fake()
         fake.kickstart = "exit 1: Operation not permitted"
-        fake.answers = [Self.running(nil, nil), Self.running("202611151700")]
+        fake.answers = [Self.running(nil, nil), Self.running(nil, nil), Self.running("202611151700")]
         let outcome = await check(fake).run()
         XCTAssertEqual(outcome, .restarted)
         XCTAssertEqual(fake.events.filter { $0 != "status" }, ["restart kickstart", "restart terminate"])
@@ -324,8 +424,9 @@ final class UpdateStagingTests: XCTestCase {
     /// A kickstart that "works" but leaves the old build answering: after a while the agent is ended instead.
     func testAKickstartThatChangesNothingEndsTheAgentInstead() async {
         let fake = Fake()
+        // Still the old build answering at the tenth ask and just before the SIGTERM.
         var answers = [Self.running(nil, nil)]
-        answers += Array(repeating: Self.running(nil, nil), count: CompanionBuildCheck.kickstartAttempts)
+        answers += Array(repeating: Self.running(nil, nil), count: CompanionBuildCheck.kickstartAttempts + 1)
         answers.append(Self.running("202611151700"))
         fake.answers = answers
         let outcome = await check(fake).run()
@@ -340,7 +441,8 @@ final class UpdateStagingTests: XCTestCase {
         fake.decision = .wait
         _ = await check(fake).run()
         let joined = fake.notes.joined(separator: "\n")
-        for expected in ["started: app build 202611151700", "status.get: appBuild=none appPayload=none", "build differs (none ≠ 202611151700)",
+        for expected in ["started: app build 202611151700", "status.get: appBuild=none appPayload=none", "agent: none running",
+                         "evidence: it answers with build none, not 202611151700",
                          "update gate: wait", "busy: waiting", "idle", "restart kickstart: ok", "result: restarted"] {
             XCTAssertTrue(joined.contains(expected), "missing \(expected) in:\n\(joined)")
         }

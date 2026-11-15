@@ -166,21 +166,33 @@ enum UpdateGate {
     enum Outcome: Equatable { case current, restarted, notRunning, didNotComeBack, otherCopy }
     /// What status.get says launched the companion: `appBuild` and `appPayload`, both nil before #850.
     struct Reported: Equatable { var build: String?; var payload: String? }
+    /// The companion's LaunchAgent process, from `launchctl print` and the process table.
+    struct Agent: Equatable {
+        var pid: Int32
+        var started: Date
+        /// Its executable (`proc_pidpath`); nil when it can't be read.
+        var executable: String?
+        /// Whether that file is still there: an app replaced by hand leaves the old process running a deleted file.
+        var executableExists: Bool
+    }
     static let didNotComeBack = "Counterpart couldn’t restart in the background after this update. Restart this Mac, then open Counterpart."
     /// Review F1: the agent belongs to another installed copy, and `kickstart -k` would relaunch that copy, not this one.
     static func otherCopy(_ payload: String, home: String = NSHomeDirectory()) -> String {
-        var folder = URL(fileURLWithPath: payload).standardizedFileURL.deletingLastPathComponent().deletingLastPathComponent()
+        let folder = URL(fileURLWithPath: payload).standardizedFileURL.deletingLastPathComponent().deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent().path
-        if folder == home || folder.hasPrefix(home + "/") { folder = "~" + folder.dropFirst(home.count) }
-        return "Another copy of Counterpart, in \(folder), runs in the background. Open that one, or remove the extra copy."
+        return "Another copy of Counterpart, in \(short(folder, home: home)), runs in the background. Open that one, or remove the extra copy."
+    }
+    /// A path with the home folder as `~`, for the person and for public log lines (review of #854, F6).
+    static func short(_ path: String, home: String = NSHomeDirectory()) -> String {
+        path == home || path.hasPrefix(home + "/") ? "~" + path.dropFirst(home.count) : path
     }
     /// About two minutes, under load, for a restarted companion to answer as this build (review F3).
     static let pauseSeconds = 2.0
     static let attempts = 60
-    /// Asks (`pause` apart, about 30 s) of a companion that answers status.get with a refusal before it is taken as a
-    /// build from before #850.
+    /// Asks (`pause` apart, about 30 s) of a companion refusing status.get as `unavailable` (#850: beta 6 does, right
+    /// after the new app opens) before the process itself is looked at. `busy` and timeouts end after two, as no answer.
     static let refusedAttempts = 15
-    /// Asks after `kickstart -k` before it is taken not to have restarted it and the agent is sent SIGTERM instead.
+    /// Asks after `kickstart -k` before the old companion, if it is positively still there, is sent SIGTERM instead.
     static let kickstartAttempts = 10
     enum Restart: Equatable {
         /// `launchctl kickstart -k`: launchd stops the job and starts it again from the bundle on disk.
@@ -191,6 +203,8 @@ enum UpdateGate {
     struct Effects {
         /// status.get's `appBuild` and `appPayload`, or why it didn't answer.
         var status: () async -> Result<Reported, Error>
+        /// The LaunchAgent's process, or nil when launchd has none running.
+        var agent: () async -> Agent?
         var ask: () async -> UpdateGate.Decision
         /// Waits, saying so, until the companion is idle.
         var waitUntilIdle: () async -> Void
@@ -203,87 +217,143 @@ enum UpdateGate {
         var note: (String) -> Void = { _ in }
     }
     let appBuild: String, appPayload: String
+    /// This app's bundle, and when it was put on disk (`installedAt`): a companion process running from this bundle's path
+    /// that started before that was started by the copy it replaced (review of #854, F2), whatever it answers.
+    let appBundle: String, installedAt: Date?
     private let effects: Effects
-    init(appBuild: String, appPayload: String, effects: Effects) { self.appBuild = appBuild; self.appPayload = appPayload; self.effects = effects }
-
-    private static func same(_ a: String, _ b: String) -> Bool {
-        let path = { (p: String) in URL(fileURLWithPath: p).standardizedFileURL.resolvingSymlinksInPath().path }
-        return path(a) == path(b)
+    init(appBuild: String, appPayload: String, appBundle: String, installedAt: Date?, effects: Effects) {
+        self.appBuild = appBuild; self.appPayload = appPayload; self.appBundle = appBundle; self.installedAt = installedAt; self.effects = effects
     }
-    private static func describe(_ answer: Result<Reported, Error>) -> String {
+
+    /// When this app was put on disk: the later inode change time (`st_ctime`) of `Contents/Info.plist` and the main
+    /// executable. Copying, unzipping or a Finder replace always sets it and none can keep an older one, unlike the
+    /// modification and birth times, which ditto, Archive Utility and Finder keep from the build (review of #854, F2).
+    static func installedAt(bundle: String, executable: String) -> Date? {
+        let times = [bundle + "/Contents/Info.plist", executable].compactMap { path -> Date? in
+            var info = stat()
+            guard stat(path, &info) == 0 else { return nil }
+            return Date(timeIntervalSince1970: TimeInterval(info.st_ctimespec.tv_sec) + TimeInterval(info.st_ctimespec.tv_nsec) / 1e9)
+        }
+        return times.max()
+    }
+
+
+    private static func standard(_ p: String) -> String { URL(fileURLWithPath: p).standardizedFileURL.resolvingSymlinksInPath().path }
+    private static func same(_ a: String, _ b: String) -> Bool { standard(a) == standard(b) }
+    private func describe(_ answer: Result<Reported, Error>) -> String {
         switch answer {
-        case .success(let r): return "appBuild=\(r.build ?? "none") appPayload=\(r.payload ?? "none")"
+        case .success(let r): return "appBuild=\(r.build ?? "none") appPayload=\(r.payload.map { Self.short($0) } ?? "none")"
         case .failure(let error): return "no answer (\(String(describing: error)))"
         }
+    }
+    private func describe(_ agent: Agent?) -> String {
+        guard let agent else { return "none running" }
+        let when = installedAt.map { "\(agent.started < $0 ? "before" : "after") this app's bundle ctime \(Self.time($0))" } ?? "bundle ctime unknown"
+        return "pid \(agent.pid), started \(Self.time(agent.started)), \(when), executable \(agent.executable.map { Self.short($0) } ?? "unknown")\(agent.executableExists ? "" : " (gone)"), \(runsFromThisBundle(agent) ? "this bundle's path" : "not this bundle's path")"
+    }
+    private static func unavailable(_ error: Error) -> Bool { (error as? ControlRemoteError)?.code == "unavailable" }
+    private static func time(_ date: Date) -> String { date.formatted(.iso8601.year().month().day().time(includingFractionalSeconds: true)) }
+    /// Runs from this bundle's path: its executable is inside this app (the file may be gone, replaced), or in the Trash
+    /// (a replaced copy moved there).
+    private func runsFromThisBundle(_ agent: Agent?) -> Bool {
+        guard let path = agent?.executable else { return false }
+        return Self.standard(path).hasPrefix(Self.standard(appBundle) + "/") || path.contains("/.Trash/")
+    }
+    /// Started before this app's files were put on disk, from this bundle's path: the copy it replaced started it.
+    private func stale(_ agent: Agent?) -> Bool {
+        guard let agent, let installedAt, runsFromThisBundle(agent) else { return false }
+        return agent.started < installedAt
+    }
+    /// The other installed copy whose executable the agent runs, if it runs one that is still there and isn't ours. A file
+    /// that is gone or in the Trash is an older copy of this app, replaced.
+    private func otherCopyBundle(_ agent: Agent?) -> String? {
+        guard let path = agent?.executable, agent?.executableExists == true, !path.contains("/.Trash/") else { return nil }
+        let exe = Self.standard(path), ours = Self.standard(appBundle)
+        guard !exe.hasPrefix(ours + "/"), let app = exe.range(of: ".app/", options: .backwards) else { return nil }
+        return String(exe[..<app.lowerBound]) + ".app"
     }
 
     func run() async -> Outcome {
         let note = effects.note
-        note("started: app build \(appBuild), payload \(appPayload)")
-        // No answer at all (no socket, a timeout): two tries (review F2), then the usual start (pairing, readiness) deals
-        // with it. A refusal is an answer from a running companion (#850: beta 6's refused status.get while the new app
-        // minted its pairing code), so it is asked for longer, and one that keeps refusing is taken as a build from before
-        // #850: a current companion never refuses status.get.
+        note("started: app build \(appBuild), bundle \(Self.short(appBundle)), bundle ctime \(installedAt.map { Self.time($0) } ?? "unknown")")
         var first = await effects.status()
-        note("status.get: \(Self.describe(first))")
+        note("status.get: \(describe(first))")
         var asks = 1
-        while case .failure(let error) = first, asks < (error is ControlRemoteError ? Self.refusedAttempts : 2) {
+        while case .failure(let error) = first, asks < (Self.unavailable(error) ? Self.refusedAttempts : 2) {
             await effects.pause()
             first = await effects.status()
             asks += 1
-            note("status.get again (\(asks)): \(Self.describe(first))")
+            note("status.get again (\(asks)): \(describe(first))")
         }
-        let running: Reported
+        let agent = await effects.agent()
+        note("agent: \(describe(agent))")
         switch first {
-        case .success(let reported): running = reported
-        case .failure(let error) where error is ControlRemoteError:
-            note("it answers but refuses status.get after \(asks) asks; taken as a build from before #850")
-            running = Reported(build: nil, payload: nil)
+        case .success(let running):
+            if let payload = running.payload, !Self.same(payload, appPayload) {
+                note("another installed copy runs the companion (\(Self.short(payload))); not restarted")
+                effects.say(Self.otherCopy(payload)); note("result: otherCopy"); return .otherCopy
+            }
+            if running.build == appBuild { note("build matches; result: current"); return .current }
+            note("evidence: it answers with build \(running.build ?? "none"), not \(appBuild)")
         case .failure:
-            note("result: notRunning")
-            return .notRunning
+            // No answer is no evidence by itself (a current companion can refuse under load, or still be starting).
+            if let other = otherCopyBundle(agent) {
+                note("another installed copy runs the companion (\(Self.short(other))); not restarted")
+                effects.say(Self.otherCopy(other + "/Contents/Resources/Payload")); note("result: otherCopy"); return .otherCopy
+            }
+            guard stale(agent) else { note("no evidence it is another build; result: notRunning"); return .notRunning }
+            note("evidence: its process started before this app's bundle ctime, from this bundle's path")
         }
-        if let payload = running.payload, !Self.same(payload, appPayload) {
-            note("another installed copy runs the companion (\(payload)); not restarted")
-            effects.say(Self.otherCopy(payload))
-            note("result: otherCopy")
-            return .otherCopy
-        }
-        if running.build == appBuild { note("build matches; result: current"); return .current }
-        note("build differs (\(running.build ?? "none") ≠ \(appBuild)); asking whether it is working")
-        let decision = await effects.ask()
-        note("update gate: \(decision)")
-        if decision == .wait {
-            note("busy: waiting, with the waiting sentence, until it is idle")
-            await effects.waitUntilIdle()
-            note("idle")
-        }
-        var method = Restart.kickstart
-        var failure = await effects.restart(method)
-        note("restart \(method): \(failure.map { "failed: \($0)" } ?? "ok")")
-        if failure != nil {
-            method = .terminate
-            failure = await effects.restart(method)
-            note("restart \(method): \(failure.map { "failed: \($0)" } ?? "ok")")
-        }
+        await waitWhileBusy()
+        let failure = await effects.restart(.kickstart)
+        note("restart kickstart: \(failure.map { "failed: \($0)" } ?? "ok")")
+        var terminated = false
+        if failure != nil { terminated = await terminateIfStillOld(agent) }
         for attempt in 1...Self.attempts {
             await effects.pause()
             let now = await effects.status()
-            if case .success(let reported) = now, reported.build == appBuild {
-                note("result: restarted, status.get \(Self.describe(now)) after \(attempt) asks")
-                return .restarted
+            if case .success(let reported) = now {
+                if reported.build == appBuild {
+                    note("result: restarted, status.get \(describe(now)) after \(attempt) asks"); return .restarted
+                }
+                if let payload = reported.payload, !Self.same(payload, appPayload) {
+                    note("another installed copy answers now (\(Self.short(payload))); result: otherCopy")
+                    effects.say(Self.otherCopy(payload)); return .otherCopy
+                }
             }
-            // kickstart said it worked but the old build still answers: end the agent instead (KeepAlive starts it again).
-            if method == .kickstart, attempt == Self.kickstartAttempts {
-                note("still \(Self.describe(now)) after kickstart; sending SIGTERM")
-                method = .terminate
-                let failed = await effects.restart(method)
-                note("restart \(method): \(failed.map { "failed: \($0)" } ?? "ok")")
+            // A kickstart that changed nothing: SIGTERM, only if the old companion is positively still the one there.
+            if !terminated, attempt == Self.kickstartAttempts {
+                note("after kickstart: status.get \(describe(now))")
+                terminated = await terminateIfStillOld(agent)
             }
         }
         effects.say(Self.didNotComeBack)
         note("result: didNotComeBack")
         return .didNotComeBack
+    }
+
+    private func waitWhileBusy() async {
+        let decision = await effects.ask()
+        effects.note("update gate: \(decision)")
+        guard decision == .wait else { return }
+        effects.note("busy: waiting, with the waiting sentence, until it is idle")
+        await effects.waitUntilIdle()
+        effects.note("idle")
+    }
+
+    /// Review of #854, F1: SIGTERM only with positive evidence the old companion is still the one running (it answers
+    /// with another build, or the same stale process is still there), and only once the gate says it isn't working.
+    private func terminateIfStillOld(_ before: Agent?) async -> Bool {
+        await waitWhileBusy()
+        let now = await effects.status(), agent = await effects.agent()
+        let answersOld: Bool
+        if case .success(let reported) = now { answersOld = reported.build != appBuild } else { answersOld = false }
+        let sameStale = agent != nil && agent?.pid == before?.pid && stale(agent)
+        effects.note("before SIGTERM: status.get \(describe(now)); agent \(describe(agent))")
+        guard answersOld || sameStale else { effects.note("no evidence the old companion is still there; no SIGTERM"); return false }
+        let failure = await effects.restart(.terminate)
+        effects.note("restart terminate: \(failure.map { "failed: \($0)" } ?? "ok")")
+        return true
     }
 }
 
