@@ -287,6 +287,11 @@ enum UpdateGate {
         }
         let agent = await effects.agent()
         note("agent: \(describe(agent))")
+        // Re-check of #854, R1: an agent running another installed copy's executable is that copy's, whatever it answers.
+        if let other = otherCopyBundle(agent) {
+            note("another installed copy runs the companion (\(Self.short(other))); not restarted")
+            effects.say(Self.otherCopy(other + "/Contents/Resources/Payload")); note("result: otherCopy"); return .otherCopy
+        }
         switch first {
         case .success(let running):
             if let payload = running.payload, !Self.same(payload, appPayload) {
@@ -297,10 +302,6 @@ enum UpdateGate {
             note("evidence: it answers with build \(running.build ?? "none"), not \(appBuild)")
         case .failure:
             // No answer is no evidence by itself (a current companion can refuse under load, or still be starting).
-            if let other = otherCopyBundle(agent) {
-                note("another installed copy runs the companion (\(Self.short(other))); not restarted")
-                effects.say(Self.otherCopy(other + "/Contents/Resources/Payload")); note("result: otherCopy"); return .otherCopy
-            }
             guard stale(agent) else { note("no evidence it is another build; result: notRunning"); return .notRunning }
             note("evidence: its process started before this app's bundle ctime, from this bundle's path")
         }
@@ -313,12 +314,13 @@ enum UpdateGate {
             await effects.pause()
             let now = await effects.status()
             if case .success(let reported) = now {
-                if reported.build == appBuild {
-                    note("result: restarted, status.get \(describe(now)) after \(attempt) asks"); return .restarted
-                }
+                // As at the start (re-check of #854, R2): another copy's answer first, then the build.
                 if let payload = reported.payload, !Self.same(payload, appPayload) {
                     note("another installed copy answers now (\(Self.short(payload))); result: otherCopy")
                     effects.say(Self.otherCopy(payload)); return .otherCopy
+                }
+                if reported.build == appBuild {
+                    note("result: restarted, status.get \(describe(now)) after \(attempt) asks"); return .restarted
                 }
             }
             // A kickstart that changed nothing: SIGTERM, only if the old companion is positively still the one there.
@@ -342,15 +344,23 @@ enum UpdateGate {
     }
 
     /// Review of #854, F1: SIGTERM only with positive evidence the old companion is still the one running (it answers
-    /// with another build, or the same stale process is still there), and only once the gate says it isn't working.
+    /// with another build, or the same stale process is still there), never another copy's, and only once the gate says
+    /// it isn't working. Re-check R3: the evidence first, then the gate, then the build once more just before the signal.
     private func terminateIfStillOld(_ before: Agent?) async -> Bool {
-        await waitWhileBusy()
         let now = await effects.status(), agent = await effects.agent()
-        let answersOld: Bool
-        if case .success(let reported) = now { answersOld = reported.build != appBuild } else { answersOld = false }
-        let sameStale = agent != nil && agent?.pid == before?.pid && stale(agent)
         effects.note("before SIGTERM: status.get \(describe(now)); agent \(describe(agent))")
+        if otherCopyBundle(agent) != nil { effects.note("another installed copy's companion; no SIGTERM"); return false }
+        var answersOld = false
+        if case .success(let reported) = now {
+            if let payload = reported.payload, !Self.same(payload, appPayload) { effects.note("another installed copy answers; no SIGTERM"); return false }
+            answersOld = reported.build != appBuild
+        }
+        let sameStale = agent != nil && agent?.pid == before?.pid && stale(agent)
         guard answersOld || sameStale else { effects.note("no evidence the old companion is still there; no SIGTERM"); return false }
+        await waitWhileBusy()
+        if case .success(let reported) = await effects.status(), reported.build == appBuild {
+            effects.note("it answers as this build now; no SIGTERM"); return false
+        }
         let failure = await effects.restart(.terminate)
         effects.note("restart terminate: \(failure.map { "failed: \($0)" } ?? "ok")")
         return true
