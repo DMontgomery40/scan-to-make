@@ -1,4 +1,5 @@
 import {CadSetupRefused} from './cad-settings.js';
+import {NO_PRINTER} from './no-printer.js';
 import {lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile} from 'node:fs/promises';
 import {dirname, join, sep} from 'node:path';
 import {createHash} from 'node:crypto';
@@ -168,6 +169,8 @@ export function createControlDispatcher(services: ControlServices) {
     try {
       switch (method) {
         case 'printer.check': {
+          // #827: with no printer listed there is only the placeholder MCP to ask; say what's missing instead.
+          if(services.objects&&!services.objects.printerListed())throw new ControlFailure('conflict',NO_PRINTER);
           if(!services.printerCheck)throw new ControlFailure('unavailable');
           return services.printerCheck.get(parameters[method].parse(raw).start);
         }

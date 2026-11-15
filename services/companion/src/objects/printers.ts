@@ -35,6 +35,9 @@ export type PrinterOrigin = 'printer-handoff' | 'counterpart' | 'claude-code' | 
 export interface PrinterCatalog {
   defaultDestinationId: string;
   destinations: PrinterDestination[];
+  /** `current` is only the host's empty install target (`placeholderEntryPoint`), never listed: with no destination
+   * listed this computer has no printer yet (#834). */
+  placeholder: boolean;
   /** Only companion code receives process settings; callers get a defensive copy. Duplicates still resolve. */
   resolve(id: string): PrinterHandoffConfig | undefined;
   /**
@@ -291,7 +294,7 @@ function winners(candidates: Candidate[], choices: Record<string, PrinterBackend
 /** Reads configured profiles only. Does not start MCP processes or contact printers. */
 export async function loadPrinterCatalog(current: PrinterHandoffConfig, options: PrinterCatalogOptions = {}): Promise<PrinterCatalog> {
   let state = await buildCatalog(current, options);
-  const catalog: PrinterCatalog = {defaultDestinationId: state.defaultDestinationId, destinations: state.destinations,
+  const catalog: PrinterCatalog = {defaultDestinationId: state.defaultDestinationId, destinations: state.destinations, placeholder: state.placeholder,
     resolve(id) { const config = state.configs.get(id); return config ? structuredClone(config) : undefined; },
     canonical(id) { return state.canonical.get(id); },
     entries() { return state.candidates.map(candidate => ({id: candidate.id, backend: candidate.backend, config: structuredClone(candidate.config)})); },
@@ -300,6 +303,7 @@ export async function loadPrinterCatalog(current: PrinterHandoffConfig, options:
       state = await buildCatalog(current, options);
       catalog.defaultDestinationId = state.defaultDestinationId;
       catalog.destinations = state.destinations;
+      catalog.placeholder = state.placeholder;
     }};
   return catalog;
 }
@@ -451,5 +455,5 @@ async function buildCatalog(current: PrinterHandoffConfig, options: PrinterCatal
     .map(({id, name, backend, model, address, source, origin, folder, incomplete}) => ({id, name: unnamed.get(id) ?? name, backend, ...(model ? {model} : {}), ...(address ? {address} : {}), source, origin,
       ...(aliases.has(id) ? {aliases: aliases.get(id)!} : {}),
       ...(alternatives.has(id) ? {mcps: alternatives.get(id)!} : {}), ...(origin === 'counterpart' && folder ? {folder} : {}), ...(incomplete ? {incomplete} : {})}));
-  return {defaultDestinationId, destinations, configs, canonical, candidates, choiceKeys};
+  return {defaultDestinationId, destinations, configs, canonical, candidates, choiceKeys, placeholder};
 }
