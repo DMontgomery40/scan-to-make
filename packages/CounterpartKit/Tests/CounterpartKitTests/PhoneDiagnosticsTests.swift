@@ -435,6 +435,23 @@ final class PhoneDiagnosticsTests: XCTestCase {
                        #"{"event":"stage.begin","stage":"3fa9c2d1","generation":"0C4F6B0E-7E0A-4B8C-9F0A-1A2B3C4D5E6F"}"#)
     }
 
+    /// A Hugging Face or Slack key in free trace text goes by its shape alone, as in the companion (`diagnostics.ts`) and
+    /// Android (`Redaction.kt`): an all-lowercase `hf_` key has no upper case or digit for the 24-character rule to catch.
+    func testHuggingFaceAndSlackKeysInFreeTraceTextGo() throws {
+        let r = { DiagnosticsRedaction.redact($0, home: "/var/mobile/Containers/Data/Application/AAAA") }
+        let lower = "hf_abcdefghijklmnopqrstuvwxyzabcd", mixed = "hf_AbCdEfGhIjKlMnOpQrStUvWx", slack = "xoxb-abcdefghij-klmnopqrst"
+        let row = #"{"event":"ai.failed","detail":"model refused with \#(lower) after a retry","time":"7"}"#
+        let out = r(row)
+        XCTAssertFalse(out.contains(lower), out)
+        XCTAssertEqual(out, #"{"event":"ai.failed","detail":"model refused with [redacted token] after a retry","time":"7"}"#)
+        XCTAssertNoThrow(try JSONSerialization.jsonObject(with: Data(out.utf8)), out)
+        for (planted, secret) in [("ai.failed: \(mixed) was rejected", mixed), ("hub said \(slack)", slack), ("key=\(lower)", lower)] {
+            XCTAssertFalse(r(planted).contains(secret), "\(planted) → \(r(planted))")
+        }
+        // Words that only start like one stay.
+        XCTAssertEqual(r("hf_cache hit, xox off"), "hf_cache hit, xox off")
+    }
+
     /// The phone's own pairing token and pin go by value, however they were written down.
     func testThePhonesOwnSecretsGoInEveryForm() {
         let token = "Q1w2E3r4T5y6U7i8O9p0A1s2D3f4G5h6J7k8L9z0X1c"

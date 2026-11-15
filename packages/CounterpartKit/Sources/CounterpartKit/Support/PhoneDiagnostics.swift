@@ -8,7 +8,7 @@ import Foundation
 /// - the phone's own secrets by value (pairing token, certificate or public-key pin, device id), in every encoding;
 /// - values of secret-named keys (JSON, escaped JSON, `key=value`, `key: value`, `--flag value`), whatever the case;
 /// - `Authorization` values, `bearer` credentials in any case, URL credentials, cookies;
-/// - JWTs, `sk-`/`ghp_`/`github_pat_`/`AKIA`/`AIza`/`xox?-` tokens, PEM blocks of any kind;
+/// - JWTs, `sk-`/`ghp_`/`github_pat_`/`AKIA`/`AIza`/`hf_`/`xox?-` tokens, PEM blocks of any kind;
 /// - 64-hex, colon-hex and base64 SHA-256 values, 32- and 43-character base64url runs (pairing codes, tokens);
 /// - emails, pairing links, IPv4 addresses, home and container paths (also with JSON's escaped slashes).
 /// Kept: a whole value of `[set]`, `[redacted…]`, empty, `true`, `false` or `null` after a secret's name (only the whole
@@ -63,6 +63,7 @@ public enum DiagnosticsRedaction {
         rule(#"\bgh[pousr]_[A-Za-z0-9]{20,}"#, "[redacted token]"),
         rule(#"\bA(?:KIA|SIA)[0-9A-Z]{16}\b"#, "[redacted key]"),
         rule(#"\bAIza[0-9A-Za-z_-]{30,}"#, "[redacted key]"),
+        rule(#"\bhf_[A-Za-z0-9]{20,}"#, "[redacted token]"),
         rule(#"\bxox[abprs]-[A-Za-z0-9-]{10,}"#, "[redacted token]"),
         // DER (a certificate or key in base64 without its PEM lines).
         rule(#"\bMII[A-Za-z0-9+/]{20,}={0,2}"#, "[redacted DER]"),
