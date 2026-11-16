@@ -67,7 +67,15 @@ struct ProjectGalleryView: View {
     }
 
     /// What the stage's downloads depend on.
-    private var wantKey: String { "\(project.id)#\(ownMesh ?? "")#\(project.scan ?? "")#\(project.mediaVersionTag)#\(String(describing: project.scanFiles))#\(scenePhase)#\(entry?.id ?? "")" }
+    private var wantKey: String { "\(project.id)#\(ownMesh ?? "")#\(project.scan ?? "")#\(project.mediaVersionTag)#\(String(describing: project.scanFiles))#\(scenePhase)#\(entry?.id ?? "")#\(Self.partMeshes(entry).joined(separator: ","))" }
+
+    /// #691: the part meshes the shown entry draws. They can arrive after the project is ready (a `project.updated` whose
+    /// `keys` include `current`), with the same entry and media version, so they are part of what the stage wants: their
+    /// arrival starts their downloads and the stage redraws without leaving the page.
+    static func partMeshes(_ entry: ProjectGallery.Entry?) -> [String] {
+        if let entry, case .parts(let drawn) = entry.drawing { return drawn.map(\.mesh) }
+        return []
+    }
 
     var body: some View {
         // #769: a pushed page's instance can draw without running its `.task`s (`BodyKick`): the downloads start from here too.
@@ -101,7 +109,7 @@ struct ProjectGalleryView: View {
         // Only a Together drawn with the scan in its seats needs the scan; a copy's is the part alone (#691).
         if gallery.entries.contains(where: { if case .assembly = $0.drawing { return true }; return false }), case .file(let path) = togetherModel { store.models.want(project, path) }
         // #691: the shown design's part meshes, each fetched like any project file.
-        if let entry, case .parts(let drawn) = entry.drawing { for part in drawn { store.models.want(project, part.mesh) } }
+        for mesh in Self.partMeshes(entry) { store.models.want(project, mesh) }
     }
 
     /// #691: the shown entry's parts on this device, each with its stage colour; nil until every part's mesh is here.

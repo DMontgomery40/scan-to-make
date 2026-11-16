@@ -946,6 +946,27 @@ private actor HeldDownload {
         return data
     }
 
+    /// #691 (#866 at 08415f69): parts arrive after the project is ready, in a `project.updated`. The same page then wants
+    /// the part meshes (so they download and the stage redraws without leaving it); before, the stage wanted only the
+    /// merged mesh and never asked for them. A one-part 3MF records no parts and keeps its merged mesh.
+    func testPartsThatArriveAfterTheProjectIsReadyAreWantedOnTheSamePage() throws {
+        let data = try Data(contentsOf: URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appending(path: "packages/contracts/fixtures/project-parts.json"))
+        let doc = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        var object = try XCTUnwrap((doc["cases"] as? [[String: Any]])?.first?["object"] as? [String: Any])
+        for (key, value) in ["id": "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a96", "createdAtMs": 1.0, "updatedAtMs": 2.0, "state": "ready",
+                             "photos": [String]()] as [String: Any] { object[key] = value }
+        let withParts = try JSONDecoder().decode(Project.self, from: JSONSerialization.data(withJSONObject: object))
+        var current = try XCTUnwrap(object["current"] as? [String: Any]); current["parts"] = nil; object["current"] = current
+        let ready = try JSONDecoder().decode(Project.self, from: JSONSerialization.data(withJSONObject: object))
+        let before = ProjectGallery(project: ready).entries.first { $0.kind == .part }
+        let after = ProjectGallery(project: withParts).entries.first { $0.kind == .part }
+        XCTAssertEqual(before?.id, after?.id, "the same entry on the same page")
+        XCTAssertEqual(ProjectGalleryView.partMeshes(before), [], "ready, before its parts: the merged mesh, nothing more wanted")
+        XCTAssertEqual(ProjectGalleryView.partMeshes(after), ["current/parts/part-1.stl", "current/parts/part-2.stl"], "the update brings them: both wanted")
+    }
+
     /// #691: a two-colour design on the stage is its two parts, each in its own colour (a dark one floored, as the stage
     /// floors every colour), lined up in the frame they share; and AR (#845) gets one USDZ of both at true size.
     func testATwoColourDesignIsDrawnPartByPartAndGoesToARAsOneFile() async throws {
