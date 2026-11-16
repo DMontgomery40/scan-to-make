@@ -577,7 +577,7 @@ final class LayoutParityUITests: XCTestCase {
         app.launch()
         let camera = app.buttons["Camera"]
         XCTAssertTrue(camera.waitForExistence(timeout: 20), "the question's answers: \(app.debugDescription)")
-        let stage = app.descendants(matching: .any)["gallery-stage"]
+        let stage = app.images["gallery-stage-picture"]
         XCTAssertTrue(stage.waitForExistence(timeout: 10))
         let said = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Nothing to show yet.")).firstMatch
         XCTAssertTrue(said.waitForExistence(timeout: 10), "the empty stage still says so in one line")
@@ -598,7 +598,7 @@ final class LayoutParityUITests: XCTestCase {
         app.launchArguments = ["-CounterpartFixtures", folder.path, "-CounterpartFixtureSet", "ar-stage", "-CounterpartScreen", "printed",
                                "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
         app.launch()
-        let stage = app.descendants(matching: .any)["gallery-stage"]
+        let stage = app.descendants(matching: .any)["model-stage"]
         XCTAssertTrue(stage.waitForExistence(timeout: 30), app.debugDescription)
         let size = app.descendants(matching: .any)["gallery-size"]
         XCTAssertTrue(size.waitForExistence(timeout: 30), "the part's size, once drawn")

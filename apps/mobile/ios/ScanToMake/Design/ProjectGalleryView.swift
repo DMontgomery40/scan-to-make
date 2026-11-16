@@ -77,7 +77,6 @@ struct ProjectGalleryView: View {
             stage
                 .frame(height: height)
                 .clipped()
-                .accessibilityElement(children: .contain).accessibilityIdentifier("gallery-stage")
                 .overlay(alignment: .bottom) { controls }
             // #848: at accessibility sizes the size line is under the stage, not a two-line chip over the model.
             if typeSize.isAccessibilitySize, let entry { sizeLine(entry, under: true) }
