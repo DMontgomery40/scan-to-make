@@ -1597,3 +1597,27 @@ test("a copy's Together is the copy in the scan's place, drawn as the part is; a
   const fit = gallery(asProject({ ...first, current, kind: "fit" }, { scan: "scan.usdz", photos: [] })).find((e) => e.kind === "together")!;
   assert.deepEqual(fit.drawing, { assembly: { part: "current/model.stl", object: "scan/scan.usdz", seats: current.seats } });
 });
+
+// #691: a design's parts land after the project is ready, with project.updated (keys current, and versions when a sealed
+// design gets them). The read after that event carries them, and the stage's design revision moves so it draws them again
+// even under the same mesh names; other updates (status, print) don't redraw the stage.
+test("parts that land after the project is ready are drawn again when their event arrives", async () => {
+  const { noteDesignChanges, withDesignRevision } = await import("../src/domain");
+  const id = "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a95";
+  let revisions = noteDesignChanges({}, [
+    { type: "project.updated", projectId: id, data: { keys: ["status"] } },
+    { type: "print.started", projectId: id },
+  ]);
+  assert.deepEqual(revisions, {}, "a status or print event leaves the stage alone");
+  revisions = noteDesignChanges(revisions, [{ type: "project.updated", projectId: id, data: { keys: ["current"] } }]);
+  assert.equal(revisions[id], 1);
+  revisions = noteDesignChanges(revisions, [{ type: "project.updated", projectId: id, data: { keys: ["current", "versions"] } }]);
+  assert.equal(revisions[id], 2);
+  const first = partsFixture().cases[0]!.object;
+  const before = asProject({ ...first, id, current: { ...first.current!, parts: undefined } });
+  assert.equal(withDesignRevision(before, {}).designRevision, undefined, "a read never carries a revision of its own");
+  assert.ok("model" in gallery(before)[0]!.drawing, "before: the merged mesh");
+  const after = withDesignRevision(asProject({ ...first, id }), revisions);
+  assert.equal(after.designRevision, 2);
+  assert.ok("parts" in gallery(after)[0]!.drawing, "after the event's read: part by part");
+});

@@ -254,7 +254,8 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
                 }
                 // #691: a multi-part design turns part by part, each in its own colour; its picture until the meshes are here.
                 val parts = (entry?.drawing as? ProjectGallery.Drawing.Parts)?.parts
-                if (entry != null && parts != null) PartsStage(shown, parts, entry.label, Modifier.fillMaxSize(), still = picture)
+                val revision = state.designRevisions.collectAsState().value[id] ?: 0
+                if (entry != null && parts != null) PartsStage(shown, parts, entry.label, Modifier.fillMaxSize(), revision = revision, still = picture)
                 else picture()
                 val draftCapsule = shownWords.phase == ProjectPhase.Ready && shown.current?.draft != null
                 StatusCapsule(shownWords.phase, text = if (draftCapsule) Project.Draft.CAPSULE else null,

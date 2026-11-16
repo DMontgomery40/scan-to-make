@@ -186,6 +186,10 @@ class AppState(private val app: Counterpart) {
 
     /** A project refresh tells the link what happened, as the list load does: an answer, a refusal (still an answer),
      *  pairing lost, or no answer at all. */
+    /** #691: per project, the last event saying its design's files changed in place (`current`, `versions`): the stage
+     *  keys its part meshes on it, so remade parts are drawn again without leaving the page. */
+    val designRevisions = MutableStateFlow<Map<String, Int>>(emptyMap())
+
     suspend fun reload(id: String): CompanionException? = try {
         val latest = app.companion.get(id)
         show(latest); answered(); remember { k, now -> k.heard(latest, now) }; null
@@ -258,6 +262,7 @@ class AppState(private val app: Counterpart) {
                                 if (e.projectId != null && e.projectId in onScreen.value) Notifications.markSeen(app, e.id, e.seq)
                                 else Notifications.post(app, e)
                                 val pid = e.projectId
+                                if (pid != null && e.changesDesign) designRevisions.update { it + (pid to e.seq) }
                                 if (pid != null) { if (e.type == "project.deleted") remove(pid) else reload(pid) }
                                 else if (e.type.startsWith("mcp.update.")) {
                                     e.data?.mcpId?.let { mcpUpdateEvents.value = mcpUpdateEvents.value + (it to e); noteMcpUpdate(it, e.type.removePrefix("mcp.update.")) }

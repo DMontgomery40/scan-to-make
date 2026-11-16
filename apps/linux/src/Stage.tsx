@@ -374,7 +374,8 @@ export function Stage({ project, locate }: { project: Project; locate?: () => vo
       live = false;
       setPartBytes(undefined);
     };
-  }, [mode, parts?.map((part) => part.mesh).join("|"), project.id, model]);
+    // #691: parts remade after the project was ready keep their names; the event that says so (designRevision) redraws them.
+  }, [mode, parts?.map((part) => part.mesh).join("|"), project.id, model, project.designRevision]);
   useEffect(() => {
     if (mode !== "3d" || !turnable || parts) return;
     let live = true;
