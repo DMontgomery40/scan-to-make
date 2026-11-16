@@ -208,6 +208,26 @@ final class ProjectGalleryTests: XCTestCase {
         }
     }
 
+    /// Review of #872 (P2-4): `parts` is all or nothing. One malformed entry and the design is drawn as if it had none (the
+    /// merged mesh, neutral), never its other parts with one missing; Android and Linux read it the same way.
+    func testOneMalformedPartDrawsTheDesignWithoutParts() throws {
+        let data = try Data(contentsOf: repoRoot.appending(path: "packages/contracts/fixtures/project-parts.json"))
+        let doc = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        var object = try XCTUnwrap((doc["cases"] as? [[String: Any]])?.first?["object"] as? [String: Any])
+        for (key, value) in ["id": "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a97", "createdAtMs": 1.0, "updatedAtMs": 2.0, "state": "ready",
+                             "photos": [String]()] as [String: Any] { object[key] = value }
+        var current = try XCTUnwrap(object["current"] as? [String: Any])
+        var parts = try XCTUnwrap(current["parts"] as? [[String: Any]])
+        parts[1]["mesh"] = 7 // not a path
+        current["parts"] = parts
+        object["current"] = current
+        let project = try JSONDecoder().decode(Project.self, from: JSONSerialization.data(withJSONObject: object))
+        XCTAssertNil(project.current?.parts, "one malformed part: no parts at all")
+        let part = try XCTUnwrap(ProjectGallery(project: project).entries.first { $0.kind == .part })
+        XCTAssertEqual(part.drawing, .model("current/model.stl"), "the merged mesh")
+        XCTAssertEqual(part.colour, .neutral)
+    }
+
     /// #691: a copy's Together is the part in the scan's place, drawn as the part is (each part in its colour), never the
     /// part inside the scan (DAD, b8158144: they z-fought, with the turntable and a loose chunk of the scan). A fit's
     /// Together is still the part with the scanned object in each seat.

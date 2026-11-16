@@ -88,7 +88,8 @@ public enum PartUSDZ {
     static func usda(_ triangles: [Triangle], srgb: SIMD3<Float>, to url: URL) throws -> Int { try usda([(triangles, srgb)], to: url) }
 
     /// The layer for several parts: one Mesh and one Material per part (`Mesh`, `Filament` for a single part, as before;
-    /// `Mesh1`…, `Filament1`… for several). Returns the triangle count of them all.
+    /// `Mesh1`…, `Filament1`… for several). Returns the triangle count of them all, or 0 (nothing written) when any part
+    /// has no triangle that can be drawn.
     static func usda(_ parts: [([Triangle], SIMD3<Float>)], to url: URL) throws -> Int {
         func stage(_ p: SIMD3<Float>) -> SIMD3<Float> { SIMD3(p.x, p.z, -p.y) * 0.001 }
         func near(_ p: SIMD3<Float>) -> Bool { p.x.isFinite && p.y.isFinite && p.z.isFinite && simd_reduce_max(simd_abs(p)) <= reach }
@@ -104,7 +105,9 @@ public enum PartUSDZ {
                 gLow = simd_min(gLow, simd_min(a, simd_min(b, c))); gHigh = simd_max(gHigh, simd_max(a, simd_max(b, c)))
                 kept.append((a, b, c)); normals.append(n)
             }
-            guard !kept.isEmpty else { continue }
+            // A part with nothing that can be drawn fails the file (review of #872): AR is then not offered, never a design
+            // with a piece missing.
+            guard !kept.isEmpty else { return 0 }
             low = simd_min(low, gLow); high = simd_max(high, gHigh)
             groups.append((kept, normals, srgb, gLow, gHigh))
         }

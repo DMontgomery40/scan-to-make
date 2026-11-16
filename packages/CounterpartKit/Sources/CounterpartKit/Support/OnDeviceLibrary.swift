@@ -59,6 +59,8 @@ public final class OnDeviceLibrary: @unchecked Sendable {
 
         public static func of(_ name: String) -> Kind {
             if name == "model.stl" || name == "current/model.stl" || name.hasPrefix("original/") { return .model }
+            // #691: a design's part meshes are models (kept and evicted as models), as Android's `Kind.of` has them.
+            if name.hasPrefix("current/parts/"), name.lowercased().hasSuffix(".stl") { return .model }
             // A sealed design's own mesh (#769): `versions/<id>/touched.stl`, or the `model.stl` sealed beside its 3MF.
             if name.hasPrefix("versions/"), !name.contains("/renders/"), !name.contains("/pictures/"), name.lowercased().hasSuffix(".stl") || name.lowercased().hasSuffix(".3mf") { return .model }
             if name.hasPrefix("scan/") || name.hasPrefix("capture/") || name.hasPrefix("photos/") { return .scan }

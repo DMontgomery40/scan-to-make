@@ -62,6 +62,19 @@ final class PartUSDZTests: XCTestCase {
         XCTAssertEqual(bounds.extents.x, 0.150, accuracy: 0.0005)
     }
 
+    /// Review of #872: a part with no triangle that can be drawn fails the whole file, so AR isn't offered, rather than an
+    /// AR file with that part quietly missing.
+    func testAPartWithNothingToDrawFailsTheFileRatherThanGoingMissing() throws {
+        let folder = try folder()
+        let target = folder.appendingPathComponent("parts.ar.usdz")
+        let flat: [PartUSDZ.Triangle] = [([0, 0, 0], [0, 0, 0], [0, 0, 0]), ([1, 1, 1], [2, 2, 2], [3, 3, 3])]
+        XCTAssertThrowsError(try PartUSDZ.write(parts: [(Self.box(), [1, 0, 0]), (flat, [0, 0, 1])], to: target)) { error in
+            XCTAssertEqual(error as? PartUSDZ.Failure, .empty)
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: target.path), "no file with a piece missing")
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: folder.path), [], "and no scratch left")
+    }
+
     @MainActor func testARealityFileNamedUSDZIsNotAUSDZ() async throws {
         let folder = try folder()
         let reality = folder.appendingPathComponent("model.usdz")
