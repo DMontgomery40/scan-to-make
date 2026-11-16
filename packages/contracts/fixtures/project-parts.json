@@ -1,5 +1,5 @@
 {
-  "about": "#691: a multi-part design drawn part by part, each part in its own colour. The companion writes current.parts (and each sealed version's result.parts) when the printer MCP meshes a 3MF's parts (counterpart/1 counterpart_part_meshes, services/printer-handoff/src/model-parts.ts): [{id, name?, colour?, plate?, painted?, mesh}], id the MCP's key (never parsed), mesh a project path to that part's STL in the 3MF's build frame in millimetres (all parts line up drawn together; parts on plate 2 and later lie at that plate's offset), colour #RRGGBB (the pass's declared colour, else the 3MF's own), plate the 0-based plate (absent for a plain 3MF), painted when the part carries painting (colour is then its base filament's). Without parts (an MCP without the tool, a one-colour model) nothing changes: the stage turns the merged mesh (mergedMesh, or the STL model) in the neutral material, as today. Every client (CounterpartKit, Android, Linux) reads each case: draw is what the stage turns for the design shown, in order, each mesh with its colour, or \"neutral\" for none. A designer's kit draws only the chosen plate's parts (publishedSelection.plateIndex); parts with no plate are on every plate. The companion's own test (services/companion/tests/objects-parts.test.mjs) writes the first two cases' records.",
+  "about": "#691: a multi-part design drawn part by part, each part in its own colour. The companion writes current.parts (and each sealed version's result.parts) when the printer MCP meshes a 3MF's parts (counterpart/1 counterpart_part_meshes, services/printer-handoff/src/model-parts.ts): [{id, name?, colour?, plate?, painted?, mesh}], id the MCP's key (never parsed), mesh a project path to that part's STL in the 3MF's build frame in millimetres (all parts line up drawn together; parts on plate 2 and later lie at that plate's offset), colour #RRGGBB (the pass's declared colour, else the 3MF's own), plate the 0-based plate (absent for a plain 3MF), painted when the part carries painting (colour is then its base filament's). Without parts (an MCP without the tool, a one-colour model) nothing changes: the stage turns the merged mesh in the neutral material, as today, named as project-gallery.json names it: a 3MF design's mergedMesh (current/model.stl), and an STL design's current model as model.stl, the companion's alias for it (GET /v1/objects/<id>/model.stl). Every client (CounterpartKit, Android, Linux) reads each case: draw is what the stage turns for the design shown, in order, each mesh with its colour, or \"neutral\" for none. A designer's kit draws only the chosen plate's parts (publishedSelection.plateIndex); parts with no plate are on every plate. The companion's own test (services/companion/tests/objects-parts.test.mjs) writes the first two cases' records. Every record here has the fields a real one carries (current.renders; a sealed version's sealedAtMs and modelSha256), so a client decodes it as it decodes the companion's.",
   "cases": [
     {
       "name": "a pass-made sign in two colours",
@@ -8,14 +8,43 @@
         "current": {
           "model": "current/model.3mf",
           "mergedMesh": "current/model.stl",
-          "filaments": [{"name": "bar", "colour": "#B0855D"}, {"name": "letters and inscription", "colour": "#111111"}],
+          "filaments": [
+            {
+              "name": "bar",
+              "colour": "#B0855D"
+            },
+            {
+              "name": "letters and inscription",
+              "colour": "#111111"
+            }
+          ],
           "parts": [
-            {"id": "1/1", "name": "bar", "colour": "#B0855D", "mesh": "current/parts/part-1.stl"},
-            {"id": "1/2", "name": "letters and inscription", "colour": "#111111", "mesh": "current/parts/part-2.stl"}
-          ]
+            {
+              "id": "1/1",
+              "name": "bar",
+              "colour": "#B0855D",
+              "mesh": "current/parts/part-1.stl"
+            },
+            {
+              "id": "1/2",
+              "name": "letters and inscription",
+              "colour": "#111111",
+              "mesh": "current/parts/part-2.stl"
+            }
+          ],
+          "renders": []
         }
       },
-      "draw": [{"mesh": "current/parts/part-1.stl", "colour": "#B0855D"}, {"mesh": "current/parts/part-2.stl", "colour": "#111111"}]
+      "draw": [
+        {
+          "mesh": "current/parts/part-1.stl",
+          "colour": "#B0855D"
+        },
+        {
+          "mesh": "current/parts/part-2.stl",
+          "colour": "#111111"
+        }
+      ]
     },
     {
       "name": "an MCP without the part-mesh tool",
@@ -24,10 +53,25 @@
         "current": {
           "model": "current/model.3mf",
           "mergedMesh": "current/model.stl",
-          "filaments": [{"name": "bar", "colour": "#B0855D"}, {"name": "letters and inscription", "colour": "#111111"}]
+          "filaments": [
+            {
+              "name": "bar",
+              "colour": "#B0855D"
+            },
+            {
+              "name": "letters and inscription",
+              "colour": "#111111"
+            }
+          ],
+          "renders": []
         }
       },
-      "draw": [{"mesh": "current/model.stl", "colour": "neutral"}]
+      "draw": [
+        {
+          "mesh": "current/model.stl",
+          "colour": "neutral"
+        }
+      ]
     },
     {
       "name": "a part the MCP and the pass gave no colour",
@@ -37,51 +81,121 @@
           "model": "current/model.3mf",
           "mergedMesh": "current/model.stl",
           "parts": [
-            {"id": "1/1", "name": "bar", "colour": "#A0522D", "mesh": "current/parts/part-1.stl"},
-            {"id": "1/2", "name": "trim", "mesh": "current/parts/part-2.stl"}
-          ]
+            {
+              "id": "1/1",
+              "name": "bar",
+              "colour": "#A0522D",
+              "mesh": "current/parts/part-1.stl"
+            },
+            {
+              "id": "1/2",
+              "name": "trim",
+              "mesh": "current/parts/part-2.stl"
+            }
+          ],
+          "renders": []
         }
       },
-      "draw": [{"mesh": "current/parts/part-1.stl", "colour": "#A0522D"}, {"mesh": "current/parts/part-2.stl", "colour": "neutral"}]
+      "draw": [
+        {
+          "mesh": "current/parts/part-1.stl",
+          "colour": "#A0522D"
+        },
+        {
+          "mesh": "current/parts/part-2.stl",
+          "colour": "neutral"
+        }
+      ]
     },
     {
       "name": "a designer's kit with its second plate chosen",
       "object": {
         "kind": "published",
-        "publishedSelection": {"fileIndex": 0, "plateIndex": 1, "sliced": false},
+        "publishedSelection": {
+          "fileIndex": 0,
+          "plateIndex": 1,
+          "sliced": false
+        },
         "current": {
           "model": "original/0f3c-caliper.3mf",
           "parts": [
-            {"id": "1/1", "name": "Body", "colour": "#FF0000", "plate": 0, "mesh": "current/parts/part-1.stl"},
-            {"id": "2/1", "name": "Depth gauge", "colour": "#FFFFFF", "plate": 1, "painted": true, "mesh": "current/parts/part-2.stl"}
-          ]
+            {
+              "id": "1/1",
+              "name": "Body",
+              "colour": "#FF0000",
+              "plate": 0,
+              "mesh": "current/parts/part-1.stl"
+            },
+            {
+              "id": "2/1",
+              "name": "Depth gauge",
+              "colour": "#FFFFFF",
+              "plate": 1,
+              "painted": true,
+              "mesh": "current/parts/part-2.stl"
+            }
+          ],
+          "renders": []
         }
       },
-      "draw": [{"mesh": "current/parts/part-2.stl", "colour": "#FFFFFF"}]
+      "draw": [
+        {
+          "mesh": "current/parts/part-2.stl",
+          "colour": "#FFFFFF"
+        }
+      ]
     },
     {
       "name": "a sealed two-colour design after a one-colour revision",
       "object": {
         "kind": "copy",
-        "current": {"model": "current/model.stl"},
+        "current": {
+          "model": "current/model.stl",
+          "renders": []
+        },
         "versions": [
           {
             "id": "b8158144-0000-4000-8000-000000000001",
+            "sealedAtMs": 1794846832068,
+            "passStartedAtMs": 1794845462228,
+            "modelSha256": "5f2b9c4e8a1d3f6b7c0e9a2d4b6f8c1e3a5d7b9f0c2e4a6b8d0f1a3c5e7b9d2f",
             "result": {
               "model": "versions/b8158144-0000-4000-8000-000000000001/model.3mf",
               "parts": [
-                {"id": "1/1", "name": "bar", "colour": "#B0855D", "mesh": "versions/b8158144-0000-4000-8000-000000000001/parts/part-1.stl"},
-                {"id": "1/2", "name": "letters and inscription", "colour": "#111111", "mesh": "versions/b8158144-0000-4000-8000-000000000001/parts/part-2.stl"}
-              ]
+                {
+                  "id": "1/1",
+                  "name": "bar",
+                  "colour": "#B0855D",
+                  "mesh": "versions/b8158144-0000-4000-8000-000000000001/parts/part-1.stl"
+                },
+                {
+                  "id": "1/2",
+                  "name": "letters and inscription",
+                  "colour": "#111111",
+                  "mesh": "versions/b8158144-0000-4000-8000-000000000001/parts/part-2.stl"
+                }
+              ],
+              "renders": []
             }
           }
         ]
       },
-      "draw": [{"mesh": "current/model.stl", "colour": "neutral"}],
+      "draw": [
+        {
+          "mesh": "model.stl",
+          "colour": "neutral"
+        }
+      ],
       "drawVersion": {
         "b8158144-0000-4000-8000-000000000001": [
-          {"mesh": "versions/b8158144-0000-4000-8000-000000000001/parts/part-1.stl", "colour": "#B0855D"},
-          {"mesh": "versions/b8158144-0000-4000-8000-000000000001/parts/part-2.stl", "colour": "#111111"}
+          {
+            "mesh": "versions/b8158144-0000-4000-8000-000000000001/parts/part-1.stl",
+            "colour": "#B0855D"
+          },
+          {
+            "mesh": "versions/b8158144-0000-4000-8000-000000000001/parts/part-2.stl",
+            "colour": "#111111"
+          }
         ]
       }
     }

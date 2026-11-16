@@ -158,6 +158,13 @@ test('sealing a version keeps its parts; a one-colour revision leaves current wi
     ['1/2', '#111111', `versions/${sealed.id}/parts/part-2.stl`],
   ]);
   for (const part of sealed.result.parts) assert.equal(await readFile(join(dir, part.mesh), 'utf8'), partStl(part.name));
+  // #869: the shared fixture's sealed version is shaped as this one is, so every client decodes it as a real one.
+  const shared = fixture.cases.find(c => c.name.startsWith('a sealed')).object.versions[0];
+  for (const key of ['id', 'sealedAtMs', 'modelSha256', 'result']) assert.ok(key in shared, `the fixture's version has ${key}`);
+  for (const [key, value] of Object.entries(shared)) assert.equal(typeof value, typeof sealed[key], `${key} is what the companion writes`);
+  assert.match(shared.modelSha256, /^[0-9a-f]{64}$/);
+  assert.match(sealed.modelSha256, /^[0-9a-f]{64}$/);
+  assert.ok(Array.isArray(shared.result.renders) && Array.isArray(sealed.result.renders));
 });
 
 test('each part\'s mesh is served beside the project, for the current design and a sealed one; nothing else under parts/ is', async t => {
@@ -180,4 +187,17 @@ test('each part\'s mesh is served beside the project, for the current design and
   const sealed = (await f.service.get(object.id)).versions.find(version => version.result.parts);
   assert.equal((await fetch(`${base}/${sealed.result.parts[0].mesh}`)).status, 200);
   assert.equal((await fetch(`${base}/current/parts/part-2.stl`)).status, 404, 'a one-colour revision has none');
+});
+
+test('the parts fixture names the merged mesh as project-gallery.json does (#869)', async () => {
+  const gallery = JSON.parse(await readFile(new URL('../../../packages/contracts/fixtures/project-gallery.json', import.meta.url), 'utf8'));
+  const drawn = test => gallery.cases.find(c => test(c.project.current ?? {}) && c.entries?.[0]?.kind === 'part')?.entries[0].drawing.model;
+  // An STL design turns as the companion's alias for its current model; a 3MF design as its merged mesh.
+  const stl = drawn(current => current.model === 'current/model.stl' && !current.mergedMesh);
+  const merged = drawn(current => current.model === 'current/model.3mf' && current.mergedMesh);
+  assert.equal(stl, 'model.stl');
+  assert.equal(merged, 'current/model.stl');
+  assert.deepEqual(fixture.cases.find(c => c.name.startsWith('a sealed')).draw, [{mesh: stl, colour: 'neutral'}]);
+  assert.deepEqual(fixture.cases.find(c => c.name === 'an MCP without the part-mesh tool').draw, [{mesh: merged, colour: 'neutral'}]);
+  for (const c of fixture.cases) assert.ok(Array.isArray(c.object.current.renders), `${c.name}: current has its renders, as a real record does`);
 });
