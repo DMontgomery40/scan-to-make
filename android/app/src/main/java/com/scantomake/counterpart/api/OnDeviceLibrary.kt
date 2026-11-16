@@ -31,7 +31,8 @@ class OnDeviceLibrary(val base: File) {
         Scan, Model, Picture;
         companion object {
             fun of(name: String): Kind = when {
-                name == "model.stl" || name.startsWith("original/") -> Model
+                // A part's own mesh (#691) is a model too, kept with the models, not the pictures.
+                name == "model.stl" || name.startsWith("original/") || name.lowercase().endsWith(".stl") -> Model
                 name.startsWith("scan/") || name.startsWith("capture/") || name.startsWith("photos/") -> Scan
                 else -> Picture
             }

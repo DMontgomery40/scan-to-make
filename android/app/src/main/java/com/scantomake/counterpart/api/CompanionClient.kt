@@ -88,7 +88,7 @@ class CompanionClient(
                     if (m("/v1/objects(?:/printers)?") || m(one) || m("$one/passes/(0|[1-9][0-9]{0,15})/activity")) return "projects:read"
                     if (m("/healthz")) return "generation:health"
                     if (m("/v1/events") || m("/v1/settings") || m("/v1/settings/cad") || m("/v1/devices")) return "projects:read"
-                    if (m("$one/(model\\.stl|reconstruction-preview\\.stl|renders/[^/]+|photos/[^/]+|capture/[^/]+|scan/[^/]+|pictures/[^/]+|original/[0-9]+|asks/[^/]+|prints/[^/]+/frames/[^/]+|versions/[^/]+/(?:(?:renders|pictures)/)?[^/]+)")) return "projects:read"
+                    if (m("$one/(model\\.stl|reconstruction-preview\\.stl|renders/[^/]+|photos/[^/]+|capture/[^/]+|scan/[^/]+|pictures/[^/]+|current/parts/[^/]+|original/[0-9]+|asks/[^/]+|prints/[^/]+/frames/[^/]+|versions/[^/]+/(?:(?:renders|pictures|parts)/)?[^/]+)")) return "projects:read"
                     if (m("$one/(filaments|colour-mapping|camera\\.jpg)") || m("/v1/objects/printers/[^/]+/camera\\.jpg")) return "printer-handoff:use"
                     if (m("/v1/objects/printers/[A-Za-z0-9_-]{1,256}/route")) return "printer-handoff:use"
                 }
@@ -391,7 +391,7 @@ class CompanionClient(
 
     // MARK: Files
 
-    private val allowed = Pattern("""original/[0-9]+|model\.stl|renders/[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.png|asks/[a-f0-9-]{36}\.(jpg|png)|prints/[a-f0-9-]{36}/frames/[a-f0-9-]{36}\.jpg|(?:photos|capture|scan)/[A-Za-z0-9][A-Za-z0-9._ -]{0,127}|pictures/[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.png|versions/[a-f0-9-]{36}/(?:(?:renders|pictures)/)?[A-Za-z0-9][A-Za-z0-9._-]{0,120}""")
+    private val allowed = Pattern("""original/[0-9]+|model\.stl|renders/[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.png|asks/[a-f0-9-]{36}\.(jpg|png)|prints/[a-f0-9-]{36}/frames/[a-f0-9-]{36}\.jpg|(?:photos|capture|scan)/[A-Za-z0-9][A-Za-z0-9._ -]{0,127}|pictures/[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.png|current/parts/[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.stl|versions/[a-f0-9-]{36}/(?:(?:renders|pictures|parts)/)?[A-Za-z0-9][A-Za-z0-9._-]{0,120}""")
 
     /** The newest copy of this file the phone keeps, of any version: drawn at once, before (and whether or not) the computer answers. */
     fun stored(project: Project, name: String): File? = library?.latest(project.id, name)?.first

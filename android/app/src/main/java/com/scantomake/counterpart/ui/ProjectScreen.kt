@@ -101,6 +101,12 @@ import kotlinx.serialization.json.JsonPrimitive
 import java.io.File
 
 /** A project (PRD §5.3): its model, what the Mac is doing or asking, and what you can do next. */
+/** #842: the stage's height while there is nothing to draw (the iPhone's 120 pt). */
+val EMPTY_STAGE = 120.dp
+
+/** #848: the font scales at which the stage's chips would cover the model (Android's accessibility sizes, 1.5× and up). */
+fun largeStageText(fontScale: Float): Boolean = fontScale >= 1.5f
+
 @Composable
 fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () -> Unit, scan: () -> Unit,
                   makeFromScan: () -> Unit = {}, open: (String) -> Unit = {}) {
@@ -222,24 +228,46 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
             val gallery = remember(shown) { ProjectGallery.of(shown) }
             var chosen by remember(id, version?.id) { mutableStateOf<String?>(null) }
             val entry = gallery.entries.firstOrNull { it.id == chosen } ?: gallery.first
-            Box(Modifier.fillMaxWidth().aspectRatio(1.1f).clip(RoundedCornerShape(28.dp))) {
-                // With nothing in the gallery yet (photos sent, no model): the subject the computer cut out, as on its card.
+            // With nothing in the gallery yet (photos sent, no model): the subject the computer cut out, as on its card.
+            val photo = shown.photoPicture()
+            // #842: with nothing to draw the stage is short, so a question's card and its action are on the first screen;
+            // it grows when the scan or the model comes (the iPhone's `emptyStage`, 120 pt).
+            val emptyStage = entry == null && photo == null
+            // #848: at the largest font scales the size and See It Together go under the stage, never over the model.
+            val largeText = largeStageText(androidx.compose.ui.platform.LocalDensity.current.fontScale)
+            val canTogether = version == null && entry?.kind == ProjectGallery.Kind.Part && project.canLocate
+            val sizeLine = entry?.sizeText()
+            val together: @Composable (Modifier) -> Unit = { modifier ->
+                Text("See It Together", modifier.testTag("see-it-together").clip(RoundedCornerShape(50)).background(Color.Black.copy(alpha = 0.62f))
+                    .clickable(enabled = idle, role = Role.Button) { run("locate") { state.show(app.companion.locate(id)) } }
+                    .padding(14.dp, 8.dp), color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+            }
+            Box(Modifier.fillMaxWidth().then(if (emptyStage) Modifier.height(EMPTY_STAGE) else Modifier.aspectRatio(1.1f))
+                .clip(RoundedCornerShape(28.dp)).testTag("project-stage")) {
                 // The one stage picture (review B1/S7 on #539): this entry's own picture, or that it is coming, or that it can't be had.
-                val photo = shown.photoPicture()
-                StagePicture(shown,
-                    still = entry?.let(shown::still) ?: photo?.let { Still.Picture(it) } ?: if (shownWords.busy) Still.Waiting else Still.NotAvailable,
-                    label = entry?.label ?: if (photo != null) "Your photo" else words.title,
-                    unavailableLine = when { entry == null -> "Nothing to show yet."; entry.kind == ProjectGallery.Kind.Plate -> "No picture of this plate came with the file."; else -> "Your computer couldn't draw a picture of this." },
-                    modifier = Modifier.fillMaxSize())
+                val picture: @Composable () -> Unit = {
+                    StagePicture(shown,
+                        still = entry?.let(shown::still) ?: photo?.let { Still.Picture(it) } ?: if (shownWords.busy) Still.Waiting else Still.NotAvailable,
+                        label = entry?.label ?: if (photo != null) "Your photo" else words.title,
+                        unavailableLine = when { entry == null -> "Nothing to show yet."; entry.kind == ProjectGallery.Kind.Plate -> "No picture of this plate came with the file."; else -> "Your computer couldn't draw a picture of this." },
+                        modifier = Modifier.fillMaxSize())
+                }
+                // #691: a multi-part design turns part by part, each in its own colour; its picture until the meshes are here.
+                val parts = (entry?.drawing as? ProjectGallery.Drawing.Parts)?.parts
+                if (entry != null && parts != null) PartsStage(shown, parts, entry.label, Modifier.fillMaxSize(), still = picture)
+                else picture()
                 val draftCapsule = shownWords.phase == ProjectPhase.Ready && shown.current?.draft != null
                 StatusCapsule(shownWords.phase, text = if (draftCapsule) Project.Draft.CAPSULE else null,
                     modifier = Modifier.padding(12.dp).testTag("status-capsule"), icon = if (draftCapsule) CIcons.Warning else null)
-                entry?.sizeText()?.let { Text(it, Modifier.align(Alignment.BottomStart).padding(12.dp).clip(RoundedCornerShape(50)).background(Color.Black.copy(alpha = 0.55f)).padding(8.dp, 4.dp), fontSize = 12.sp) }
-                // On the picture, with the same dark backing as the size and status chips, so it reads on either stage.
-                if (version == null && entry?.kind == ProjectGallery.Kind.Part && project.canLocate) Text("See It Together",
-                    Modifier.align(Alignment.BottomEnd).padding(12.dp).clip(RoundedCornerShape(50)).background(Color.Black.copy(alpha = 0.62f))
-                        .clickable(enabled = idle, role = Role.Button) { run("locate") { state.show(app.companion.locate(id)) } }
-                        .padding(14.dp, 8.dp), color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                if (!largeText) {
+                    sizeLine?.let { Text(it, Modifier.align(Alignment.BottomStart).padding(12.dp).testTag("project-size").clip(RoundedCornerShape(50)).background(Color.Black.copy(alpha = 0.55f)).padding(8.dp, 4.dp), fontSize = 12.sp) }
+                    // On the picture, with the same dark backing as the size and status chips, so it reads on either stage.
+                    if (canTogether) together(Modifier.align(Alignment.BottomEnd).padding(12.dp))
+                }
+            }
+            if (largeText && (sizeLine != null || canTogether)) Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                sizeLine?.let { Text(it, Modifier.testTag("project-size"), color = Palette.secondary, fontSize = 12.sp) }
+                if (canTogether) together(Modifier)
             }
             if (gallery.entries.size > 1) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).semantics { contentDescription = "Pictures" },
                 horizontalArrangement = Arrangement.spacedBy(8.dp)) {

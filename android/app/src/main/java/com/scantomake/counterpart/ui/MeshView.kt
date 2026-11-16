@@ -25,7 +25,7 @@ data class MeshHighlight(val min: FloatArray, val max: FloatArray, val axis: Int
  * An orbit/zoom view of a real triangle mesh (OpenGL ES 2.0, flat-shaded), framed on given bounds and
  * able to draw a selection box in the mesh's own coordinates. Drag turns it; pinch zooms.
  */
-class MeshSurfaceView(context: Context) : GLSurfaceView(context) {
+class MeshSurfaceView(context: Context, private val background: FloatArray = floatArrayOf(0.05f, 0.05f, 0.07f)) : GLSurfaceView(context) {
     private val renderer = MeshRenderer()
     @Volatile private var azimuth = 35f
     @Volatile private var elevation = 22f
@@ -63,7 +63,17 @@ class MeshSurfaceView(context: Context) : GLSurfaceView(context) {
 
     fun show(mesh: StlMesh, frameMin: FloatArray, frameMax: FloatArray) {
         azimuth = 35f; elevation = 22f; zoom = 1f
-        queueEvent { renderer.setMesh(mesh, frameMin, frameMax) }
+        queueEvent { renderer.setMeshes(listOf(mesh to REVIEW_GREY), frameMin, frameMax) }
+        requestRender()
+    }
+
+    /** #691: several meshes in one frame (a multi-part design's parts), each in its own colour (linear 0–1 RGB). */
+    fun showParts(parts: List<Pair<StlMesh, FloatArray>>) {
+        if (parts.isEmpty()) return
+        val lo = FloatArray(3) { a -> parts.minOf { it.first.boundsMin[a] } }
+        val hi = FloatArray(3) { a -> parts.maxOf { it.first.boundsMax[a] } }
+        azimuth = 35f; elevation = 22f; zoom = 1f
+        queueEvent { renderer.setMeshes(parts, lo, hi) }
         requestRender()
     }
 
@@ -74,9 +84,9 @@ class MeshSurfaceView(context: Context) : GLSurfaceView(context) {
 
     private inner class MeshRenderer : Renderer {
         private var program = 0
-        private var meshBuffers = IntArray(2)
+        /** Each mesh's position and normal buffers, triangle count and colour. */
+        private var pieces: List<Triple<IntArray, Int, FloatArray>> = emptyList()
         private var lineBuffer = IntArray(1)
-        private var triangleCount = 0
         private var lineCount = 0
         private var axisLineStart = 0
         private var axisLineCount = 0
@@ -88,12 +98,15 @@ class MeshSurfaceView(context: Context) : GLSurfaceView(context) {
         private val mvp = FloatArray(16)
         private val normalM = FloatArray(16)
 
-        fun setMesh(mesh: StlMesh, frameMin: FloatArray, frameMax: FloatArray) {
-            GLES20.glDeleteBuffers(2, meshBuffers, 0)
-            GLES20.glGenBuffers(2, meshBuffers, 0)
-            upload(meshBuffers[0], mesh.positions)
-            upload(meshBuffers[1], mesh.normals)
-            triangleCount = mesh.renderedTriangles
+        fun setMeshes(meshes: List<Pair<StlMesh, FloatArray>>, frameMin: FloatArray, frameMax: FloatArray) {
+            pieces.forEach { GLES20.glDeleteBuffers(2, it.first, 0) }
+            pieces = meshes.map { (mesh, colour) ->
+                val buffers = IntArray(2)
+                GLES20.glGenBuffers(2, buffers, 0)
+                upload(buffers[0], mesh.positions)
+                upload(buffers[1], mesh.normals)
+                Triple(buffers, mesh.renderedTriangles, colour)
+            }
             center = FloatArray(3) { (frameMin[it] + frameMax[it]) / 2 }
             var r = 0f
             for (a in 0 until 3) r = max(r, (frameMax[a] - frameMin[a]) / 2)
@@ -135,7 +148,7 @@ class MeshSurfaceView(context: Context) : GLSurfaceView(context) {
         }
 
         override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
-            GLES20.glClearColor(0.05f, 0.05f, 0.07f, 1f)
+            GLES20.glClearColor(background[0], background[1], background[2], 1f)
             GLES20.glEnable(GLES20.GL_DEPTH_TEST)
             fun shader(type: Int, src: String) = GLES20.glCreateShader(type).also { GLES20.glShaderSource(it, src); GLES20.glCompileShader(it) }
             program = GLES20.glCreateProgram()
@@ -151,7 +164,7 @@ class MeshSurfaceView(context: Context) : GLSurfaceView(context) {
 
         override fun onDrawFrame(gl: GL10?) {
             GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT or GLES20.GL_DEPTH_BUFFER_BIT)
-            if (triangleCount == 0 || program == 0) return
+            if (pieces.none { it.second > 0 } || program == 0) return
             val distance = radius * 3.2f / max(0.1f, zoom)
             Matrix.setLookAtM(view, 0, 0f, 0f, distance, 0f, 0f, 0f, 0f, 1f, 0f)
             Matrix.setIdentityM(model, 0)
@@ -167,16 +180,18 @@ class MeshSurfaceView(context: Context) : GLSurfaceView(context) {
             val normLoc = GLES20.glGetAttribLocation(program, "a_Normal")
             val colourLoc = GLES20.glGetUniformLocation(program, "u_Colour")
             val flatLoc = GLES20.glGetUniformLocation(program, "u_Flat")
-            // The mesh itself.
+            // The meshes themselves, each in its colour.
             GLES20.glUniform1f(flatLoc, 0f)
-            GLES20.glUniform4f(colourLoc, 0.72f, 0.78f, 0.84f, 1f)
-            GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, meshBuffers[0])
-            GLES20.glVertexAttribPointer(posLoc, 3, GLES20.GL_FLOAT, false, 0, 0)
-            GLES20.glEnableVertexAttribArray(posLoc)
-            GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, meshBuffers[1])
-            GLES20.glVertexAttribPointer(normLoc, 3, GLES20.GL_FLOAT, false, 0, 0)
-            GLES20.glEnableVertexAttribArray(normLoc)
-            GLES20.glDrawArrays(GLES20.GL_TRIANGLES, 0, triangleCount * 3)
+            for ((buffers, triangles, colour) in pieces) {
+                GLES20.glUniform4f(colourLoc, colour[0], colour[1], colour[2], 1f)
+                GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, buffers[0])
+                GLES20.glVertexAttribPointer(posLoc, 3, GLES20.GL_FLOAT, false, 0, 0)
+                GLES20.glEnableVertexAttribArray(posLoc)
+                GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, buffers[1])
+                GLES20.glVertexAttribPointer(normLoc, 3, GLES20.GL_FLOAT, false, 0, 0)
+                GLES20.glEnableVertexAttribArray(normLoc)
+                GLES20.glDrawArrays(GLES20.GL_TRIANGLES, 0, triangles * 3)
+            }
             // The selection box over it.
             if (lineCount + axisLineCount > 0) {
                 GLES20.glUniform1f(flatLoc, 1f)
@@ -200,6 +215,8 @@ class MeshSurfaceView(context: Context) : GLSurfaceView(context) {
     }
 
     companion object {
+        /** The review preview's own grey (the reconstruction review), unchanged. */
+        private val REVIEW_GREY = floatArrayOf(0.72f, 0.78f, 0.84f)
         private const val VERTEX = """
             attribute vec4 a_Position; attribute vec3 a_Normal;
             uniform mat4 u_MVP; uniform mat4 u_Normal;

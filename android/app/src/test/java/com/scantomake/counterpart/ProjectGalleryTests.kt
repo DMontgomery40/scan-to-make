@@ -6,6 +6,7 @@ import com.scantomake.counterpart.api.canLocate
 import com.scantomake.counterpart.api.drawnColour
 import com.scantomake.counterpart.api.photoPicture
 import com.scantomake.counterpart.api.picturePath
+import com.scantomake.counterpart.api.showingDesign
 import com.scantomake.counterpart.api.Still
 import com.scantomake.counterpart.api.still
 import com.scantomake.counterpart.core.parseObject
@@ -55,9 +56,48 @@ class ProjectGalleryTests {
                         assertEquals(name, a["object"]!!.jsonPrimitive.content, d.obj)
                         assertEquals(name, a["seats"]!!.jsonPrimitive.int, d.seats.size)
                     }
+                    is ProjectGallery.Drawing.Parts -> org.junit.Assert.fail("$name: no gallery case has parts (project-parts.json does)")
                 }
             }
         }
+    }
+
+    /**
+     * #691: what the stage turns for a design, part by part, from packages/contracts/fixtures/project-parts.json: each part's
+     * mesh in its own colour, neutral for one with none, only the chosen plate's parts of a designer's kit, a sealed
+     * design's own parts when it is shown, and the merged mesh exactly as before when there are no parts.
+     */
+    @Test fun eachPartIsDrawnInItsOwnColourFromTheSharedPartCases() {
+        val cases = parseObject(contractFixture("project-parts.json").readText())!!["cases"]!!.jsonArray.map { it.jsonObject }
+        assertEquals(5, cases.size)
+        fun word(c: ProjectGallery.Colour) = when (c) { is ProjectGallery.Colour.Spool -> c.hex; else -> "neutral" }
+        fun drawn(p: Project): List<Pair<String, String>> {
+            val entry = ProjectGallery.of(p).entries.first { it.kind == ProjectGallery.Kind.Part }
+            return when (val d = entry.drawing) {
+                is ProjectGallery.Drawing.Parts -> d.parts.map { it.mesh to word(it.colour) }
+                is ProjectGallery.Drawing.Model -> listOf(d.path to word(entry.colour))
+                else -> error("${entry.drawing} is not turned")
+            }
+        }
+        fun want(e: JsonElement) = e.jsonArray.map { it.jsonObject["mesh"]!!.jsonPrimitive.content to it.jsonObject["colour"]!!.jsonPrimitive.content }
+        for (item in cases) {
+            val name = item["name"]!!.jsonPrimitive.content
+            val record = JsonObject(mapOf("id" to JsonPrimitive("6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a99"), "createdAtMs" to JsonPrimitive(1),
+                "updatedAtMs" to JsonPrimitive(2), "state" to JsonPrimitive("ready")) + item["object"]!!.jsonObject)
+            val project = Project.decode(record)!!
+            assertEquals(name, want(item["draw"]!!), drawn(project))
+            item["drawVersion"]?.jsonObject?.forEach { (id, draw) -> assertEquals("$name, design $id", want(draw), drawn(project.showingDesign(id))) }
+        }
+    }
+
+    /** #706: the stage draws each part through the dark-part floor; a part with no colour is the neutral material. */
+    @Test fun eachPartsDrawnColourGoesThroughTheDarkPartFloor() {
+        fun rgb(hex: String) = hex.removePrefix("#").toInt(16).let { floatArrayOf(((it shr 16) and 255) / 255f, ((it shr 8) and 255) / 255f, (it and 255) / 255f) }
+        assertTrue(com.scantomake.counterpart.api.stageRgb(ProjectGallery.Colour.Spool("#000000")).contentEquals(rgb("#333435")))
+        assertTrue(com.scantomake.counterpart.api.stageRgb(ProjectGallery.Colour.Spool("#111111")).contentEquals(rgb(drawnColour("#111111"))))
+        assertTrue(drawnColour("#111111") != "#111111")
+        assertTrue(com.scantomake.counterpart.api.stageRgb(ProjectGallery.Colour.Spool("#B0855D")).contentEquals(rgb("#B0855D")))
+        assertTrue(com.scantomake.counterpart.api.stageRgb(ProjectGallery.Colour.Neutral).contentEquals(rgb(com.scantomake.counterpart.api.NEUTRAL_MATERIAL)))
     }
 
     /** The stage stays dark for every colour (David, Nov 11): a dark part is floored in its material, not by lightening the backdrop. */

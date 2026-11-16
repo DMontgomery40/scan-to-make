@@ -191,8 +191,15 @@ export interface Project {
     ownSettings?: boolean;
     /** A fit's places for the scanned object (docs/protocols/seats.md). */
     seats?: { name?: string; translationMm: number[]; rotationDeg: number[] }[];
+    /**
+     * #691: each part of a multi-part design as the printer MCP meshed it (packages/contracts/fixtures/project-parts.json):
+     * `mesh` a project path in the 3MF's build frame, `plate` 0-based (absent: on every plate).
+     */
+    parts?: { id: string; name?: string; colour?: string; plate?: number; painted?: boolean; mesh: string }[];
   };
   scan?: string;
+  /** A designer's file and plate the person chose (the companion's `publishedSelection`). */
+  publishedSelection?: { fileIndex?: number; plateIndex?: number; sliced?: boolean };
   /** The project whose scan this one was made from, with its title then ("Make something else from this scan"). */
   scanFrom?: { id: string; title: string };
   /** The project's picture (PRD §5.1): the object alone on the stage, drawn by the computer. */

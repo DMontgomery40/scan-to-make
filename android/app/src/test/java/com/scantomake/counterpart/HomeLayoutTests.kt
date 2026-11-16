@@ -205,6 +205,95 @@ class HomeLayoutTests {
         assertEquals("Your project’s picture. No picture came with this question.", AskPicture.caption(null))
     }
 
+    private fun showPage(id: String, data: JsonObject, fontScale: Float = 1f) {
+        app.pairingStore.save(v2Record(ADDRESSES[0]), false)
+        val fake = FakeTransport { request, _ -> when {
+            request.url.endsWith("/v1/objects/$id") -> HttpReply(200, WireJson.encodeToString(JsonElement.serializer(), JsonObject(mapOf("object" to data))).toByteArray())
+            else -> json(404, mapOf("error" to mapOf("code" to "not-found", "message" to "not here")))
+        } }
+        app.pairing = PairingClient(app.pairingStore, fake)
+        app.companion = CompanionClient(app.pairing, fake, null, null, app.cacheDir)
+        state.projects.value = listOf(project("other", "Existing project", "ready"), requireNotNull(Project.decode(data)))
+        state.loaded.value = true
+        compose.setContent { WithApp {
+            val density = androidx.compose.ui.platform.LocalDensity.current
+            androidx.compose.runtime.CompositionLocalProvider(androidx.compose.ui.platform.LocalDensity provides androidx.compose.ui.unit.Density(density.density, fontScale)) {
+                com.scantomake.counterpart.ui.ProjectScreen(id, back = {}, print = {}, printing = {}, scan = {})
+            }
+        } }
+    }
+
+    /** #842 with projects present: a project with nothing to draw has a short stage, so the question's card and its
+     *  action are on the first screen; it was the full-width 1.1 stage and pushed them below the fold. */
+    @Test fun anEmptyStageIsShortSoTheQuestionsActionIsOnTheFirstScreenWithProjectsPresent() {
+        val id = "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a06"
+        showPage(id, WireJson.parseToJsonElement(
+            """{"id":"$id","title":"Wall holder for three","instructions":"Make something that holds three of these","state":"needs-closeup",
+               "createdAtMs":1,"updatedAtMs":2,"photos":[],"passes":[{"startedAtMs":1,"endedAtMs":2,"status":"needs_closeup"}],
+               "ask":{"id":"1af638c1-ec63-46fc-aa2f-e74cd29df231","question":"Can you send a photo of it from the side?",
+                      "answers":["camera","photos","best-guess","text"],"status":"open"}}""").jsonObject)
+        val stage = compose.onNode(hasTestTag("project-stage")).fetchSemanticsNode().boundsInRoot
+        with(compose.density) { assertTrue("an empty stage is short: ${stage.height.toDp()}", stage.height.toDp() <= com.scantomake.counterpart.ui.EMPTY_STAGE + 1.dp) }
+        // On the first screen, without scrolling.
+        compose.onNodeWithText("Take a Photo").assertIsDisplayed()
+    }
+
+    /** #848 with projects present: at the largest font scale the size line is under the stage, never over the model;
+     *  at the default scale it stays the chip on the stage. Android pins no bottom bar: the ask field and Print scroll
+     *  with the page. */
+    @Test fun atTheLargestFontTheSizeIsUnderTheStageWithProjectsPresent() {
+        val id = "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a07"
+        val data = WireJson.parseToJsonElement(
+            """{"id":"$id","title":"Mic mount","state":"ready","kind":"fit","createdAtMs":1,"updatedAtMs":2,"photos":[],
+               "passes":[{"startedAtMs":1,"endedAtMs":2,"status":"done"}],
+               "current":{"model":"current/model.stl","renders":[],"sizeMm":[51.9,50,54.4]}}""").jsonObject
+        assertTrue(com.scantomake.counterpart.ui.largeStageText(2f))
+        assertTrue(!com.scantomake.counterpart.ui.largeStageText(1.3f))
+        showPage(id, data, fontScale = 2f)
+        val stage = compose.onNode(hasTestTag("project-stage")).fetchSemanticsNode().boundsInRoot
+        val size = compose.onNode(hasTestTag("project-size"), useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        assertTrue("the size line ($size) is under the stage ($stage)", size.top >= stage.bottom)
+    }
+
+    @Test fun atTheDefaultFontTheSizeStaysOnTheStageWithProjectsPresent() {
+        val id = "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a08"
+        showPage(id, WireJson.parseToJsonElement(
+            """{"id":"$id","title":"Mic mount","state":"ready","kind":"fit","createdAtMs":1,"updatedAtMs":2,"photos":[],
+               "passes":[{"startedAtMs":1,"endedAtMs":2,"status":"done"}],
+               "current":{"model":"current/model.stl","renders":[],"sizeMm":[51.9,50,54.4]}}""").jsonObject)
+        val stage = compose.onNode(hasTestTag("project-stage")).fetchSemanticsNode().boundsInRoot
+        val size = compose.onNode(hasTestTag("project-size"), useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        assertTrue("the size chip ($size) is on the stage ($stage)", size.bottom <= stage.bottom && size.top >= stage.top)
+    }
+
+    /** #691 with projects present: a multi-part design's stage turns its parts, each in its own colour, and shows its
+     *  picture until the meshes are here (here they never come, so it says so); a one-colour design keeps its picture. */
+    @Test fun aMultiPartDesignsStageDrawsEachPartInItsOwnColourWithProjectsPresent() {
+        val id = "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a05"
+        val case = WireJson.parseToJsonElement(contractFixture("project-parts.json").readText()).jsonObject["cases"]!!.jsonArray[0].jsonObject
+        val data = JsonObject(mapOf("id" to JsonPrimitive(id), "title" to JsonPrimitive("Desk sign"), "state" to JsonPrimitive("ready"),
+            "createdAtMs" to JsonPrimitive(1), "updatedAtMs" to JsonPrimitive(2), "photos" to JsonArray(emptyList()),
+            "passes" to WireJson.parseToJsonElement("[{\"startedAtMs\":1,\"endedAtMs\":2,\"status\":\"done\"}]")) + case["object"]!!.jsonObject)
+        app.pairingStore.save(v2Record(ADDRESSES[0]), false)
+        val fake = FakeTransport { request, _ -> when {
+            request.url.endsWith("/v1/objects/$id") -> HttpReply(200, WireJson.encodeToString(JsonElement.serializer(), JsonObject(mapOf("object" to data))).toByteArray())
+            else -> json(404, mapOf("error" to mapOf("code" to "not-found", "message" to "not here")))
+        } }
+        app.pairing = PairingClient(app.pairingStore, fake)
+        app.companion = CompanionClient(app.pairing, fake, null, null, app.cacheDir)
+        state.projects.value = listOf(project("other", "Existing project", "ready"), requireNotNull(Project.decode(data)))
+        state.loaded.value = true
+        compose.setContent { WithApp { com.scantomake.counterpart.ui.ProjectScreen(id, back = {}, print = {}, printing = {}, scan = {}) } }
+        compose.onNode(hasTestTag("gallery-stage-parts")).assertExists()
+        compose.onNode(hasContentDescription("Your copy in 2 parts, each in its own colour")).assertExists()
+        val notAvailable = hasTestTag("gallery-stage-parts") and androidx.compose.ui.test.SemanticsMatcher.expectValue(androidx.compose.ui.semantics.SemanticsProperties.StateDescription, "not available")
+        compose.waitUntil(5_000) { compose.onAllNodes(notAvailable).fetchSemanticsNodes().isNotEmpty() }
+        assertTrue("the stage asked for the part's mesh: ${fake.paths}", fake.paths.any { "/current/parts/part-1.stl" in it })
+        // Its meshes didn't come: the stage keeps the design's picture, never an empty stage.
+        compose.onNode(hasTestTag("gallery-stage-picture")).assertExists()
+        compose.onNode(notAvailable).assertExists()
+    }
+
     /** Design §3.3 with projects present (AGENTS.md "Every layout"): a copy whose scan is really the thing a case must fit
      *  offers Make something else from this scan on its page, and its New opens holding that scan, asking first. */
     @Test fun aCopysPageOffersMakeSomethingElseFromItsScanWithProjectsPresent() {
