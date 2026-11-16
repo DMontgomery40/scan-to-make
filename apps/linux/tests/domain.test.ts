@@ -1526,3 +1526,18 @@ test("a multi-part design's page offers Explore in 3D with other projects presen
   const without = { ...withParts, current: { ...withParts.current!, parts: undefined, mergedMesh: undefined } } as Project;
   assert.match(buttonTag(pageOf(without, undefined, [project, without]), "Explore in 3D"), /disabled/);
 });
+
+// #871 (#842 on Linux): a question's card is in the inspector, its own column beside the stage that scrolls on its own,
+// so a project with nothing on its stage never pushes the question or its action below the first screen.
+test("a question beside an empty stage is in the inspector, never under the stage, with other projects present", () => {
+  const asking = { ...project, id: "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a97", state: "needs-closeup", title: "Wall holder for three",
+    photos: [], capture: [], current: undefined, picture: undefined, pictures: undefined,
+    ask: { id: "1af638c1-ec63-46fc-aa2f-e74cd29df231", question: "Can you send a photo of it from the side?", answers: ["camera", "photos", "best-guess", "text"], status: "open" },
+  } as unknown as Project;
+  assert.equal(gallery(asking).length, 0, "nothing to draw");
+  const html = pageOf(asking, undefined, [project, asking]);
+  const inspector = html.indexOf('<aside class="inspector"');
+  const question = html.indexOf('data-testid="ask-wait"');
+  assert.ok(inspector > 0 && question > inspector, "the question is in the inspector");
+  assert.ok(html.indexOf('class="project-main"') < inspector, "the stage's column ends before the inspector starts");
+});
