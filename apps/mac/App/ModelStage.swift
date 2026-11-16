@@ -36,6 +36,9 @@ struct ModelStage: View {
     /// Together (docs/protocols/seats.md): the scan in its own colours at each seat (row-major 4×4, the part's millimetres).
     var object: URL? = nil
     var seats: [[Double]] = []
+    /// #691: a multi-part design, each part's STL (one frame, so they line up) in its own colour (nil: neutral). When set,
+    /// `url` is the first part's file and the stage draws them all.
+    var parts: [(url: URL, tint: NSColor?)] = []
     /// The size of what is drawn, in millimetres, once it is loaded.
     var measured: (([Double]) -> Void)? = nil
     @State private var still: CGImage?
@@ -48,7 +51,8 @@ struct ModelStage: View {
     @State private var failed = false
 
     private var showsLive: Bool { visible && interactive && live }
-    private var variant: String { "\(tint?.description ?? "neutral")#\(object?.path ?? "")#\(seats.count)" }
+    private var variant: String { "\(tint?.description ?? "neutral")#\(object?.path ?? "")#\(seats.count)#\(Self.partsKey(parts))" }
+    static func partsKey(_ parts: [(url: URL, tint: NSColor?)]) -> String { parts.map { "\($0.url.path)@\($0.tint?.description ?? "neutral")" }.joined(separator: "|") }
     private var imageIdentity: String { "\(url.path)#\(version)#\(yaw)#\(pitch)#\(fit)#\(variant)" }
 
     var body: some View {
@@ -91,7 +95,7 @@ struct ModelStage: View {
             // already current. File-version/framing changes must still reload.
             if stillIdentity == requestedIdentity, still != nil { return }
             failed = false
-            let loaded = await Self.cached(url, version: version, tint: tint, object: object, seats: seats)
+            let loaded = await Self.cached(url, version: version, tint: tint, object: object, seats: seats, parts: parts)
             guard !Task.isCancelled else { return }
             guard let model = loaded else { failed = poster == nil; return }
             let e = model.visualBounds(relativeTo: nil).extents
@@ -140,7 +144,7 @@ struct ModelStage: View {
     private var realityView: some View {
         RealityView { content in
             content.camera = .virtual
-            let loaded = await Self.cached(url, version: version, tint: tint, object: object, seats: seats)
+            let loaded = await Self.cached(url, version: version, tint: tint, object: object, seats: seats, parts: parts)
             guard !Task.isCancelled, showsLive else { return }
             if let model = loaded {
                 content.add(ModelPoster.scene(model: model, yaw: yaw, pitch: pitch, fit: fit).root)
@@ -155,8 +159,17 @@ struct ModelStage: View {
     /// The gallery turns between a part, its scan and the two together: keep those three loaded.
     @MainActor private static let cache = ModelEntityCache(limit: 3)
     @MainActor static func releaseCachedModels() { cache.removeAll() }
-    @MainActor static func cached(_ url: URL, version: Double, tint: NSColor? = nil, object: URL? = nil, seats: [[Double]] = []) async -> Entity? {
-        await cache.load(key: "\(url.path)#\(version)#\(tint?.description ?? "neutral")#\(object?.path ?? "")#\(seats.map { $0.map { String($0) }.joined(separator: ",") }.joined(separator: ";"))") {
+    @MainActor static func cached(_ url: URL, version: Double, tint: NSColor? = nil, object: URL? = nil, seats: [[Double]] = [], parts: [(url: URL, tint: NSColor?)] = []) async -> Entity? {
+        await cache.load(key: "\(url.path)#\(version)#\(tint?.description ?? "neutral")#\(object?.path ?? "")#\(seats.map { $0.map { String($0) }.joined(separator: ",") }.joined(separator: ";"))#\(partsKey(parts))") {
+            // #691: each part in its own colour, together; a part that can't be drawn fails the stage (its picture stays).
+            if !parts.isEmpty {
+                let whole = Entity()
+                for part in parts {
+                    guard let drawn = await load(part.url, tint: part.tint) else { return nil }
+                    whole.addChild(drawn)
+                }
+                return whole
+            }
             guard let model = await load(url, tint: tint) else { return nil }
             guard let object, !seats.isEmpty, let scan = try? await Entity(contentsOf: object) else { return model }
             // The scan (metres, Y up) into the seat frame (millimetres, Z up), placed by each seat in the part's frame,

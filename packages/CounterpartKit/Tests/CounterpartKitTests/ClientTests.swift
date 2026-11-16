@@ -350,12 +350,19 @@ final class CompanionClientTests: XCTestCase {
         let box = project(["kind": "fit", "current": ["model": "current/model.3mf", "renders": []]])
         let mesh = try await c.download(box, "current/model.stl")
         XCTAssertEqual(try Data(contentsOf: mesh), Data("mesh".utf8))
+        // #691: a part's own mesh downloads too (the phone refused every one before the request).
+        let part = try await c.download(box, "current/parts/part-1.stl")
+        XCTAssertFalse(try Data(contentsOf: part).isEmpty)
         XCTAssertTrue(fake.calls.contains { $0.request.url?.path == "/v1/objects/\(box.id)/current/model.stl" }, fake.calls.map { $0.request.url?.path ?? "" }.joined(separator: ", "))
         let printed = try await c.download(box, "model.stl")
         XCTAssertEqual(try Data(contentsOf: printed), Data("3mf".utf8), "model.stl is still the file that prints")
         XCTAssertNotEqual(mesh, printed)
         XCTAssertEqual(CompanionClient.scope("GET", "/v1/objects/\(box.id)/current/model.stl"), "projects:read")
         XCTAssertNil(CompanionClient.scope("GET", "/v1/objects/\(box.id)/current/object.json"))
+        // #691: each part's mesh, as the companion serves it, current and sealed; nothing else under parts/.
+        XCTAssertEqual(CompanionClient.scope("GET", "/v1/objects/\(box.id)/current/parts/part-1.stl"), "projects:read")
+        XCTAssertEqual(CompanionClient.scope("GET", "/v1/objects/\(box.id)/versions/b8158144-0000-4000-8000-000000000001/parts/part-2.stl"), "projects:read")
+        XCTAssertNil(CompanionClient.scope("GET", "/v1/objects/\(box.id)/current/parts/part-1.3mf"))
         // Kept on the phone as a model, as the page's model.stl is, and so is an earlier design's own mesh.
         XCTAssertEqual(OnDeviceLibrary.Kind.of("current/model.stl"), .model)
         XCTAssertEqual(OnDeviceLibrary.Kind.of("versions/2d67e062-42b7-4d91-ab77-212a490a5a65/touched.stl"), .model)

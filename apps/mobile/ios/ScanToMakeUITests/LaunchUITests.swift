@@ -1864,6 +1864,44 @@ final class LayoutParityUITests: XCTestCase {
         XCTAssertTrue(failures.isEmpty, "Past the screen's edge at the largest text size:\n" + failures.joined(separator: "\n"))
     }
 
+    /// #691: a two-colour design (DAD's sign, a copy) is drawn on the stage part by part, with projects present: the stage
+    /// draws (never "failed"), AR is offered for it (#845), and its Together is the part, not the part inside the scan.
+    /// `STM_PARTS_FIXTURE` names a folder with DAD's own meshes for review screenshots; otherwise two boxes stand in.
+    func testATwoColourDesignIsDrawnPartByPartWithProjectsPresent() throws {
+        if regular { XCUIDevice.shared.orientation = .landscapeLeft }
+        defer { XCUIDevice.shared.orientation = .portrait }
+        var folder = ProcessInfo.processInfo.environment["STM_PARTS_FIXTURE"].map { URL(fileURLWithPath: $0) }
+        if folder == nil {
+            let made = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            try FileManager.default.createDirectory(at: made, withIntermediateDirectories: true)
+            addTeardownBlock { try? FileManager.default.removeItem(at: made) }
+            try Self.boxSTL().write(to: made.appendingPathComponent("dad-part-1.stl"))
+            try Self.boxSTL().write(to: made.appendingPathComponent("dad-part-2.stl"))
+            folder = made
+        }
+        let app = XCUIApplication()
+        app.launchArguments = ["-CounterpartFixtures", folder!.path, "-CounterpartFixtureSet", "parts-sign",
+                               "-CounterpartOpen", "counterpart://project/6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01"]
+        app.launch()
+        let part = app.buttons["gallery-result"]
+        XCTAssertTrue(part.waitForExistence(timeout: 30), "the part's picture entry: \(app.debugDescription)")
+        part.tap()
+        let stage = app.descendants(matching: .any)["model-stage"]
+        XCTAssertTrue(stage.waitForExistence(timeout: 20))
+        let drawn = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value IN %@", ["still", "live"]), object: stage)
+        let unavailable = app.descendants(matching: .any)["gallery-model-unavailable"]
+        XCTAssertEqual(XCTWaiter().wait(for: [drawn], timeout: 60), .completed,
+                       "both parts drawn: \(String(describing: stage.value)); \(unavailable.exists ? unavailable.label : "no line under the stage")")
+        XCTAssertTrue(app.buttons["gallery-ar"].waitForExistence(timeout: 10), "AR for a design drawn part by part (#845)")
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "691 two-part \(regular ? "iPad" : "iPhone")"; shot.lifetime = .keepAlways; add(shot)
+        let together = app.buttons["gallery-together"]
+        XCTAssertTrue(together.waitForExistence(timeout: 10), "a copy with seats has Together")
+        together.tap()
+        XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "value IN %@", ["still", "live"]), object: stage)], timeout: 60), .completed,
+                       "Together is the part drawn, not a scan that never comes")
+        let both = XCTAttachment(screenshot: app.screenshot()); both.name = "691 together \(regular ? "iPad" : "iPhone")"; both.lifetime = .keepAlways; add(both)
+    }
+
     static func boxSTL() -> Data {
         let size = SIMD3<Float>(146, 40, 20)
         let c: [SIMD3<Float>] = (0..<8).map { i in SIMD3(Float(i & 1), Float((i >> 1) & 1), Float((i >> 2) & 1)) * size }

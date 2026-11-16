@@ -563,6 +563,21 @@ enum Fixtures {
                 "photos": ["photo1.jpg", "photo2.jpg"], "messages": [], "passes": [["startedAtMs": now - 60_000, "trigger": "new"]],
                 "picture": "pictures/photo-1.png", "pictures": ["photo": "pictures/photo-1.png"]]]
         }
+        // `-CounterpartFixtureSet parts-sign` (#691): DAD's sign as a copy in two colours, each part its own mesh, as the
+        // shared case in packages/contracts/fixtures/project-parts.json has it. The assets folder holds `dad-part-1.stl`,
+        // `dad-part-2.stl` and `dad-part.png` (the Mac's picture of it).
+        if set == "parts-sign" {
+            let ms = now.timeIntervalSince1970 * 1000
+            return [["id": ids.mic, "createdAtMs": ms - 600_000, "updatedAtMs": ms - 60_000, "state": "ready", "kind": "copy", "title": "DAD sign",
+                     "instructions": "A replica of this DAD desk thing", "scan": "scan.usdz", "photos": [], "capture": ["0001.heic"], "messages": [],
+                     "passes": [["startedAtMs": ms - 500_000, "endedAtMs": ms - 60_000, "status": "done", "trigger": "new"]],
+                     "current": ["model": "current/model.3mf", "mergedMesh": "current/model.stl", "renders": [],
+                                 "filaments": [["name": "bar", "colour": "#B0855D"], ["name": "letters and inscription", "colour": "#111111"]],
+                                 "parts": [["id": "1/1", "name": "bar", "colour": "#B0855D", "mesh": "current/parts/part-1.stl"],
+                                           ["id": "1/2", "name": "letters and inscription", "colour": "#111111", "mesh": "current/parts/part-2.stl"]],
+                                 "seats": [["rotationDeg": [0, 0, 0], "translationMm": [0, 0, 0]]]],
+                     "picture": "pictures/part-dad.png", "pictures": ["part": "pictures/part-dad.png", "together": "pictures/together-dad.png"]]]
+        }
         // `-CounterpartFixtureSet scan-stage` (Nov 10, every "What you scanned" on David's phone blank): with projects
         // present, a copy whose scan the Mac lists but can't send (the canned Mac has no file: 404), and a copy whose only
         // scan is a 192 MB rebuild (e9b21ab1's size), too large for a phone. Each stage keeps the Mac's picture and says why.
@@ -946,6 +961,12 @@ enum Fixtures {
         if path.hasSuffix("/asks/\(bottleAsk).jpg") { return "ask-bottle.jpg" }
         if path.hasSuffix("/" + bottlePicture) { return "bottle-picture.png" }
         if let range = path.range(of: #"/capture/[0-9]{4}\.heic$"#, options: .regularExpression) { return "bottle-capture/" + path[range].dropFirst("/capture/".count) }
+        // #691: the parts-sign fixture's part meshes and its Mac pictures.
+        if Fixtures.set == "parts-sign" {
+            if path.hasSuffix("/current/parts/part-1.stl") { return "dad-part-1.stl" }
+            if path.hasSuffix("/current/parts/part-2.stl") { return "dad-part-2.stl" }
+            if path.hasSuffix("/pictures/part-dad.png") || path.hasSuffix("/pictures/together-dad.png") { return "dad-part.png" }
+        }
         // The meshes the Mac serves, as David's records name them (#769): a page's model.stl, a multi-part design's merged
         // current/model.stl and the model.stl sealed beside a touched.3mf, an earlier design's touched.stl. Never a 3MF as an STL.
         // A merged mesh only where the project lists it, as the companion serves it (review of #770).

@@ -19,11 +19,17 @@ public enum PartUSDZ {
     /// Writes `triangles` (STL frame: millimetres, Z up) in `srgb` (0…1, the spool's colour) to `target`, through a
     /// scratch file beside it so a half-written file is never there to be reused. Call it off the main actor.
     public static func write(_ triangles: [Triangle], srgb: SIMD3<Float>, to target: URL) throws {
+        try write(parts: [(triangles, srgb)], to: target)
+    }
+
+    /// #691, #845: several parts in one file, each mesh with its own colour, in the frame they share (the 3MF's build frame:
+    /// they line up as they print). The whole rests on y = 0 with its footprint centred.
+    public static func write(parts: [([Triangle], SIMD3<Float>)], to target: URL) throws {
         let folder = target.deletingLastPathComponent()
         let scratch = folder.appendingPathComponent(scratchPrefix + UUID().uuidString)
         let layer = scratch.appendingPathExtension("usda"), packed = scratch.appendingPathExtension("usdz")
         defer { try? FileManager.default.removeItem(at: layer); try? FileManager.default.removeItem(at: packed) }
-        guard try usda(triangles, srgb: srgb, to: layer) > 0 else { throw Failure.empty }
+        guard try usda(parts, to: layer) > 0 else { throw Failure.empty }
         guard !Task.isCancelled else { throw Failure.cancelled }
         MDLUtility.convert(toUSDZ: layer, writeTo: packed)
         guard isUSDZ(packed) else { throw Failure.notUSDZ }
@@ -79,19 +85,30 @@ public enum PartUSDZ {
     /// The USD layer, streamed to `url` in chunks (a part can be half a million triangles). Returns the triangle count.
     /// Nothing in a triangle can stop it (#840): a triangle with a corner that isn't a finite number within `reach`, or
     /// with no normal (`STLMesh.faceNormal`), is left out, and every number is written by `number`, which can't trap.
-    static func usda(_ triangles: [Triangle], srgb: SIMD3<Float>, to url: URL) throws -> Int {
+    static func usda(_ triangles: [Triangle], srgb: SIMD3<Float>, to url: URL) throws -> Int { try usda([(triangles, srgb)], to: url) }
+
+    /// The layer for several parts: one Mesh and one Material per part (`Mesh`, `Filament` for a single part, as before;
+    /// `Mesh1`…, `Filament1`… for several). Returns the triangle count of them all.
+    static func usda(_ parts: [([Triangle], SIMD3<Float>)], to url: URL) throws -> Int {
         func stage(_ p: SIMD3<Float>) -> SIMD3<Float> { SIMD3(p.x, p.z, -p.y) * 0.001 }
         func near(_ p: SIMD3<Float>) -> Bool { p.x.isFinite && p.y.isFinite && p.z.isFinite && simd_reduce_max(simd_abs(p)) <= reach }
-        var kept: [Triangle] = [], normals: [SIMD3<Float>] = []
-        kept.reserveCapacity(triangles.count); normals.reserveCapacity(triangles.count)
+        var groups: [(kept: [Triangle], normals: [SIMD3<Float>], srgb: SIMD3<Float>, low: SIMD3<Float>, high: SIMD3<Float>)] = []
         var low = SIMD3<Float>(repeating: .infinity), high = SIMD3<Float>(repeating: -.infinity)
-        for t in triangles {
-            let a = stage(t.0), b = stage(t.1), c = stage(t.2)
-            guard near(a), near(b), near(c), let n = STLMesh.faceNormal(a, b, c) else { continue }
-            low = simd_min(low, simd_min(a, simd_min(b, c))); high = simd_max(high, simd_max(a, simd_max(b, c)))
-            kept.append((a, b, c)); normals.append(n)
+        for (triangles, srgb) in parts {
+            var kept: [Triangle] = [], normals: [SIMD3<Float>] = []
+            kept.reserveCapacity(triangles.count); normals.reserveCapacity(triangles.count)
+            var gLow = SIMD3<Float>(repeating: .infinity), gHigh = SIMD3<Float>(repeating: -.infinity)
+            for t in triangles {
+                let a = stage(t.0), b = stage(t.1), c = stage(t.2)
+                guard near(a), near(b), near(c), let n = STLMesh.faceNormal(a, b, c) else { continue }
+                gLow = simd_min(gLow, simd_min(a, simd_min(b, c))); gHigh = simd_max(gHigh, simd_max(a, simd_max(b, c)))
+                kept.append((a, b, c)); normals.append(n)
+            }
+            guard !kept.isEmpty else { continue }
+            low = simd_min(low, gLow); high = simd_max(high, gHigh)
+            groups.append((kept, normals, srgb, gLow, gHigh))
         }
-        guard !kept.isEmpty else { return 0 }
+        guard !groups.isEmpty else { return 0 }
         // Resting on y = 0, its footprint centred on the origin.
         let shift = SIMD3<Float>(-(low.x + high.x) / 2, -low.y, -(low.z + high.z) / 2)
         FileManager.default.createFile(atPath: url.path, contents: nil)
@@ -122,8 +139,7 @@ public enum PartUSDZ {
             buffer.append(UInt8(ascii: "(")); number(v.x, places: places, scale: scale); text(", ")
             number(v.y, places: places, scale: scale); text(", "); number(v.z, places: places, scale: scale); buffer.append(UInt8(ascii: ")"))
         }
-        let linear = SIMD3(Self.linear(srgb.x), Self.linear(srgb.y), Self.linear(srgb.z))
-        let lo = low + shift, hi = high + shift
+        let single = groups.count == 1
         text("""
         #usda 1.0
         (
@@ -139,37 +155,45 @@ public enum PartUSDZ {
             kind = "component"
         )
         {
-            def Mesh "Mesh" (
-                prepend apiSchemas = ["MaterialBindingAPI"]
-            )
-            {
-                float3[] extent = [
+
         """)
-        vector(lo, places: 6, scale: 1e6); text(", "); vector(hi, places: 6, scale: 1e6)
-        text("]\n        int[] faceVertexCounts = [")
-        for i in 0..<kept.count { text(i == 0 ? "3" : ", 3"); if i % 65_536 == 0 { try flush() } }
-        text("]\n        int[] faceVertexIndices = [")
-        for i in 0..<(kept.count * 3) { if i > 0 { text(", ") }; text(String(i)); if i % 65_536 == 0 { try flush() } }
-        text("]\n        rel material:binding = </Part/Materials/Filament>\n        normal3f[] normals = [")
-        // Flat, per corner, as the stage draws it (`ModelStage.geometry`): a printed part's edges stay sharp.
-        for (i, n) in normals.enumerated() {
-            for k in 0..<3 { if i > 0 || k > 0 { text(", ") }; vector(n, places: 4, scale: 1e4) }
-            if i % 16_384 == 0 { guard !Task.isCancelled else { throw Failure.cancelled }; try flush() }
+        for (index, group) in groups.enumerated() {
+            let mesh = single ? "Mesh" : "Mesh\(index + 1)", material = single ? "Filament" : "Filament\(index + 1)"
+            let kept = group.kept, normals = group.normals
+            let lo = group.low + shift, hi = group.high + shift
+            text("    def Mesh \"\(mesh)\" (\n        prepend apiSchemas = [\"MaterialBindingAPI\"]\n    )\n    {\n        float3[] extent = [")
+            vector(lo, places: 6, scale: 1e6); text(", "); vector(hi, places: 6, scale: 1e6)
+            text("]\n        int[] faceVertexCounts = [")
+            for i in 0..<kept.count { text(i == 0 ? "3" : ", 3"); if i % 65_536 == 0 { try flush() } }
+            text("]\n        int[] faceVertexIndices = [")
+            for i in 0..<(kept.count * 3) { if i > 0 { text(", ") }; text(String(i)); if i % 65_536 == 0 { try flush() } }
+            text("]\n        rel material:binding = </Part/Materials/\(material)>\n        normal3f[] normals = [")
+            // Flat, per corner, as the stage draws it (`ModelStage.geometry`): a printed part's edges stay sharp.
+            for (i, n) in normals.enumerated() {
+                for k in 0..<3 { if i > 0 || k > 0 { text(", ") }; vector(n, places: 4, scale: 1e4) }
+                if i % 16_384 == 0 { guard !Task.isCancelled else { throw Failure.cancelled }; try flush() }
+            }
+            text("] (\n            interpolation = \"vertex\"\n        )\n        uniform token orientation = \"rightHanded\"\n        point3f[] points = [")
+            for (i, t) in kept.enumerated() {
+                for (k, p) in [t.0, t.1, t.2].enumerated() { if i > 0 || k > 0 { text(", ") }; vector(p + shift, places: 6, scale: 1e6) }
+                if i % 16_384 == 0 { guard !Task.isCancelled else { throw Failure.cancelled }; try flush() }
+            }
+            text("]\n        uniform token subdivisionScheme = \"none\"\n    }\n\n")
         }
-        text("] (\n            interpolation = \"vertex\"\n        )\n        uniform token orientation = \"rightHanded\"\n        point3f[] points = [")
-        for (i, t) in kept.enumerated() {
-            for (k, p) in [t.0, t.1, t.2].enumerated() { if i > 0 || k > 0 { text(", ") }; vector(p + shift, places: 6, scale: 1e6) }
-            if i % 16_384 == 0 { guard !Task.isCancelled else { throw Failure.cancelled }; try flush() }
+        text("    def Scope \"Materials\"\n    {\n")
+        for (index, group) in groups.enumerated() {
+            let material = single ? "Filament" : "Filament\(index + 1)"
+            let linear = SIMD3(Self.linear(group.srgb.x), Self.linear(group.srgb.y), Self.linear(group.srgb.z))
+            text("        def Material \"\(material)\"\n        {\n")
+            text("            token outputs:surface.connect = </Part/Materials/\(material)/Surface.outputs:surface>\n\n")
+            text("            def Shader \"Surface\"\n            {\n                uniform token info:id = \"UsdPreviewSurface\"\n")
+            text("                color3f inputs:diffuseColor = "); vector(linear, places: 4, scale: 1e4)
+            text("\n                float inputs:metallic = 0\n                float inputs:roughness = 0.55\n                token outputs:surface\n")
+            text("            }\n        }\n")
         }
-        text("]\n        uniform token subdivisionScheme = \"none\"\n    }\n\n    def Scope \"Materials\"\n    {\n")
-        text("        def Material \"Filament\"\n        {\n")
-        text("            token outputs:surface.connect = </Part/Materials/Filament/Surface.outputs:surface>\n\n")
-        text("            def Shader \"Surface\"\n            {\n                uniform token info:id = \"UsdPreviewSurface\"\n")
-        text("                color3f inputs:diffuseColor = "); vector(linear, places: 4, scale: 1e4)
-        text("\n                float inputs:metallic = 0\n                float inputs:roughness = 0.55\n                token outputs:surface\n")
-        text("            }\n        }\n    }\n}\n")
+        text("    }\n}\n")
         try flush(force: true)
-        return kept.count
+        return groups.reduce(0) { $0 + $1.kept.count }
     }
 }
 #endif

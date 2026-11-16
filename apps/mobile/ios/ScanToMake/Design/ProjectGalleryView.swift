@@ -67,7 +67,7 @@ struct ProjectGalleryView: View {
     }
 
     /// What the stage's downloads depend on.
-    private var wantKey: String { "\(project.id)#\(ownMesh ?? "")#\(project.scan ?? "")#\(project.mediaVersionTag)#\(String(describing: project.scanFiles))#\(scenePhase)" }
+    private var wantKey: String { "\(project.id)#\(ownMesh ?? "")#\(project.scan ?? "")#\(project.mediaVersionTag)#\(String(describing: project.scanFiles))#\(scenePhase)#\(entry?.id ?? "")" }
 
     var body: some View {
         // #769: a pushed page's instance can draw without running its `.task`s (`BodyKick`): the downloads start from here too.
@@ -98,7 +98,16 @@ struct ProjectGalleryView: View {
         guard scenePhase == .active else { return }
         if let ownMesh { store.models.want(project, ownMesh) }
         if case .file(let path) = scanModel { store.models.want(project, path) }
-        if gallery.entries.contains(where: { $0.kind == .together }), case .file(let path) = togetherModel { store.models.want(project, path) }
+        // Only a Together drawn with the scan in its seats needs the scan; a copy's is the part alone (#691).
+        if gallery.entries.contains(where: { if case .assembly = $0.drawing { return true }; return false }), case .file(let path) = togetherModel { store.models.want(project, path) }
+        // #691: the shown design's part meshes, each fetched like any project file.
+        if let entry, case .parts(let drawn) = entry.drawing { for part in drawn { store.models.want(project, part.mesh) } }
+    }
+
+    /// #691: the shown entry's parts on this device, each with its stage colour; nil until every part's mesh is here.
+    private func stageParts(_ drawn: [ProjectGallery.DrawnPart]) -> [StagePart]? {
+        let parts = drawn.compactMap { part in store.models.file(project, part.mesh).map { StagePart(url: $0, tint: tint(part.colour)) } }
+        return parts.count == drawn.count && !parts.isEmpty ? parts : nil
     }
 
     /// `gallery.url`, from `body` (#769): this gallery's part model, logged when it changes, with the stage it tags.
@@ -150,13 +159,16 @@ struct ProjectGalleryView: View {
     private struct ModelProblem { var reason: ModelUnavailable; var path: String? }
     private func modelProblem(_ entry: ProjectGallery.Entry) -> ModelProblem? {
         let (path, model): (String?, Project.ScanModel?) = switch entry.drawing {
-        case .model(let drawn) where entry.kind == .part || drawn == "model.stl": (drawn, nil)
+        case .model(let drawn) where entry.kind == .part || entry.kind == .together || drawn == "model.stl": (drawn, nil)
         case .model: (nil, scanURL == nil ? scanModel : nil)
         // Together needs both: the scan, and the part (review S4: with the scan here and the part missing it said nothing).
         case .assembly: togetherScanURL == nil ? (nil, togetherModel) : (effectiveModelURL == nil ? ownMesh ?? "model.stl" : nil, nil)
         case .picture: (nil, nil)
+        // #691: the first part whose mesh isn't here yet; its fetch says why.
+        case .parts(let drawn): (drawn.first { store.models.file(project, $0.mesh) == nil }?.mesh, nil)
         }
-        let fetch: ModelFiles.Fetch? = if let path { effectiveModelURL == nil ? store.models.fetch(project, path) : nil }
+        let partsMissing: Bool = if case .parts = entry.drawing { true } else { false }
+        let fetch: ModelFiles.Fetch? = if let path { effectiveModelURL == nil || partsMissing ? store.models.fetch(project, path) : nil }
             else if case .file(let file)? = model { store.models.fetch(project, file) }
             else if case .tooLarge? = model { .tooLarge } else { nil }
         let retryPath: String? = path ?? { if case .file(let file)? = model { return file }; return nil }()
@@ -196,7 +208,7 @@ struct ProjectGalleryView: View {
         if let entry {
             switch entry.drawing {
             case .model(let path):
-                ModelStage(url: entry.kind == .part || path == "model.stl" ? effectiveModelURL : scanURL, tint: tint(entry.colour),
+                ModelStage(url: entry.kind == .part || entry.kind == .together || path == "model.stl" ? effectiveModelURL : scanURL, tint: tint(entry.colour),
                            measured: { drawn(entry, $0) },
                            placeholder: AnyView(still(entry)), undrawable: { undrawable.insert(entry.id) },
                            drawn: { undrawable.remove(entry.id) }, traceOwner: instance)
@@ -211,6 +223,13 @@ struct ProjectGalleryView: View {
                 // Its own identity: a plate or picture switch starts a new stage, never one still holding the last entry's
                 // picture (review of #741, P1).
                 still(entry).id(entry.id)
+            case .parts(let meshes):
+                // #691: each part in its own colour; the Mac's picture until every part's mesh is here.
+                let parts = stageParts(meshes)
+                ModelStage(url: parts?.first?.url, parts: parts ?? [], measured: { drawn(entry, $0) },
+                           placeholder: AnyView(still(entry)), undrawable: { undrawable.insert(entry.id) },
+                           drawn: { undrawable.remove(entry.id) }, traceOwner: instance)
+                    .id(entry.id)
             }
         } else if let photo = project.photoPicture {
             // Photos sent, no scan model or result yet: the subject the Mac cut out, as the project's card shows it.
@@ -332,6 +351,14 @@ struct ProjectGalleryView: View {
     /// project's own state. What follows only says how far along that file is on this phone.
     private func arChip(_ entry: ProjectGallery.Entry) -> ARChip? {
         guard let path = entry.ar else { return nil }
+        // #691, #845: a design drawn part by part goes to AR as one file of its parts, each in its colour.
+        if case .parts(let drawn) = entry.drawing {
+            if arPreparing { return .preparing }
+            guard let parts = stageParts(drawn) else { return store.away ? .needsMac : waiting(for: drawn.first { store.models.file(project, $0.mesh) == nil }?.mesh ?? path) }
+            let target = ARModel.target(forParts: parts.map(\.url), tints: drawn.map(\.colour.hex))
+            if PartUSDZ.isUSDZ(target) { return arFailed ? .failedScan(target) : .show(target) }
+            return arFailed ? .failed(parts[0].url) : .prepare(parts[0].url)
+        }
         switch entry.kind {
         case .part:
             if arPreparing { return .preparing }
@@ -397,6 +424,18 @@ struct ProjectGalleryView: View {
         arTask?.cancel()
         arPreparing = true; arFailed = false
         let tint = arTint, scene = String(describing: scenePhase)
+        if let entry, case .parts(let drawn) = entry.drawing, let parts = stageParts(drawn) {
+            let urls = parts.map(\.url), tints = drawn.map(\.colour.hex)
+            arTask = Task {
+                let prepared = await MediaTrace.$context.withValue(MediaTrace.Context(file: stl, scene: scene)) {
+                    await ARModel.usdz(fromParts: urls, tints: tints)
+                }
+                guard !Task.isCancelled else { return }
+                arPreparing = false
+                if let prepared, ARModel.show(prepared) {} else { arFailed = true }
+            }
+            return
+        }
         arTask = Task {
             let prepared = await MediaTrace.$context.withValue(MediaTrace.Context(file: stl, scene: scene)) {
                 await ARModel.usdz(fromSTL: stl, tint: tint)

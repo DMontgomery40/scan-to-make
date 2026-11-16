@@ -49,6 +49,7 @@ final class ProjectGalleryTests: XCTestCase {
                     XCTAssertEqual(want["part"] as? String, part, name)
                     XCTAssertEqual(want["object"] as? String, object, name)
                     XCTAssertEqual(want["seats"] as? Int, seats.count, name)
+                case .parts: XCTFail("\(name): project-gallery.json has no parts; they are project-parts.json's cases")
                 }
             }
         }
@@ -171,6 +172,65 @@ final class ProjectGalleryTests: XCTestCase {
         let entry = ProjectGallery(project: project(["state": "ready", "kind": "fit", "current": ["model": "current/model.stl", "renders": [], "sizeMm": [213, 43, 82]]])).entries[0]
         XCTAssertEqual(entry.sizeText(), "Part · 213 × 43 × 82 mm")
         XCTAssertEqual(entry.sizeText([66.2, 30.6, 150]), "Part · 66.2 × 30.6 × 150 mm")
+    }
+
+    /// #691: a multi-part design is drawn part by part, each mesh in its own colour, on every client: the five shared cases
+    /// in packages/contracts/fixtures/project-parts.json (also read by Android and Linux). `draw` is what the part's stage
+    /// turns for the design shown; `drawVersion` the same for a sealed design shown from its history.
+    func testEveryClientDrawsEachPartInItsOwnColourFromTheSharedCases() throws {
+        let data = try Data(contentsOf: repoRoot.appending(path: "packages/contracts/fixtures/project-parts.json"))
+        let doc = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let cases = try XCTUnwrap(doc["cases"] as? [[String: Any]])
+        XCTAssertEqual(cases.count, 5)
+        func drawn(_ project: Project) -> [[String: String]] {
+            guard let entry = ProjectGallery(project: project).entries.first(where: { $0.kind == .part }) else { return [] }
+            func name(_ colour: ProjectGallery.Colour) -> String { if case .spool(let hex) = colour { return hex }; return "neutral" }
+            return switch entry.drawing {
+            case .parts(let parts): parts.map { ["mesh": $0.mesh, "colour": name($0.colour)] }
+            case .model(let mesh): [["mesh": mesh, "colour": name(entry.colour)]]
+            case .picture, .assembly: []
+            }
+        }
+        for item in cases {
+            let name = item["name"] as! String
+            var object = item["object"] as! [String: Any]
+            for (key, value) in ["id": "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a99", "createdAtMs": 1.0, "updatedAtMs": 2.0, "state": "ready", "photos": [String]()] as [String: Any]
+            where object[key] == nil { object[key] = value }
+            let project = try JSONDecoder().decode(Project.self, from: JSONSerialization.data(withJSONObject: object))
+            XCTAssertEqual(drawn(project), item["draw"] as? [[String: String]], name)
+            for (version, want) in (item["drawVersion"] as? [String: [[String: String]]]) ?? [:] {
+                XCTAssertEqual(drawn(project.showingDesign(version)), want, "\(name), version \(version)")
+            }
+            // A design drawn part by part opens AR too (#845), written from its parts.
+            if case .parts(let parts)? = ProjectGallery(project: project).entries.first(where: { $0.kind == .part })?.drawing {
+                XCTAssertEqual(ProjectGallery(project: project).entries.first { $0.kind == .part }?.ar, parts.first?.mesh, name)
+            }
+        }
+    }
+
+    /// #691: a copy's Together is the part in the scan's place, drawn as the part is (each part in its colour), never the
+    /// part inside the scan (DAD, b8158144: they z-fought, with the turntable and a loose chunk of the scan). A fit's
+    /// Together is still the part with the scanned object in each seat.
+    func testACopysTogetherIsThePartInTheScansPlaceNotInsideTheScan() throws {
+        let data = try Data(contentsOf: repoRoot.appending(path: "packages/contracts/fixtures/project-parts.json"))
+        let doc = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        var object = try XCTUnwrap((doc["cases"] as? [[String: Any]])?.first?["object"] as? [String: Any])
+        var current = try XCTUnwrap(object["current"] as? [String: Any])
+        current["seats"] = [["rotationDeg": [0, 0, 0], "translationMm": [0, -19.5, 3]]]
+        object["current"] = current
+        for (key, value) in ["id": "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a98", "createdAtMs": 1.0, "updatedAtMs": 2.0, "state": "ready",
+                             "photos": [String](), "scan": "scan.usdz"] as [String: Any] { object[key] = value }
+        let copy = try JSONDecoder().decode(Project.self, from: JSONSerialization.data(withJSONObject: object))
+        let entries = ProjectGallery(project: copy).entries
+        let part = try XCTUnwrap(entries.first { $0.kind == .part }), together = try XCTUnwrap(entries.first { $0.kind == .together })
+        XCTAssertEqual(together.drawing, part.drawing, "the part as it is drawn, part by part in its colours")
+        if case .assembly = together.drawing { XCTFail("no scan drawn over the copy") }
+        XCTAssertNil(together.ar)
+        object["kind"] = "fit"
+        let fit = try JSONDecoder().decode(Project.self, from: JSONSerialization.data(withJSONObject: object))
+        let fitTogether = try XCTUnwrap(ProjectGallery(project: fit).entries.first { $0.kind == .together }, "a fit keeps its Together")
+        guard case .assembly(let mesh, let scan, let fitSeats) = fitTogether.drawing else { return XCTFail("a fit's Together is the part with the object in its seats") }
+        XCTAssertEqual(mesh, "current/model.stl", "the merged mesh"); XCTAssertEqual(scan, "scan/scan.usdz"); XCTAssertEqual(fitSeats.count, 1)
     }
 
     /// The stage stays dark for every colour (David, Nov 11: "we just entered light mode without a flashbang
