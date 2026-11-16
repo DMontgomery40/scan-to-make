@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import re
 import queue
 import shlex
 import subprocess
@@ -143,6 +144,9 @@ class Watch:
 
 
 def find_transcript(host: str | None, project: str) -> str:
+    # The project goes into a shell glob: only a project id's characters, never shell syntax (#870 review).
+    if project and not re.fullmatch(r"[0-9A-Za-z-]+", project):
+        sys.exit(f"Not a project id: {project!r}.")
     pattern = PASS_GLOB.format(project=project or "")
     command = f"ls -t {pattern} 2>/dev/null | grep -v '/\\._' | head -1"
     found = subprocess.run(["ssh", host, command] if host else ["sh", "-c", command], capture_output=True, text=True, check=False).stdout.strip()

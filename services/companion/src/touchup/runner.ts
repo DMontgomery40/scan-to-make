@@ -4,7 +4,7 @@ import {createHash} from 'node:crypto';
 import {readdir, readFile, stat} from 'node:fs/promises';
 import {join} from 'node:path';
 import {createInterface} from 'node:readline';
-import {inspectModelFile} from '@scan-to-make/printer-handoff';
+import {inspectModelFile, readModelFile} from '@scan-to-make/printer-handoff';
 import type {TouchupPass} from './inputs.js';
 import type {TouchupInvocation} from './invocation.js';
 import {collectCodeRuns, type DesignSource} from './code-engine.js';
@@ -294,6 +294,8 @@ export async function runClaudeWorker(inv: TouchupInvocation, opts: {
 /** Why a pass's 3MF was refused, as a sentence: inspectModelFile's own words, else the zip reader's terse error in ours. */
 function refusal(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
+  // readModelFile's own refusal speaks to a person choosing a file; a pass's file gets the same limit in its words.
+  if (/^Choose a model file/.test(message) || (error as NodeJS.ErrnoException)?.code === 'ELOOP') return 'It isn’t a regular file of at most 64 MiB.';
   return /^[A-Z].*\.$/.test(message) ? message : 'It isn’t a readable 3MF file.';
 }
 
@@ -335,15 +337,18 @@ export async function runTouchupWorker(inv: TouchupInvocation, pass: TouchupPass
   // archive or a stray zip falls back to the merged mesh instead of becoming the model.
   // It also only counts beside the final mesh it was exported with — never a checkpoint's.
   // #858: it is read with a pass's limits (its whole mesh is in it), and one that is refused is never dropped silently.
-  const parts = model === touched ? await readFile(partsPath).then(bytes => {
+  // #870 review: read capped (64 MiB) and without following a link, as every model file is, so a runaway file can't
+  // fill memory; no file is a one-colour pass and says nothing, and any other read failure is said like a refusal.
+  const notKept = (error: unknown) => {
+    const said = publicText(`Counterpart couldn’t keep the multi-part file this pass made, so it prints as one piece in one colour. ${refusal(error)}`);
+    console.error(`touch-up: ${said}`);
+    opts.onProgress?.({seconds: seconds(), toolCalls, activity: [{atMs: Date.now(), kind: 'message', text: said}]});
+    return undefined;
+  };
+  const parts = model === touched ? await readModelFile(partsPath).then(bytes => {
     try { inspectModelFile(bytes, '3mf', {origin: 'pass'}); return partsPath; }
-    catch (error) {
-      const said = publicText(`Counterpart couldn’t keep the multi-part file this pass made, so it prints as one piece in one colour. ${refusal(error)}`);
-      console.error(`touch-up: ${said}`);
-      opts.onProgress?.({seconds: seconds(), toolCalls, activity: [{atMs: Date.now(), kind: 'message', text: said}]});
-      return undefined;
-    }
-  }, () => undefined) : undefined;
+    catch (error) { return notKept(error); }
+  }, (error: NodeJS.ErrnoException) => error?.code === 'ENOENT' ? undefined : notKept(error)) : undefined;
   const resumeIndex = inv.args.indexOf('--resume'), resumeId = resumeIndex < 0 ? undefined : inv.args[resumeIndex + 1];
   // Claude Code 2.1.321: exact loader error, exit 1, zero API time/turns. Init is not evidence either way.
   const resumeUnavailable = !!resumeId && run.exitCode === 1 && toolCalls === 0
