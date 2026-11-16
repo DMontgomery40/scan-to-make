@@ -108,7 +108,7 @@ struct McpPackageRow: View {
                         if update != nil, package.showsUpdate(status:status), let update {
                             Button(failed ? "Try Again" : "Update", action:update)
                                 .buttonStyle(.glassProminent).controlSize(.small)
-                                .accessibilityLabel(package.updateLabel(failed:failed))
+                                .namedButton(package.updateLabel(failed:failed), action:update)
                                 .help("Installs \(package.available ?? "the latest version") for Counterpart. Other copies on this Mac are left as they are.")
                         }
                     }
@@ -134,8 +134,9 @@ struct McpPackageRow: View {
             if status?.spinning == true { ProgressView().controlSize(.small) }
             if !package.installed {
                 Button(failed ? "Try Again" : "Download", action:download)
-                    .buttonStyle(.glassProminent).disabled(busy || installedNow)
-                    .accessibilityLabel(failed ? "Try downloading \(package.label) again" : "Download \(package.label)")
+                    .buttonStyle(.glassProminent)
+                    .namedButton(failed ? "Try downloading \(package.label) again" : "Download \(package.label)", action:download)
+                    .disabled(busy || installedNow)
                     .help("Installs the latest \(package.label) for Counterpart only. Nothing else changes.")
             }
         }
@@ -609,7 +610,9 @@ struct AddedPrinterActions: View {
                                 .labelsHidden().fixedSize()
                         }
                         Button(completing ? "Completing…" : "Complete Settings") { complete() }
-                            .buttonStyle(.glassProminent).controlSize(.small).disabled(completing || (needsModel && model.isEmpty))
+                            .buttonStyle(.glassProminent).controlSize(.small)
+                            .namedButton(completing ? "Completing…" : "Complete Settings for \(printer.name)") { complete() }
+                            .disabled(completing || (needsModel && model.isEmpty))
                     }
                 }
             }
@@ -693,3 +696,12 @@ struct AddedPrinterActions: View {
     }
 }
 #endif
+
+extension View {
+    /// #740: on the Mac these Liquid Glass buttons reached accessibility clients (VoiceOver, System Events, an agent
+    /// driving the app) as a bare "button", even the Update button that had `.accessibilityLabel`. The accessibility
+    /// element is a plain button with the name instead, which presses the same action.
+    func namedButton(_ name: String, action: @escaping () -> Void) -> some View {
+        accessibilityRepresentation { Button(name, action: action) }
+    }
+}

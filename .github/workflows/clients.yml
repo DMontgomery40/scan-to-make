@@ -2,10 +2,10 @@ name: Android and Linux client checks
 on:
   pull_request:
     branches: [main]
-    paths: ['android/**', 'apps/linux/**', 'packages/CounterpartKit/Tests/CounterpartKitTests/Fixtures/**', 'packages/contracts/fixtures/**', '.github/workflows/clients.yml']
+    paths: ['android/**', 'apps/linux/**', 'tools/linux-host/**', 'packages/CounterpartKit/Tests/CounterpartKitTests/Fixtures/**', 'packages/contracts/fixtures/**', '.github/workflows/clients.yml']
   push:
     branches: [main]
-    paths: ['android/**', 'apps/linux/**', 'packages/CounterpartKit/Tests/CounterpartKitTests/Fixtures/**', 'packages/contracts/fixtures/**', '.github/workflows/clients.yml']
+    paths: ['android/**', 'apps/linux/**', 'tools/linux-host/**', 'packages/CounterpartKit/Tests/CounterpartKitTests/Fixtures/**', 'packages/contracts/fixtures/**', '.github/workflows/clients.yml']
 permissions:
   contents: read
 jobs:
@@ -77,4 +77,38 @@ jobs:
       - run: apps/linux/scripts/prepare-frontend.sh
       - run: npm ci --prefix apps/linux --ignore-scripts
       - run: npm test --prefix apps/linux
+      # Packaging and bundled-Python checks (#856); bundle.sh runs them too.
+      - run: python3 -m unittest discover -s apps/linux/tests -p 'test_*.py'
       - run: npm run build --prefix apps/linux
+  # #818: the Tauri shell's Rust tests (diagnostics, scoped file reads). They build against WebKitGTK, whose headers
+  # only agents-136 has, so ci_local runs this job there (CI_LOCAL_LINUX_HOST), from the Mac or any Linux box.
+  # The Linux helper's own tests (tools/linux-host) run here too: the packages ship it beside the shell.
+  linux-rust:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CI_LOCAL_LINUX_HOST: agents-136
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: 24
+      # A warm target folder on agents-136: a cold Tauri build is several minutes. A dependency
+      # change rebuilds only what changed; cargo's own build lock makes a shared folder safe.
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        id: cargo-cache
+        with:
+          path: ${{ runner.temp }}/cargo-target
+          key: cargo-linux-v1
+      - name: Tauri shell frontend (compiled into the crate)
+        run: |
+          set -euo pipefail
+          apps/linux/scripts/prepare-frontend.sh
+          npm ci --prefix apps/linux --ignore-scripts
+          npm run build --prefix apps/linux
+      - name: Tauri shell cargo tests
+        run: CARGO_TARGET_DIR="$RUNNER_TEMP/cargo-target/shell" cargo test --locked --manifest-path apps/linux/src-tauri/Cargo.toml
+      - name: Linux helper cargo tests
+        run: CARGO_TARGET_DIR="$RUNNER_TEMP/cargo-target/host" cargo test --locked --manifest-path tools/linux-host/Cargo.toml

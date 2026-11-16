@@ -370,6 +370,11 @@ struct ProjectView: View {
                         Self.lastRoom[key] = answerRoom
                     }
                 if fit.cardFirst { requestText(object, words).padding(.horizontal, 20) }
+                // #848: at accessibility sizes a pinned bar (the field over a two-line Print Another) took a third of the
+                // screen and left a sliver of page between it and the stage. There it scrolls with the page, after the card.
+                if typeSize.isAccessibilitySize, showsBar(object, words) {
+                    bottomBar(object, words).disabled(earlierShown)
+                }
 
                 if let viewingDesign, let version = object.versions?.first(where: { $0.id == viewingDesign }) {
                     HStack {
@@ -463,8 +468,8 @@ struct ProjectView: View {
                 .accessibilityLabel("More")
             }
         }
-            // A failed pass that left an earlier model still offers changes and Print; with no model, the failed card's Try Again is the way on.
-            if object.canAskForChanges || (words.phase != .needsYou && !(words.phase == .failed && object.current == nil)) {
+            // At accessibility sizes the bar is in the page instead (#848).
+            if !typeSize.isAccessibilitySize, showsBar(object, words) {
                 bottomBar(object, words).disabled(earlierShown).padding(.top, 8)
             }
         }
@@ -549,6 +554,8 @@ struct ProjectView: View {
     static let pageSpace = "project-page"
     static let answerCard = "answer-card"
     static let fullStage: CGFloat = 380
+    /// The stage with nothing to draw (#842): the toolbar over it and "Nothing to show yet." under it.
+    static let emptyStage: CGFloat = 120
     /// The stage never gets shorter than this, so the model stays a picture of the part.
     static let stageFloor: CGFloat = 160
     /// Below this a real picture stops reading as the part (chosen by looking at real parts on the smallest iPhone,
@@ -660,8 +667,10 @@ struct ProjectView: View {
         let scanKey = "\(object.id)#\(object.scan ?? "")"
         let _ = scanKick.on(scanKey) { [self] in scanURL = object.current == nil ? store.mac.localScan(object.id) : nil }
         VStack(spacing: 8) {
+            // #842: with nothing to draw the stage is only as tall as the toolbar floating over it and its one line, so a
+            // question's card and its answer are on the first screen. It grows to the full stage when the scan comes.
             ProjectGalleryView(store: store, project: object, words: words,
-                               height: stage,
+                               height: ProjectGalleryView.nothingToShow(object, localScan: scanURL) ? Self.emptyStage : stage,
                                arFile: $arFile, localScan: scanURL, working: working || away,
                                locate: { act { try await store.mac.client.locate(object.id) } })
             .task(id: scanKey) {
@@ -1059,6 +1068,11 @@ struct ProjectView: View {
     }
 
     // MARK: Bottom bar
+
+    /// A failed pass that left an earlier model still offers changes and Print; with no model, the failed card's Try Again is the way on.
+    private func showsBar(_ object: Project, _ words: ProjectWords) -> Bool {
+        object.canAskForChanges || (words.phase != .needsYou && !(words.phase == .failed && object.current == nil))
+    }
 
     @ViewBuilder private func bottomBar(_ object: Project, _ words: ProjectWords) -> some View {
         // While the Mac works, a change waits and goes in when this pass finishes.

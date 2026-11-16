@@ -567,6 +567,63 @@ final class LayoutParityUITests: XCTestCase {
         return app
     }
 
+    /// #842: a project with nothing to draw (DAD, started from words while its scan stopped on the phone) kept the full
+    /// 3D stage, quiet ("Nothing to show yet."), and its question's answers started at the bottom edge, Camera below the
+    /// fold. With projects present, the empty stage is short and the question's answer is on the first screen.
+    func testAnEmptyStageLeavesTheQuestionAndItsAnswerOnTheFirstScreen() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-CounterpartFixtures", NSTemporaryDirectory() + "no-assets", "-CounterpartFixtureSet", "ask-stranded",
+                               "-CounterpartOpen", "counterpart://project/6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a04"]
+        app.launch()
+        let camera = app.buttons["Camera"]
+        XCTAssertTrue(camera.waitForExistence(timeout: 20), "the question's answers: \(app.debugDescription)")
+        let stage = app.images["gallery-stage-picture"]
+        XCTAssertTrue(stage.waitForExistence(timeout: 10))
+        let said = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Nothing to show yet.")).firstMatch
+        XCTAssertTrue(said.waitForExistence(timeout: 10), "the empty stage still says so in one line")
+        XCTAssertLessThanOrEqual(stage.frame.height, 200, "an empty stage is short: \(stage.frame)")
+        let window = app.windows.firstMatch.frame
+        XCTAssertTrue(camera.isHittable && camera.frame.maxY <= window.maxY, "Camera on the first screen: \(camera.frame) in \(window)")
+    }
+
+    /// #848: at the largest text size the pinned bottom bar (the ask field over a two-line Print Another) took a third of
+    /// the screen, and the stage's chips ("Explore in 3D", "AR", the size) were each two lines over the model. There the
+    /// bar scrolls with the page, the chips are their symbols (named as before), and the size is a line under the stage.
+    func testAtTheLargestTextSizeTheBarScrollsAndTheStageChipsStayOffTheModel() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try Self.boxSTL().write(to: folder.appendingPathComponent("mic.stl"))
+        let app = XCUIApplication()
+        app.launchArguments = ["-CounterpartFixtures", folder.path, "-CounterpartFixtureSet", "ar-stage", "-CounterpartScreen", "printed",
+                               "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launch()
+        let stage = app.descendants(matching: .any)["model-stage"]
+        XCTAssertTrue(stage.waitForExistence(timeout: 30), app.debugDescription)
+        let size = app.descendants(matching: .any)["gallery-size"]
+        XCTAssertTrue(size.waitForExistence(timeout: 30), "the part's size, once drawn")
+        XCTAssertGreaterThanOrEqual(size.frame.minY, stage.frame.maxY - 1, "the size is under the stage, not over the model: \(size.frame) vs \(stage.frame)")
+        let ar = app.buttons["gallery-ar"]
+        XCTAssertTrue(ar.waitForExistence(timeout: 20))
+        XCTAssertEqual(ar.label, "AR", "still named for VoiceOver")
+        XCTAssertLessThan(ar.frame.width, 90, "AR is its symbol: \(ar.frame)")
+        let explore = app.buttons["Explore in 3D"]
+        if explore.waitForExistence(timeout: 20) {
+            // Its symbol in the stage's glass measures 93 × 63 pt here (body font); its words were two lines.
+            XCTAssertLessThan(explore.frame.width, 120, "Explore in 3D is its symbol: \(explore.frame)")
+            XCTAssertLessThan(explore.frame.height, 70, "one line, not two over the model: \(explore.frame)")
+        }
+        // The bar is in the page: scrolling moves it, where a pinned bar stays put.
+        let print = app.buttons["print"]
+        XCTAssertTrue(print.waitForExistence(timeout: 20))
+        let before = print.frame.minY
+        let scroll = app.scrollViews.firstMatch
+        scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.9))
+            .press(forDuration: 0.05, thenDragTo: scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)))
+        RunLoop.current.run(until: Date().addingTimeInterval(1))
+        XCTAssertGreaterThan(abs(print.frame.minY - before), 20, "the bar scrolls with the page: \(before) → \(print.frame.minY)")
+    }
+
     /// Scrolls the project page until `element` is on screen, dragging from the page's lower edge. `app.swipeUp()` drags
     /// through the app's middle, which on the iPad in landscape is the scan stage: the drag turns the model and the page
     /// stays put. The lower edge is below the stage and below the tab picker, so the drag never changes the tab either.
@@ -1780,7 +1837,15 @@ final class LayoutParityUITests: XCTestCase {
             XCTAssertTrue(app.scrollViews.firstMatch.waitForExistence(timeout: 30), "\(page.name): \(app.debugDescription)")
             if let tap = page.tap {
                 let entry = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", tap)).firstMatch
-                if entry.waitForExistence(timeout: 10) { entry.tap() } else { failures.append("\(page.name): no \(tap) to tap") }
+                if entry.waitForExistence(timeout: 10) {
+                    // At these sizes a page with "Did it fit?" opens scrolled to that card (#527 S5), the labels above it.
+                    let scroll = app.scrollViews.firstMatch
+                    for _ in 0..<4 where entry.frame.minY < app.windows.firstMatch.frame.minY + 60 {
+                        scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3))
+                            .press(forDuration: 0.05, thenDragTo: scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.9)))
+                    }
+                    entry.tap()
+                } else { failures.append("\(page.name): no \(tap) to tap") }
             }
             RunLoop.current.run(until: Date().addingTimeInterval(3))
             for screen in ["first screen", "scrolled"] {
