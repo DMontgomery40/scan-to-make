@@ -12,7 +12,8 @@ import {inspectModelFile, modelPlatePreview} from '@scan-to-make/printer-handoff
  */
 export async function mcpPlates({modelPath}) {
   const bytes = await readFile(modelPath);
-  const info = inspectModelFile(bytes, '3mf');
+  // The MCPs read any entry up to 256 MiB (their src/safety/archive.ts), as a pass-made 3MF's limits do here (#858).
+  const info = inspectModelFile(bytes, '3mf', {origin: 'pass'});
   const filaments = standInFilaments(bytes);
   return {projectFilaments: filaments.project, plates: info.plates.map(plate => {
     const thumbnail = modelPlatePreview(bytes, plate.index);

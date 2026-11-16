@@ -81,6 +81,33 @@ test('a design in several colours keeps its multi-part 3MF as the model, and is 
   await assert.rejects(readFile(join(dir, 'current', 'model.3mf')), {code: 'ENOENT'}, 'a one-colour revision leaves no stale parts file');
 });
 
+test('a pass whose two-part 3MF unpacks past 8 MB keeps it as the model, with its colours and merged mesh (#858)', async t => {
+  // The DAD sign: the worker's 3MF (bar and letters) was refused for its 14 MB mesh and the project kept a one-colour STL.
+  const {prepareTouchupPass} = await import('../dist/touchup/inputs.js');
+  const {runTouchupWorker} = await import('../dist/touchup/runner.js');
+  const fixtures = new URL('./fixtures/touchup/', import.meta.url).pathname;
+  const root = await tempDir('objects-passes-big-');
+  t.after(() => rm(root, {recursive: true, force: true, maxRetries: 10, retryDelay: 20}));
+  const store = new ObjectStore(join(root, 'objects'));
+  const runTouchup = async input => {
+    input.onStage?.('working', 'blender');
+    const pass = await prepareTouchupPass({root: join(root, 'passes'), objectId: 'obj', scan: [join(fixtures, 'scan.obj')], photos: [join(fixtures, 'photo.jpg')]});
+    const inv = {command: process.execPath, args: [join(fixtures, 'fake-claude.mjs'), 'multicolourbig'], env: {PATH: process.env.PATH}, cwd: pass.dir, mcpConfigPath: join(pass.dir, 'mcp.json'), mcpConfig: {mcpServers: {}}};
+    return {...await runTouchupWorker(inv, pass, {onProgress: input.onProgress}), passDir: pass.dir};
+  };
+  const service = new ObjectService({store, runTouchup, stlInfo: async () => [195.7, 19.9, 100.5], claudePath: '/unused', handoff: {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true'}},
+    events: {emit: async () => {}}, passTimings: new PassTimings(join(root, 'timings.json'))});
+  t.after(() => service.close());
+  const object = await service.create('A replica of this DAD desk sign', 'copy');
+  await service.start(object.id);
+  await service.settled(object.id);
+  const ready = await service.get(object.id);
+  assert.equal(ready.current.model, 'current/model.3mf', 'the two parts are what prints');
+  assert.deepEqual(ready.current.filaments, [{name: 'bar', colour: '#B0855D'}, {name: 'letters and inscription', colour: '#111111'}]);
+  assert.equal(ready.current.mergedMesh, 'current/model.stl', 'the merged mesh is listed beside the 3MF');
+  assert.ok((await readFile(join(store.dir(object.id), 'current', 'model.3mf'))).length > 0);
+});
+
 test("a copy of a designer's 3MF works on that 3MF every pass, never its merged mesh (the Nov 4 caliper card)", async t => {
   // Pass 3 of the caliper card was given the merged STL, rebuilt a bare 3MF from it and lost the designer's
   // print settings and painted markings; the printed card no longer folded.

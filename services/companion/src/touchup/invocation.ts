@@ -31,7 +31,7 @@ export const TOUCHUP_RESULT_SCHEMA = {
         text: {type: 'string', maxLength: 200, description: 'One short line, at most 200 characters'},
         toleranceMm: {type: 'number', minimum: 0, description: 'For estimated sizes: plus or minus this many millimetres'},
       }}},
-    parts: {type: 'array', maxItems: 64, description: 'Only for a request in more than one colour: the parts of out/touched.3mf in filament order (the first prints on filament 1), each with the colour the person asked for as #RRGGBB, so Counterpart can put it on the nearest loaded spool',
+    parts: {type: 'array', maxItems: 64, description: 'Only for a model in more than one colour: the parts of out/touched.3mf in filament order (the first prints on filament 1), each with its colour as #RRGGBB (the one the person asked for, or for a copy the original’s from the photos), so Counterpart can put it on the nearest loaded spool',
       items: {type: 'object', additionalProperties: false, required: ['colour'], properties: {
         name: {type: 'string', maxLength: 128, description: 'The part’s name in the 3MF, at most 128 characters, like "body" or "letters"'},
         colour: {type: 'string', pattern: '^#[0-9A-Fa-f]{6}$', description: 'The colour this part should print in, as #RRGGBB'},
@@ -126,7 +126,7 @@ export const RULE_SECTIONS = {
   newDesign: 'A new design:',
   captured: 'Cleaning up a captured object:',
   fitSizes: 'Sizes the part must fit:',
-  colours: 'A request in more than one colour or material:',
+  colours: 'More than one colour or material:',
   designerCopy: "A copy of a designer's 3MF:",
   namedModel: 'A model the person names:',
   seats: 'Where the scanned object sits:',
@@ -164,8 +164,27 @@ Settle the sizes the part must fit in this order, before modelling anything that
 2. When there is a scan, compare each measured or published size with it, measuring the scan in the object's own upright frame. If any of them differs by more than the stated tolerance (2 mm or 2% when none is stated), stop with needs_closeup before modelling any fit-critical geometry, however little you judge the difference to matter for this part. The question names both sets of numbers, each measurement and what the scan reads, in mm, and asks which to use. Don't ask again when the person has already answered it: their answer is in the request or the change.
 3. Size each place the part meets a real object from the measured or published sizes, with a fit chosen by what that interface has to do. Say its function in plain words: the object rests in, or drops in and lifts out; slides; locates without rattle; grips so it does not slip or turn; clamps closed with a screw; snaps over; or presses in to stay. Infer it first from the object and how the part mounts (a holder open at the top is a drop-in; a mount on a pole must not turn). Keep three things apart: the object's size, with how it was measured (calipers, a published dimension, a scan, a photo estimate) and how sure it is; the correction for how that feature prints; and the fit, which comes only from the function. Choose the fit from the function, the feature's size and shape, how sure the size is and how it prints: a plain clearance where loose is the point; where it must grip, or the size is less sure than the function tolerates, a mechanism that takes up the difference (crush ribs, a split with a pinch screw, a flexure, a snap), or ask for the one caliper measurement that settles it. For example, a wall holder that bottles drop into takes a clearance all round, while a pole clamp sized from a photo takes a split and a screw so it grips across the range that estimate allows. Never reuse one number for every interface, and never choose a fit to make room for the scan. When you can't tell what an interface has to do and the answer would change the design, stop with needs_closeup and ask about behaviour the person can answer (should it stay in upside down, lift out with one hand, ever turn?). In your summary, give each interface its function, the fit chosen (clearance or interference per side, or the mechanism and the range of sizes it holds) and why.${scanCheck}`;
 
-const COLOUR_RULES = (whole: string) => `${RULE_SECTIONS.colours}
-- Model each colour as its own body or object, export each one as an STL, and combine them with the printer MCP's counterpart_make_3mf into out/touched.3mf, one part per colour in the order the request names them (part 1 on filament 1, and so on). Build the parts lying the way the object should print: a 3MF keeps its placement exactly as made (Counterpart never re-orients a 3MF), so the orientation you model is the orientation that prints, supports included. Report every part under "parts" in your answer, in that same order, with its name and the colour the person asked for as #RRGGBB (and its material when they named one): the 3MF itself carries no colours, so this list is how Counterpart knows which spool each part belongs on. ${whole} Counterpart prints the 3MF and puts each part on a spool; never tell the person how to slice, which filament slot to use or which layer height to pick.`;
+/**
+ * More than one colour (#858): asked for in words, or, for a copy, shown by the original's photos. How the parts are
+ * made is the engine's: the code engine makes them in the same cad_run as the model (project_3mf, #859 fix 5); the
+ * others combine one STL per colour with counterpart_make_3mf. Either way they end as out/touched.3mf.
+ */
+const COLOUR_RULES = (code: boolean, coloured: boolean) => `${RULE_SECTIONS.colours}
+- Make the model in more than one colour when the person asks for colours. A copy is also made as the original is, without being asked: when its photos plainly show it made of more than one material or colour (black letters standing in a wooden base, a red cap on a clear bottle), make it in those colours, one part per colour. Ink stays ink: a printed colour may become a part flush with the surface it is printed on, never raised. When the photos leave it unclear, make it in one colour.
+- Whether and how the person's printer prints several colours is the printer MCP's judgement, not yours: read its fdm_multicolor guidance (its design_guidance tool) and follow it.
+${code
+    ? coloured
+      // #858, the MCP implementer's rule for an MCP that takes each part's colour (capabilities.partMeshes).
+      ? "- When the design has more than one colour, make the colours in the same cad_run as the model: build() in the run you mark final returns project_3mf(), with one add_part per colour body, each with its filament number (the first colour on filament 1, and so on) and its colour from the request or the photos as color=\"#RRGGBB\", named as the person would name it (\"Bar\", \"Letters and inscription\"); the parts of one piece share one object= so they print together. That one run writes the model's STL and its 3MF together, and Counterpart keeps the 3MF as out/touched.3mf. Never run the design again for each colour, and never export one STL per colour for counterpart_make_3mf. The run you mark final is still the whole model."
+      : "- Make the colour parts in the same cad_run as the model: build() in the run you mark final returns project_3mf(), with one add_part per colour (the first colour on filament 1, and so on), and the parts of one piece share one object= so they print together. That run writes its 3MF beside its STL, and Counterpart keeps it as out/touched.3mf. Never run the design again for each colour, and never combine colour parts with counterpart_make_3mf. The run you mark final is still the whole model."
+    : coloured
+      ? "- Model each colour as its own body or object, export each one as an STL, and combine them with the printer MCP's counterpart_make_3mf into out/touched.3mf, one part per colour (part 1 on filament 1, and so on), each named as the person would name it and given its colour from the request or the photos as color: \"#RRGGBB\". Still export the whole model to out/touched.stl."
+      : "- Model each colour as its own body or object, export each one as an STL, and combine them with the printer MCP's counterpart_make_3mf into out/touched.3mf, one part per colour (part 1 on filament 1, and so on). Still export the whole model to out/touched.stl."}${coloured ? `
+- Slice the 3MF once with slice_stl. If the slice refuses with needs-more-filaments, say its slicer_report.message in your summary, as it is, and offer the one-colour print.` : ''}
+- Order the parts as the request names their colours, or for a copy from the largest part to the smallest. Build them lying the way the object should print: a 3MF keeps its placement exactly as made (Counterpart never re-orients a 3MF), so the orientation you model is the orientation that prints, supports included.
+- Report every part under "parts" in your answer, in that same order, with its name and its colour as #RRGGBB (the one the person asked for, or the original's from the photos), and its material only when the person named one: this list is how Counterpart knows which spool each part belongs on.
+- Say it plainly in the summary's first sentence, naming colours, not materials you can't confirm, for example: "Made as the original is: black letters in a wood-colour base. Prints as one piece in two colours."
+- Counterpart prints the 3MF and puts each part on a spool; never tell the person how to slice, which filament slot to use or which layer height to pick.`;
 
 const DESIGNER_COPY_RULES = `${RULE_SECTIONS.designerCopy}
 - The files list names a designer's 3MF project: that project is the thing being copied, and it prints with the designer's own parts, plate placement, painted colours and print settings. Change only what the person asked for, inside that project: edit its object models in place (for example re-paint or add faces with the same colour attributes the designer used, or change one object's mesh) and write the whole project, every other file unchanged, to out/touched.3mf. Never rebuild it from the merged mesh or with counterpart_make_3mf, never turn painted markings into separate parts, and never move, turn or rescale what the designer laid out. Export the merged mesh to out/touched.stl as well, for the renders. Check it against the designer's own file: everything the designer's file prints must still print. Counterpart refuses a copy whose print settings differ from the designer's file.`;
@@ -314,7 +333,15 @@ export const BLENDER_RULES = `${ON_ENGINE.blender}\n` + "- Reach Blender only th
  * The printer MCP's own guidance for a pass: how to design for its printers (`fdm_design`) and how its slicer
  * orients, supports and checks a slice (`fdm_slicing`). The app holds no slicer knowledge (PRD §8.0 item 10).
  */
-export interface DesignGuidance {design?: string; slicing?: string; cad?: string}
+export interface DesignGuidance {
+  design?: string; slicing?: string; cad?: string;
+  /**
+   * #858: the printer MCP advertises `capabilities.partMeshes`, the release that takes each part's colour (`project_3mf()`
+   * `add_part(color=…)`, `counterpart_make_3mf` `parts[].color`) and refuses a slice short of filaments with
+   * `needs-more-filaments`. Without it the colour rules name neither.
+   */
+  partColours?: boolean;
+}
 
 /** What decides a pass's rules: the inputs `buildTouchupInvocation` already has. */
 export interface PassRules {
@@ -337,8 +364,9 @@ export function ruleSections(pass: PassRules): (keyof typeof RULE_SECTIONS)[] {
   if (pass.kind === 'fit') sections.push('newDesign');
   if (pass.kind === 'copy' && !pass.designerCopy) sections.push('captured');
   if (pass.kind === 'fit') sections.push('fitSizes');
-  // No input says a request is in several colours; any words from the person may ask for them. A designer's 3MF keeps its own.
-  if (pass.request && !pass.designerCopy) sections.push('colours');
+  // No input says a request is in several colours; any words from the person may ask for them, and a copy's photos may
+  // show them (#858: the DAD sign's black letters in a wooden bar). A designer's 3MF keeps its own.
+  if ((pass.request || pass.kind === 'copy') && !pass.designerCopy) sections.push('colours');
   if (pass.designerCopy) sections.push('designerCopy');
   if (pass.request) sections.push('namedModel');
   if (pass.kind === 'fit' && pass.scan) sections.push('seats');
@@ -352,7 +380,7 @@ export function systemRules(pass: PassRules, guidance: DesignGuidance = {}): str
   const text: Record<keyof typeof RULE_SECTIONS, () => string> = {
     newDesign: () => NEW_DESIGN_RULES(engineName), captured: () => CAPTURED_RULES(code ? '' : " Use Blender's existing sculpt, modelling and modifier tools for that cleanup."),
     fitSizes: () => FIT_SIZE_RULES(code ? CODE_FIT_CHECK : ''),
-    colours: () => COLOUR_RULES(code ? 'The run you mark final is still the whole model.' : 'Still export the whole model to out/touched.stl.'), designerCopy: () => DESIGNER_COPY_RULES, namedModel: () => NAMED_MODEL_RULES,
+    colours: () => COLOUR_RULES(code, guidance.partColours === true), designerCopy: () => DESIGNER_COPY_RULES, namedModel: () => NAMED_MODEL_RULES,
     seats: () => SEAT_RULES(code),
   };
   if (pass.locate) return [code ? CODE_LOCATE_CORE : BLENDER_RULES, LOCATE_RULES(code)].join('\n\n')

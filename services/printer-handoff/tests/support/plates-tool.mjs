@@ -6,7 +6,8 @@ import {standInFilaments} from './plate-filaments-stand-in.mjs';
 
 export async function platesResult(path, thumbnails = true) {
   const bytes = await readFile(path);
-  const info = inspectModelFile(bytes, '3mf');
+  // The MCPs read any entry up to 256 MiB (their src/safety/archive.ts), as a pass-made 3MF's limits do here (#858).
+  const info = inspectModelFile(bytes, '3mf', {origin: 'pass'});
   const filaments = standInFilaments(bytes);
   const plates = info.plates.map(plate => {
     const png = thumbnails ? modelPlatePreview(bytes, plate.index) : undefined;

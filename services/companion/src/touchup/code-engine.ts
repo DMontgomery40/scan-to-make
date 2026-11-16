@@ -123,6 +123,8 @@ interface CadReceipt {
   role?: unknown;
   /** #790, optional: why a run that isn't final is a draft, as the MCP says it; first among the reasons. */
   draft_reasons?: unknown;
+  /** Optional: the 3MF project the run wrote when its build() returned project_3mf(), one part per colour (#858). */
+  three_mf?: unknown;
 }
 interface CadRun {dir: string; receipt: CadReceipt; manifest: string; stl: string; script: string; parameters: string; completedAt: string}
 
@@ -189,12 +191,15 @@ export async function collectCodeRuns(pass: Pick<TouchupPass, 'dir' | 'outDir' |
   const views: {view: string; file: string}[] = [];
   for (const [view, path] of Object.entries(renders)) { const file = inside(model.dir, path); if (file && await isFile(file)) views.push({view, file}); }
   views.sort((a, b) => Number(b.view === 'contact') - Number(a.view === 'contact') || a.view.localeCompare(b.view));
-  const touched = join(pass.outDir, 'touched.stl');
+  const touched = join(pass.outDir, 'touched.stl'), parts = inside(model.dir, model.receipt.three_mf);
   try {
     await mkdir(pass.checkpointsDir, {recursive: true});
     for (const [index, run] of runs.entries()) await copyFile(run.stl, join(pass.checkpointsDir, `${String(index + 1).padStart(3, '0')}.stl`));
     for (const [index, {view, file}] of views.entries()) await copyFile(file, join(pass.outDir, `${index + 1}-${view}${extname(file) || '.png'}`));
     await copyFile(model.stl, touched);
+    // #858, #859 fix 5: a run whose build() returned project_3mf() made its colour parts with the model, in one run.
+    // Its 3MF is the pass's multi-part file, beside the merged mesh it was written with (the STL in the same run).
+    if (parts && await isFile(parts)) await copyFile(parts, join(pass.outDir, 'touched.3mf'));
   } catch (error) {
     // Nothing half-kept: without its design source the model is not offered either.
     await rm(touched, {force: true}).catch(() => undefined);

@@ -1167,7 +1167,7 @@ Without the code engine, scan cleanup uses Blender, and designing a part from sc
 | A new design (interfaces, complete functional geometry in the engine, assembly check) | a fit |
 | Cleaning up a captured object (recognise it, fix what the photos support, rebuild manufactured features regular, ink is not shape, §5.3) | a copy, except a designer's 3MF |
 | Sizes the part must fit (look up, confirm with an Ask, measured sizes win) | a fit |
-| A request in more than one colour or material (one part per colour, `counterpart_make_3mf`, `parts`) | any pass with the person's words, except a designer's 3MF. No input says a request is multi-colour, so any request or change may ask for colours |
+| More than one colour or material (one part per colour, `parts`, a summary that says it plainly; the code engine makes the parts in the model's own `cad_run` with `project_3mf()`, the others with `counterpart_make_3mf`; the printer's judgement is the MCP's `fdm_multicolor`; each part's `color` and the `needs-more-filaments` refusal only for an MCP that advertises `capabilities.partMeshes`) (#858) | any pass with the person's words, and every copy, except a designer's 3MF. No input says a request is multi-colour, so any request or change may ask for colours, and a copy is made in the colours its photos plainly show, without being asked |
 | A copy of a designer's 3MF (edit the project in place) | a designer's 3MF |
 | A model the person names (never a substitute) | any pass with the person's words |
 

@@ -474,7 +474,10 @@ test('the composed rules for a code pass: the MCP\'s cad_design prompt plus only
   assert.equal(fit.includes(RULE_SECTIONS.captured), false);
   assert.match(fit, /cad_check_fit/, 'a fit can check itself against the scan');
   assert.doesNotMatch(fit, /out\/touched\.stl/, 'a code worker writes no files itself: the touched run is the whole model');
-  assert.match(fit, /counterpart_make_3mf into out\/touched\.3mf/, 'several colours still combine into the 3MF');
+  // #859 fix 5: a code pass makes its colour parts in the model's own run, never one re-run per colour.
+  assert.match(fit, /same cad_run as the model: build\(\) in the run you mark final returns project_3mf\(\)/, 'several colours come from the final run');
+  assert.match(fit, /Counterpart keeps it as out\/touched\.3mf/, 'and still end as the 3MF');
+  assert.match(systemRules({kind: 'fit', request: true}), /counterpart_make_3mf into out\/touched\.3mf/, 'other engines still combine one STL per colour');
   assert.match(systemRules({kind: 'fit', request: true}), /Still export the whole model to out\/touched\.stl\./);
   // How to prepare the reference and that a fit check never resizes a measured interface are the MCP's (cad_design).
   assert.doesNotMatch(fit.replace('MCP CAD PROMPT', ''), /never rescale|as information|never to choose a size/i, 'no sentence duplicates the MCP\'s cad_design prompt');
