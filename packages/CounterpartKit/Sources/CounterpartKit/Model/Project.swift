@@ -541,8 +541,9 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
             seats = (try? c.decodeIfPresent([Seat].self, forKey: .seats)) ?? nil
             mergedMesh = (try? c.decodeIfPresent(String.self, forKey: .mergedMesh)) ?? nil
             draft = (try? c.decodeIfPresent(DesignDraft.self, forKey: .draft)) ?? nil
-            // One malformed part leaves that part out, never the design's other parts.
-            let decoded = (try? c.decodeIfPresent([Lossy<ResultPart>].self, forKey: .parts))?.compactMap(\.value)
+            // All or nothing (review of #872, P2-4): one malformed part and the design is drawn as if it had no parts (the
+            // merged mesh, neutral), never with a piece silently missing. Android and Linux read it the same way.
+            let decoded = (try? c.decodeIfPresent([ResultPart].self, forKey: .parts)) ?? nil
             parts = decoded?.isEmpty == false ? decoded : nil
         }
     }
@@ -561,11 +562,6 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
         }
     }
 
-    /// A list element that decodes to nil instead of failing the list.
-    struct Lossy<T: Decodable>: Decodable {
-        let value: T?
-        init(from decoder: Decoder) throws { value = try? T(from: decoder) }
-    }
 
     /// #788: why a design is a draft, in the printer MCP's own words (`final_refused`, or its failing purpose
     /// requirements), shown as given and never interpreted. Empty from an MCP before engine round 4.

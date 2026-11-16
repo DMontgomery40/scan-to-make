@@ -367,6 +367,9 @@ final class CompanionClientTests: XCTestCase {
         XCTAssertEqual(OnDeviceLibrary.Kind.of("current/model.stl"), .model)
         XCTAssertEqual(OnDeviceLibrary.Kind.of("versions/2d67e062-42b7-4d91-ab77-212a490a5a65/touched.stl"), .model)
         XCTAssertEqual(OnDeviceLibrary.Kind.of("versions/2d67e062-42b7-4d91-ab77-212a490a5a65/pictures/part.png"), .picture)
+        // #691 (review of #872): a design's part meshes are models, current and sealed, never pictures.
+        XCTAssertEqual(OnDeviceLibrary.Kind.of("current/parts/part-1.stl"), .model)
+        XCTAssertEqual(OnDeviceLibrary.Kind.of("versions/2d67e062-42b7-4d91-ab77-212a490a5a65/parts/part-2.stl"), .model)
         for refused in ["current/model.3mf", "current/../object.json", "current/design/inputs/scan.obj"] {
             do { _ = try await c.download(box, refused); XCTFail(refused) } catch {}
         }
