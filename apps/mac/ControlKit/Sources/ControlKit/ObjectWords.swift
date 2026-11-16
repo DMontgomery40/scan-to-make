@@ -34,7 +34,7 @@ public enum ObjectAction: Sendable, Equatable {
 
 /// The sidebar's sections (PRD §7.2), in order. Every stage belongs to exactly one.
 public enum ProjectGroup: Int, Sendable, Equatable, CaseIterable, Comparable {
-    /// Done: the person said it works (PRD §5.4). Drafts: started on the phone, nothing sent yet.
+    /// Done: the person said it works (PRD §5.4). Drafts: started on the phone or this Mac, nothing added yet.
     /// Archived: hidden from the others, collapsed, everything kept.
     case now, needsYou, ready, done, printed, drafts, archived
     public var title: String {
@@ -101,10 +101,12 @@ public struct ObjectWords: Sendable, Equatable {
         return head + " · " + short.prefix(1).lowercased() + short.dropFirst()
     }
 
-    /// "Draft from your iPhone · nothing sent yet".
-    public static let draftLine = "Draft from your iPhone · nothing sent yet"
+    /// "Draft · add photos or a model". A draft is started on the phone or on this Mac, and the project keeps no record
+    /// of which, so the line names neither (#851: a Mac draft said "Draft from your iPhone"); like the phone's "Add photos
+    /// or a scan", it says what comes next, and this Mac also takes a model file.
+    public static let draftLine = "Draft · add photos or a model"
 
-    /// A project started on the phone with nothing sent: new, no scan, photos or capture on this Mac, and nothing
+    /// A project started on the phone or this Mac with nothing sent: new, no scan, photos or capture on this Mac, and nothing
     /// arriving. The companion says when the first files are arriving (`progress`, control socket only); it keeps no
     /// other trace of an upload in progress, so this never guesses from how old the project is.
     public static func isDraft(_ object: Project) -> Bool {

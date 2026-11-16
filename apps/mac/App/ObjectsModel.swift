@@ -240,6 +240,9 @@ struct SocketObjects: ObjectsCompanion {
     enum DiscoveryState { case loading, ready, failed }
     @Published private(set) var printerDiscovery = DiscoveryState.loading
     @Published private(set) var phoneDiscovery = DiscoveryState.loading
+    /// Connected-phone reads that failed in a row; the footer says so only from `phoneFailuresShown` (#851).
+    private var phoneFailures = 0
+    static let phoneFailuresShown = 3
     var missingPhoneText: String {
         if availability == .notRunning { return "Not running" }
         switch phoneDiscovery {
@@ -542,15 +545,22 @@ struct SocketObjects: ObjectsCompanion {
         if let status = try? await companion.status(), capabilities != status.capabilities { capabilities = status.capabilities }
         if let devices = try? await companion.devices() {
             if devices.map(\.id) != self.devices.map(\.id) || devices.map(\.seenAt) != self.devices.map(\.seenAt) || devices.map(\.lastSeenAt) != self.devices.map(\.lastSeenAt) { self.devices = devices }
+            phoneFailures = 0
             phoneDiscovery = .ready
-        } else { phoneDiscovery = .failed }
+        } else {
+            // #851: one read that didn't answer (the companion starting, or busy) briefly said "Couldn't read connected
+            // phones." on a Mac with no phone yet. What was shown stays until reads fail several times in a row.
+            phoneFailures += 1
+            if phoneFailures >= Self.phoneFailuresShown { phoneDiscovery = .failed }
+        }
         aiProvider = await companion.aiProvider()
     }
 
     /// Starts a project on this Mac (PRD §7.2): the request, then each dropped file, then the pass. Photos
     /// (JPEG, HEIC, PNG) go in as photos; STL, 3MF and USDZ as the thing to copy. Returns one sentence when it
-    /// didn't go through; the project is selected when it did.
-    func startProject(instructions: String, files: [URL], kind: String = "fit", url: String? = nil) async -> String? {
+    /// didn't go through; the project is selected when it did. `kind` is only the person's own choice: with none, none is
+    /// sent and the companion decides from the words and files (#867).
+    func startProject(instructions: String, files: [URL], kind: String? = nil, url: String? = nil) async -> String? {
         if url != nil && capabilities?.publishedModels != true { return "Update Counterpart’s companion to get the designer’s model file." }
         guard capabilities?.objectsCreate == true else { return Self.createUnavailable }
         let text = String(instructions.trimmingCharacters(in:.whitespacesAndNewlines).prefix(4000))
