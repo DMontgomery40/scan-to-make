@@ -60,6 +60,9 @@ export async function sealVersion(object: StmObject, dir: string, result: NonNul
     // Multipart designs keep the merged mesh as well as the printable 3MF.
     const mesh = join(dirname(result.model), 'model.stl');
     if (mesh !== result.model) await copy(mesh, 'model.stl');
+    // #691: each part's own mesh, so a sealed design is drawn in its colours as it was.
+    const parts: NonNullable<typeof result.parts> = [];
+    for (const part of result.parts ?? []) { const mesh = await copy(part.mesh, join('parts', basename(part.mesh))); if (mesh) parts.push({...part, mesh}); }
     const renders: string[] = [];
     for (const [index, path] of result.renders.entries()) { const saved = await copy(path, join('renders', `${index}-${basename(path)}`)); if (saved) renders.push(saved); }
     let design = result.design;
@@ -80,7 +83,9 @@ export async function sealVersion(object: StmObject, dir: string, result: NonNul
     if (!reused) { await rename(temp, join(dir, prefix)); pass.created?.add(id); }
     return {id, sealedAtMs: pass.endedAtMs, ...(pass.startedAtMs !== undefined ? {passStartedAtMs: pass.startedAtMs} : {}), ...(pass.note ? {note: pass.note} : {}), modelSha256,
       // The merged mesh is listed from disk as the project is read, never copied from `current` (its path is current's).
-      result: {...withoutMergedMesh(result), model: paths.get(result.model)!, renders, ...(design ? {design} : {})}};
+      result: {...withoutParts(withoutMergedMesh(result)), model: paths.get(result.model)!, renders, ...(design ? {design} : {}),
+        // All of a design's parts or none: a part missing from disk draws the merged mesh instead, never half the parts.
+        ...(parts.length && parts.length === result.parts?.length ? {parts} : {})}};
   } catch (error) { await rm(temp, {recursive: true, force: true}); throw error; }
 }
 
@@ -271,6 +276,10 @@ async function migrateOnce(object: StmObject, dir: string, options: {events?: Hi
   return {...migrated, versionsV1: true, ...(versions.length > 1 ? {historyRestored: restoredWords} : {})};
 }
 
+function withoutParts<T extends {parts?: unknown}>(result: T): Omit<T, 'parts'> {
+  const {parts: _parts, ...rest} = result;
+  return rest;
+}
 function withoutMergedMesh<T extends {mergedMesh?: string}>(result: T): Omit<T, 'mergedMesh'> {
   const {mergedMesh: _mergedMesh, ...rest} = result;
   return rest;

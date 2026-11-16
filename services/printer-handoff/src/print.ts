@@ -9,6 +9,7 @@ import {
 import type {ElicitationContext, ElicitationRelay} from './elicitation.js';
 import {slicedFacts, type SliceEstimate, type SliceSettings} from './slice-estimate.js';
 import {modelPlatesFrom, type McpModelPlates} from './model-plates.js';
+import {MODEL_PARTS_TOOL, modelPartsFrom, type McpModelPart} from './model-parts.js';
 import {lacksSlicerReport, logSlicerRefusal, slicerReport} from './slicer-report.js';
 import {slicePreview, type SlicePreview} from './slice-preview.js';
 import {createHash} from 'node:crypto';
@@ -287,6 +288,23 @@ export class PrinterHandoffRunner {
       const options = {...(input.signal ? {signal: input.signal} : {}), failFast: shared};
       await session.connect(options);
       return listPlates(session, input.modelPath, this.#config.backend, options, input.thumbnails !== false);
+    });
+  }
+
+  /**
+   * #691: a 3MF's parts, one STL each written into `outputDir` by the MCP, with their names, filaments and colours.
+   * Undefined when the MCP doesn't offer it: the design is then drawn as today (its merged mesh, neutral). An answer
+   * this version can't read fails `parts-unreadable`. Counterpart reads no 3MF geometry itself.
+   */
+  async modelParts(input: {modelPath: string; outputDir: string; signal?: AbortSignal}): Promise<McpModelPart[] | undefined> {
+    return this.#use(async (session, shared) => {
+      const options = {...(input.signal ? {signal: input.signal} : {}), failFast: shared};
+      await session.connect(options);
+      if (!session.hasTool(MODEL_PARTS_TOOL)) return undefined;
+      const result = await call(session, MODEL_PARTS_TOOL, {source_path: input.modelPath, output_dir: input.outputDir}, options);
+      const parts = modelPartsFrom(result.structuredContent, input.outputDir);
+      if (!parts) throw new PrinterMcpError('parts-unreadable', undefined, `Update ${packageLabel(this.#config.backend)} in Settings → Printers to show this design's parts in their colours.`);
+      return parts;
     });
   }
 

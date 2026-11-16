@@ -43,7 +43,7 @@ import {carriedSeats, scanBoundsFromObj, seatsProblem, stlBounds, stlFileBounds,
 import {convertScanMesh, createCaptureConverter} from '../capture-converter.js';
 import {ProjectPictures, VersionPictures, leadPicture, type DrawPicture} from './pictures.js';
 import {NO_PRINTER, NO_SOFTWARE_FOR_DESIGN} from '../no-printer.js';
-import {publicTouchupText, limitWords, type TouchupActivity, type TouchupResult} from '../touchup/runner.js';
+import {isValidStl, publicTouchupText, limitWords, type TouchupActivity, type TouchupResult} from '../touchup/runner.js';
 import {ObjectNotFoundError, ObjectStore, restoreLocate, type LocateSnapshot, type ObjectPrintConfirmation, type StmObject} from './store.js';
 import {fitRequest, workerRequest} from './fit.js';
 import {inheritHistory} from './inherited.js';
@@ -1981,7 +1981,13 @@ export class ObjectService {
       // An uncertain send stays on its own plate (plateProgress keeps it "unknown"); the others stay choosable (Nov 6).
       if (!Number.isSafeInteger(fileIndex) || !Number.isSafeInteger(plateIndex) || !projectPlates(object).some(p => p.fileIndex === fileIndex && p.plateIndex === plateIndex))
         throw new InvalidStateError('Choose a plate in this model.');
-      return this.#changed(await this.#deps.store.update(id, o => selectingPlate(o, fileIndex, plateIndex)));
+      const file = object.files?.receipts?.[fileIndex]?.path;
+      // #691: another file's parts are its own; another plate of the same file keeps them (each part names its plate).
+      const parts = file && file !== object.current?.model ? {parts: await this.#partMeshes(object, file)} : {};
+      return this.#changed(await this.#deps.store.update(id, o => {
+        const next = selectingPlate(o, fileIndex, plateIndex);
+        return 'parts' in parts && next.current ? {...next, current: {...next.current, parts: parts.parts}} : next;
+      }));
     });
   }
 
@@ -2563,6 +2569,41 @@ export class ObjectService {
       return false;
     }
     return false;
+  }
+
+  /**
+   * #691: a 3MF model's parts, each meshed by the printer MCP into its own STL (counterpart/1, `MODEL_PARTS_TOOL`) and
+   * kept as `current/parts/<id>.stl`, with its name, colour and plate. The colour is the MCP's, else the one the pass
+   * declared for that part (by name, then by filament). Any other model, an MCP without the tool, or a failure leaves
+   * no parts (the design is drawn as its merged mesh, as before); a failure is logged. Counterpart meshes nothing itself.
+   */
+  async #partMeshes(object: StmObject, model: string, declared?: {name?: string; colour?: string}[]): Promise<NonNullable<StmObject['current']>['parts']> {
+    const dir = this.dir(object.id), partsDir = join(dir, 'current', 'parts');
+    await rm(partsDir, {recursive: true, force: true});
+    if (!model.toLowerCase().endsWith('.3mf')) return undefined;
+    const destination = this.#destinationId(object);
+    const runner = (destination ? this.#deps.print?.destinations?.get(destination) : undefined)?.runner ?? this.#deps.print?.services.runner;
+    if (!runner?.modelParts) return undefined;
+    const staging = join(dir, 'current', `.parts-${randomUUID()}`);
+    try {
+      await mkdir(staging, {recursive: true, mode: 0o700});
+      const listed = await runner.modelParts({modelPath: join(dir, model), outputDir: staging, signal: AbortSignal.timeout(120_000)});
+      if (!listed?.length) return undefined;
+      await mkdir(partsDir, {recursive: true, mode: 0o700});
+      const parts: NonNullable<NonNullable<StmObject['current']>['parts']> = [];
+      for (const part of listed) {
+        if (!await isValidStl(part.stlPath)) throw new Error(`the mesh of part ${part.name ?? part.id} isn't a complete STL`);
+        await copyFile(part.stlPath, join(partsDir, `${part.id}.stl`));
+        const colour = part.colour ?? (declared?.find(item => item.name && item.name === part.name) ?? (part.filament ? declared?.[part.filament - 1] : undefined))?.colour;
+        parts.push({id: part.id, ...(part.name ? {name: part.name} : {}), ...(colour ? {colour} : {}), ...(part.plate !== undefined ? {plate: part.plate} : {}),
+          mesh: join('current', 'parts', `${part.id}.stl`)});
+      }
+      return parts;
+    } catch (error) {
+      await rm(partsDir, {recursive: true, force: true});
+      console.error(`project ${object.id}: couldn’t keep this design’s parts in their colours, so it shows as one piece: ${error instanceof Error ? error.message : String(error)}`);
+      return undefined;
+    } finally { await rm(staging, {recursive: true, force: true}); }
   }
 
   async #modelBytes(object: StmObject): Promise<Buffer> {
@@ -3344,7 +3385,9 @@ export class ObjectService {
     const first = receipts[0]!;
     const firstPlate = first.plates[0];
     const summary = info.summary ? this.#publicText(info.summary) : undefined;
-    const current = {model: first.path, renders: firstPlate?.thumbnail ? [firstPlate.thumbnail] : [], ...(summary ? {summary} : {})};
+    // #691: the designer's parts, each in its own colour, as the printer MCP meshes them.
+    const parts = await this.#partMeshes(object, first.path);
+    const current = {model: first.path, renders: firstPlate?.thumbnail ? [firstPlate.thumbnail] : [], ...(summary ? {summary} : {}), ...(parts ? {parts} : {})};
     const published = {original: originals, current: current.model, receipts};
     const credit = {...(first.credit ?? info.credit), ...(first.designer ? {designer: first.designer} : {}), ...(first.licence ? {licence: first.licence} : {})};
     // A starter keeps all its files and plates (the rig's six plates; the caliper and its depth gauge), each printed
@@ -3684,13 +3727,15 @@ export class ObjectService {
       else await rm(join(currentDir, 'model.3mf'), {force: true});
       // Where the scanned object sits: stated by this pass, or kept from a model this pass didn't change; never guessed.
       const before = await store.get(id);
+      // #691: each part's own mesh and colour, as the printer MCP meshes them; a one-colour model has none.
+      const parts = await this.#partMeshes(before, join('current', result.parts ? 'model.3mf' : 'model.stl'), result.parts ? result.partColours : undefined);
       if (passKind(before) === 'fit' && before.scan) {
         seats = carriedSeats(before.current?.seats, result.seats, result.status === 'unchanged');
         const problem = result.seats?.length ? await this.#seatsProblem(before, result.seats, join(currentDir, 'model.stl')) : undefined;
         if (problem) { seats = undefined; seatNote = problem; }
       }
       current = {model: join('current', result.parts ? 'model.3mf' : 'model.stl'), renders, ...(sizeMm ? {sizeMm} : {}), ...(summary ? {summary} : {}),
-        ...(result.parts && result.partColours?.length ? {filaments: result.partColours} : {}),
+        ...(result.parts && result.partColours?.length ? {filaments: result.partColours} : {}), ...(parts ? {parts} : {}),
         ...(result.changes?.length ? {changes: result.changes} : {}), ...(result.supports ? {supports: result.supports} : {}), engine, ...(design ? {design} : {}),
         ...(seats?.length ? {seats} : {}),
         // #788: the MCP's reasons, as given (made safe to show by the runner). A pass that changed nothing leaves the model
