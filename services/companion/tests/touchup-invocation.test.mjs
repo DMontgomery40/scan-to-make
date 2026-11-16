@@ -368,6 +368,35 @@ test('a copy is made in the colours its photos show, and the code engine makes t
   assert.match(TOUCHUP_RESULT_SCHEMA.properties.parts.description, /for a copy the original’s from the photos/);
 });
 
+test('an MCP that takes each part\'s colour (capabilities.partMeshes) gets color= and needs-more-filaments in the colour rules; an older one gets neither (#858)', () => {
+  const S = RULE_SECTIONS;
+  const coloursOf = (engine, guidance) => {
+    const rules = systemRules({kind: 'copy', engine}, guidance);
+    return rules.slice(rules.indexOf(`\n\n${S.colours}\n`)).split(/\n\n(?=\S)/)[1];
+  };
+  // Code engine, new MCP: the MCP implementer's rule.
+  const code = coloursOf('code', {partColours: true});
+  assert.match(code, /When the design has more than one colour, make the colours in the same cad_run as the model: build\(\) in the run you mark final returns project_3mf\(\), with one add_part per colour body, each with its filament number/);
+  assert.match(code, /its colour from the request or the photos as color="#RRGGBB", named as the person would name it \("Bar", "Letters and inscription"\)/);
+  assert.match(code, /That one run writes the model's STL and its 3MF together/);
+  assert.match(code, /never export one STL per colour for counterpart_make_3mf/);
+  assert.match(code, /Slice the 3MF once with slice_stl\. If the slice refuses with needs-more-filaments, say its slicer_report\.message in your summary, as it is, and offer the one-colour print\./);
+  // Code engine, older MCP: the one-run rule without color= or the refusal it can't give.
+  const oldCode = coloursOf('code', {});
+  assert.match(oldCode, /same cad_run as the model: build\(\) in the run you mark final returns project_3mf\(\)/);
+  assert.doesNotMatch(oldCode, /color=|needs-more-filaments/);
+  // Blender and Fusion: counterpart_make_3mf's parts[].color only on the new MCP.
+  for (const engine of ['blender', 'fusion']) {
+    const made = coloursOf(engine, {partColours: true});
+    assert.match(made, /counterpart_make_3mf into out\/touched\.3mf, one part per colour \(part 1 on filament 1, and so on\), each named as the person would name it and given its colour from the request or the photos as color: "#RRGGBB"/, engine);
+    assert.match(made, /needs-more-filaments, say its slicer_report\.message/, engine);
+    const older = coloursOf(engine, {});
+    assert.match(older, /counterpart_make_3mf into out\/touched\.3mf, one part per colour/, engine);
+    assert.doesNotMatch(older, /color:|needs-more-filaments/, engine);
+  }
+  assert.equal(systemRules({kind: 'copy'}, {partColours: false}), systemRules({kind: 'copy'}), 'false is the same as not said');
+});
+
 test('a captured object is recognised first, and its manufactured features are rebuilt regular', () => {
   const rules = CLEANUP_RULES.slice(CLEANUP_RULES.indexOf(RULE_SECTIONS.captured));
   assert.match(rules, /First say what the object is and name its parts/);
