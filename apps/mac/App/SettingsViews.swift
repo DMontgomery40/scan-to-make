@@ -86,7 +86,7 @@ extension SettingsTab {
 struct GeneralSettings: View {
     /// PRD §5.9: kept in the companion when it keeps them, so the phone shows and changes the same values.
     @ObservedObject private var companion = CompanionSettingsModel.shared
-    @State private var login = SMAppService.mainApp.status == .enabled
+    @State private var login = LoginRegistrationAction.shownOn(SMAppService.mainApp.status)
     @State private var loginProblem: String?
     @State private var dock = DockIcon.shown
     @State private var switches: [NotificationSwitch: Bool] = Dictionary(uniqueKeysWithValues:NotificationSwitch.allCases.map { ($0, NotificationPrefs().isOn($0)) })
@@ -102,7 +102,7 @@ struct GeneralSettings: View {
             Section {
                 Toggle(isOn:Binding(get:{ companion.settings?.general?.openAtLogin ?? login }, set:{ setLogin($0) })) {
                     Text("Open at login")
-                    Text(loginProblem ?? companion.problem ?? "Your phone only gets updates while Counterpart is running.")
+                    Text(loginProblem ?? companion.problem ?? LoginRegistrationAction.line(SMAppService.mainApp.status) ?? "Your phone only gets updates while Counterpart is running.")
                 }
                 Toggle("Show in Dock", isOn:Binding(get:{ companion.settings?.general?.showInDock ?? dock }, set:{ setDock($0) }))
                 if let keepAwake = companion.settings?.general?.keepAwake {
@@ -222,7 +222,7 @@ struct GeneralSettings: View {
         } catch {
             loginProblem = "Allow Counterpart in System Settings → General → Login Items."
         }
-        login = SMAppService.mainApp.status == .enabled
+        login = LoginRegistrationAction.shownOn(SMAppService.mainApp.status)
     }
 }
 

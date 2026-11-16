@@ -240,6 +240,9 @@ struct SocketObjects: ObjectsCompanion {
     enum DiscoveryState { case loading, ready, failed }
     @Published private(set) var printerDiscovery = DiscoveryState.loading
     @Published private(set) var phoneDiscovery = DiscoveryState.loading
+    /// Connected-phone reads that failed in a row; the footer says so only from `phoneFailuresShown` (#851).
+    private var phoneFailures = 0
+    static let phoneFailuresShown = 3
     var missingPhoneText: String {
         if availability == .notRunning { return "Not running" }
         switch phoneDiscovery {
@@ -542,8 +545,14 @@ struct SocketObjects: ObjectsCompanion {
         if let status = try? await companion.status(), capabilities != status.capabilities { capabilities = status.capabilities }
         if let devices = try? await companion.devices() {
             if devices.map(\.id) != self.devices.map(\.id) || devices.map(\.seenAt) != self.devices.map(\.seenAt) || devices.map(\.lastSeenAt) != self.devices.map(\.lastSeenAt) { self.devices = devices }
+            phoneFailures = 0
             phoneDiscovery = .ready
-        } else { phoneDiscovery = .failed }
+        } else {
+            // #851: one read that didn't answer (the companion starting, or busy) briefly said "Couldn't read connected
+            // phones." on a Mac with no phone yet. What was shown stays until reads fail several times in a row.
+            phoneFailures += 1
+            if phoneFailures >= Self.phoneFailuresShown { phoneDiscovery = .failed }
+        }
         aiProvider = await companion.aiProvider()
     }
 

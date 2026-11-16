@@ -868,6 +868,34 @@ test('an MCP updated in place is asked again; one slow MCP never makes Find prin
   assert.ok(Date.now() - settingsStarted < 1_000);
 });
 
+test('Add printer… asks each MCP for its setup again when it opens: a slicer installed meanwhile is found at once (#851)', async t => {
+  const {PrinterSetup} = await import('../dist/printing/setup.js');
+  const {hostEnvironment} = await import('../dist/printing/mcp-install.js');
+  const home = await tempDir('printer-fresh-');
+  t.after(() => rm(home, {recursive: true, force: true}));
+  const data = join(home, 'Library/Application Support/Scan to Make');
+  const put = async (file, text) => { await mkdir(join(home, file, '..'), {recursive: true}); await writeFile(join(home, file), text); };
+  for (const [dir, pkg] of [['bambu', 'bambu-printer-mcp'], ['generic', 'mcp-3d-printer-server']]) {
+    await put(`Library/Application Support/Scan to Make/printers/${dir}/lib/node_modules/${pkg}/package.json`, JSON.stringify({name: pkg, version: '1.0.0'}));
+    await put(`Library/Application Support/Scan to Make/printers/${dir}/lib/node_modules/${pkg}/dist/index.js`, '');
+  }
+  const env = {...hostEnvironment(data), home};
+  const catalog = await loadPrinterCatalog({backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true', args: []}}, {homeDirectory: home, sourcePaths: [], profilesPath: join(env.appPrinters, 'profiles.json')});
+  const calls = [];
+  const setup = new PrinterSetup({env, configs: () => catalog.entries(), catalog: () => catalog, profilesPath: join(env.appPrinters, 'profiles.json'), node: '/usr/local/bin/node',
+    discoverBudgetMs: 6_000, folders: async () => [], client: withSetupMcp(undefined, {calls})});
+  const asked = () => calls.filter(([, name]) => name === 'counterpart_setup_fields').map(([backend]) => backend).sort();
+  await setup.discover();
+  assert.deepEqual(asked(), ['bambu-printer-mcp', 'mcp-3d-printer-server']);
+  // Same files, seconds later (the person installed Bambu Studio and opened Add printer… again): each MCP is asked again,
+  // not answered from the ten-minute cache that kept "slicer not found".
+  await setup.discover();
+  assert.deepEqual(asked(), ['bambu-printer-mcp', 'bambu-printer-mcp', 'mcp-3d-printer-server', 'mcp-3d-printer-server']);
+  // Settings still answers from the fields already read, without starting an MCP.
+  await setup.mcps();
+  assert.equal(asked().length, 4);
+});
+
 test('an MCP that was only slow is asked again, not reported as needing an update; a stalled first MCP leaves the second its time (Codex review on #346)', async t => {
   const {PrinterSetup} = await import('../dist/printing/setup.js');
   const {hostEnvironment} = await import('../dist/printing/mcp-install.js');

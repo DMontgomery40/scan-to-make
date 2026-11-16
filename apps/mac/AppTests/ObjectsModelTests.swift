@@ -558,12 +558,20 @@ private func project(_ item: [String: Any]) throws -> Project {
     }
 
     func testDiscoveryDoesNotClaimEmptyPhonesOrPrintersBeforeSuccessfulReads() async {
-        let failed = ObjectsModel(companion: FakeObjects())
+        var clock = Date(timeIntervalSince1970: 1_000_000)
+        let failed = ObjectsModel(companion: FakeObjects(), now: { clock })
         XCTAssertEqual(failed.missingPhoneText, "Checking connected phones…")
         XCTAssertEqual(failed.missingPrinterText, "Reading your printer settings…")
         await failed.refresh()
-        XCTAssertEqual(failed.missingPhoneText, "Couldn't read connected phones.")
         XCTAssertEqual(failed.missingPrinterText, "Couldn't read your printer settings.")
+        // #851: one unanswered read on a Mac with no phone yet said "Couldn't read connected phones." Only reads failing
+        // several times in a row (each extras read is 30 s apart) say so.
+        XCTAssertEqual(failed.missingPhoneText, "Checking connected phones…", "one failed read keeps what was shown")
+        for _ in 1..<ObjectsModel.phoneFailuresShown {
+            clock += ObjectsModel.extrasDelay + 1
+            await failed.refresh()
+        }
+        XCTAssertEqual(failed.missingPhoneText, "Couldn't read connected phones.")
         let companion = FakeObjects()
         await companion.enableDiscovery()
         let empty = ObjectsModel(companion: companion)
