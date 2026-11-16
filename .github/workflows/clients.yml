@@ -77,6 +77,8 @@ jobs:
       - run: apps/linux/scripts/prepare-frontend.sh
       - run: npm ci --prefix apps/linux --ignore-scripts
       - run: npm test --prefix apps/linux
+      # Packaging and bundled-Python checks (#856); bundle.sh runs them too.
+      - run: python3 -m unittest discover -s apps/linux/tests -p 'test_*.py'
       - run: npm run build --prefix apps/linux
   # #818: the Tauri shell's Rust tests (diagnostics, scoped file reads). They build against WebKitGTK, whose headers
   # only agents-136 has, so ci_local runs this job there (CI_LOCAL_LINUX_HOST), from the Mac or any Linux box.
@@ -96,6 +98,7 @@ jobs:
       # A warm target folder on agents-136: a cold Tauri build is several minutes. A dependency
       # change rebuilds only what changed; cargo's own build lock makes a shared folder safe.
       - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        id: cargo-cache
         with:
           path: ${{ runner.temp }}/cargo-target
           key: cargo-linux-v1
