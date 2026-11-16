@@ -174,6 +174,26 @@ test('an unscanned copy that already made a model from its request is a new desi
   assert.equal((await f.store.get(object.id)).kind, 'fit');
 });
 
+test('a pass that ends in a question or a failure never teaches the estimate how long a design takes (#859)', async t => {
+  const f = await setup(t, [{result: {summary: 'Made it.'}}, {status: 'needs_closeup', result: {closeup: 'the clip'}}, {status: 'failed', result: {reason: 'it broke'}}]);
+  const timings = join(f.root, 'timings.json');
+  const read = async () => JSON.parse(await readFile(timings, 'utf8').catch(() => '{}'));
+  const saved = count => until(async () => { const value = await read(); return value['fit:blender:saving']?.length === count ? value : undefined; });
+  const object = await f.service.create('A mic mount for the stand', 'fit');
+  await f.service.start(object.id);
+  await f.service.settled(object.id);
+  assert.equal((await saved(1))['fit:blender:working'].length, 1, 'a design that was made counts');
+  // A change that ends in a question, then one that fails: their preparing and saving times are real, their working
+  // time is a question asked or a failure, not a design made.
+  for (const [note, count] of [['Make it 1 mm wider', 2], ['Make it 2 mm wider', 3]]) {
+    await f.service.correct(object.id, note);
+    await f.service.settled(object.id);
+    const value = await saved(count);
+    assert.equal(value['fit:blender:preparing'].length, count);
+    assert.equal(value['fit:blender:working'].length, 1);
+  }
+});
+
 test('a design pass reports stages with an estimate, its title, what changed, and its Fusion design for next time', async t => {
   const f = await setup(t, [
     {wait: true, engine: 'fusion', result: {summary: 'A clamp-on mount.', title: 'Clamp mount', changes: [{tag: 'added', text: 'A 25 mm clamp'}, {tag: 'estimated', text: 'Stand pole 25 mm', toleranceMm: 1}]}},
