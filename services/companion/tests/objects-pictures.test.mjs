@@ -26,6 +26,28 @@ test("a project's picture is its result in its spool, else its scan, else a phot
   assert.deepEqual(pictureSpecs({...base, state: 'new', kind: 'fit', capture: ['0001.heic']}), {photo: {photo: 'capture/0001.heic'}}, 'before any model: a photo, cut out');
 });
 
+// #691: the picture every client shows draws a multi-part design part by part, each in its colour (the shared case in
+// packages/contracts/fixtures/project-parts.json). A copy's Together is the part in the scan's place: DAD's (b8158144)
+// had the scan drawn over the part, z-fighting into blotches, with the turntable and a loose chunk of the scan in it.
+test("a design's parts are drawn in their colours; a copy's Together is the part in the scan's place, not over the scan", async () => {
+  const fixture = JSON.parse(await readFile(new URL('../../../packages/contracts/fixtures/project-parts.json', import.meta.url), 'utf8'));
+  const sign = {...base, ...fixture.cases[0].object, scan: 'scan.usdz', capture: ['0001.heic'], current: {...fixture.cases[0].object.current, seats}};
+  const parts = fixture.cases[0].draw.map(({mesh, colour}) => ({mesh, colour}));
+  const specs = pictureSpecs(sign);
+  assert.deepEqual(specs.part, {model: 'current/model.3mf', zUp: true, parts}, 'each part in its colour');
+  assert.deepEqual(specs.together, specs.part, 'a copy: the part alone where the scan was, no scan drawn over it');
+  assert.equal(specs.together.object, undefined);
+  const fit = {...sign, kind: 'fit'};
+  assert.deepEqual(pictureSpecs(fit).together, {...pictureSpecs(fit).part, object: 'scan/scan.usdz', seats: [[1, 0, 0, 0, 0, 1, 0, -19.5, 0, 0, 1, 3, 0, 0, 0, 1]]},
+    'a fit: the part with the scanned object in each seat');
+  const stl = {...base, kind: 'copy', scan: 'scan.usdz', current: {model: 'current/model.stl', renders: [], seats}};
+  assert.deepEqual(pictureSpecs(stl).together, {model: 'current/model.stl', zUp: true}, 'a one-colour copy too: the part in the scan\'s place');
+  const without = {...base, ...fixture.cases[1].object};
+  assert.equal(pictureSpecs(without).part.parts, undefined, 'without parts: drawn as before');
+  const kit = {...base, ...fixture.cases[3].object};
+  assert.deepEqual(pictureSpecs(kit).part.parts, [{mesh: 'current/parts/part-2.stl', colour: '#FFFFFF'}], "a designer's kit: the chosen plate's parts");
+});
+
 // Nov 10: a 3MF with four objects (the bottle holder and three fit rings, e4d404f2) had no picture, and David couldn't
 // tell what the project was. Every model file gets one; a designer's file with its own plate pictures keeps them.
 test('every model file is drawn, a 3MF like an STL, in the project\'s first colour; a designer\'s own plate pictures are kept', () => {

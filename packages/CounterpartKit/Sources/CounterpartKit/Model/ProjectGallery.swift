@@ -64,6 +64,8 @@ public struct ProjectGallery: Equatable, Sendable {
         case spool(String)
         /// Its own colours: a scan's photo texture, a designer's or a design pass's picture.
         case own
+        /// The spool's `#RRGGBB`, nil for neutral or own.
+        public var hex: String? { if case .spool(let hex) = self { return hex }; return nil }
     }
 
     /// Which entry shows first: the thing that will print once there is one, the scan before that.
@@ -81,10 +83,19 @@ public struct ProjectGallery: Equatable, Sendable {
         // Together: the one result with the scanned object in every seat, only where the pass said where it sits.
         // Only where it is drawn right today: a USDZ scan, whose frame (metres, Y up) the stages and the Mac's picture
         // assume. A scan in another frame (a handheld STL) gets no Together until the project carries its frame.
-        if let part = parts.first, parts.count == 1, case .model(let model) = part.drawing,
-           let seats = project.current?.seats, !seats.isEmpty, let scan = scans.first, scan.lowercased().hasSuffix(".usdz") {
-            entries.append(Entry(id: "together", kind: .together, label: "Together", drawing: .assembly(part: model, object: scan, seats: seats),
-                                 colour: part.colour, measures: "Together", sizeMm: nil, photos: []))
+        if let part = parts.first, parts.count == 1, let seats = project.current?.seats, !seats.isEmpty,
+           let scan = scans.first, scan.lowercased().hasSuffix(".usdz") {
+            let turns: Bool = switch part.drawing { case .model, .parts: true; default: false }
+            if turns && project.usesCopyWorkflow {
+                // A copy's Together is the part in the scan's place (#691): the scan (its turntable, its loose bits) drawn
+                // over the copy z-fought into blotches. The part, as it is drawn, where the scanned object was.
+                entries.append(Entry(id: "together", kind: .together, label: "Together", drawing: part.drawing,
+                                     colour: part.colour, measures: "Together", sizeMm: nil, photos: []))
+            } else if let model = { if case .model(let model) = part.drawing { return model }; return turns ? project.partMesh : nil }() {
+                // A fit drawn part by part keeps its Together: the merged mesh, with the scanned object in each seat.
+                entries.append(Entry(id: "together", kind: .together, label: "Together", drawing: .assembly(part: model, object: scan, seats: seats),
+                                     colour: part.colour, measures: "Together", sizeMm: nil, photos: []))
+            }
         }
         for (index, scan) in scans.enumerated() {
             entries.append(Entry(id: "scan-\(index)", kind: .scan, label: scans.count > 1 ? "Scan \(index + 1)" : "What you scanned",

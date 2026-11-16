@@ -208,6 +208,31 @@ final class ProjectGalleryTests: XCTestCase {
         }
     }
 
+    /// #691: a copy's Together is the part in the scan's place, drawn as the part is (each part in its colour), never the
+    /// part inside the scan (DAD, b8158144: they z-fought, with the turntable and a loose chunk of the scan). A fit's
+    /// Together is still the part with the scanned object in each seat.
+    func testACopysTogetherIsThePartInTheScansPlaceNotInsideTheScan() throws {
+        let data = try Data(contentsOf: repoRoot.appending(path: "packages/contracts/fixtures/project-parts.json"))
+        let doc = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        var object = try XCTUnwrap((doc["cases"] as? [[String: Any]])?.first?["object"] as? [String: Any])
+        var current = try XCTUnwrap(object["current"] as? [String: Any])
+        current["seats"] = [["rotationDeg": [0, 0, 0], "translationMm": [0, -19.5, 3]]]
+        object["current"] = current
+        for (key, value) in ["id": "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a98", "createdAtMs": 1.0, "updatedAtMs": 2.0, "state": "ready",
+                             "photos": [String](), "scan": "scan.usdz"] as [String: Any] { object[key] = value }
+        let copy = try JSONDecoder().decode(Project.self, from: JSONSerialization.data(withJSONObject: object))
+        let entries = ProjectGallery(project: copy).entries
+        let part = try XCTUnwrap(entries.first { $0.kind == .part }), together = try XCTUnwrap(entries.first { $0.kind == .together })
+        XCTAssertEqual(together.drawing, part.drawing, "the part as it is drawn, part by part in its colours")
+        if case .assembly = together.drawing { XCTFail("no scan drawn over the copy") }
+        XCTAssertNil(together.ar)
+        object["kind"] = "fit"
+        let fit = try JSONDecoder().decode(Project.self, from: JSONSerialization.data(withJSONObject: object))
+        let fitTogether = try XCTUnwrap(ProjectGallery(project: fit).entries.first { $0.kind == .together }, "a fit keeps its Together")
+        guard case .assembly(let mesh, let scan, let fitSeats) = fitTogether.drawing else { return XCTFail("a fit's Together is the part with the object in its seats") }
+        XCTAssertEqual(mesh, "current/model.stl", "the merged mesh"); XCTAssertEqual(scan, "scan/scan.usdz"); XCTAssertEqual(fitSeats.count, 1)
+    }
+
     /// The stage stays dark for every colour (David, Nov 11: "we just entered light mode without a flashbang
     /// alert"): a dark part is made readable in its material, not by changing the backdrop. Its drawn colour is
     /// lifted to the floor the Mac's still pictures use; colours already above it are drawn as they are.

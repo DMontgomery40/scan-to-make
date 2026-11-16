@@ -1575,6 +1575,42 @@ enum ARModel {
         }
     }
 
+    /// #691, #845: where a design's parts are written as one AR file: beside the first part, named by every part's file and
+    /// colour, so a change to either writes a new one.
+    static func target(forParts urls: [URL], tints: [String?]) -> URL {
+        let key = zip(urls, tints).map { "\($0.lastPathComponent)@\($1 ?? "neutral")" }.joined(separator: "|")
+        var hash: UInt64 = 0xcbf29ce484222325
+        for byte in key.utf8 { hash = (hash ^ UInt64(byte)) &* 0x100000001b3 }
+        return urls[0].deletingLastPathComponent().appendingPathComponent("parts-\(String(hash, radix: 16)).ar.usdz")
+    }
+
+    /// A design's parts as one USDZ for AR Quick Look, each part in its colour (the stage's neutral without one), written
+    /// once, off the main actor. Nil when it can't be made in time.
+    @MainActor static func usdz(fromParts urls: [URL], tints: [String?], deadline: Duration = exportDeadline) async -> URL? {
+        guard !urls.isEmpty, urls.count == tints.count else { return nil }
+        let target = target(forParts: urls, tints: tints)
+        if PartUSDZ.isUSDZ(target) { return target }
+        MediaTrace.record("ar.export-start", ["format": "usdz", "parts": String(urls.count)])
+        let colours = tints.map(srgb)
+        let work = Task.detached(priority: .userInitiated) { () throws -> Int in
+            var parts: [([PartUSDZ.Triangle], SIMD3<Float>)] = []
+            for (url, colour) in zip(urls, colours) {
+                guard let data = try? Data(contentsOf: url, options: .mappedIfSafe), data.count > 84 else { throw PartUSDZ.Failure.empty }
+                parts.append((STLMesh.triangles(data), colour))
+            }
+            try PartUSDZ.write(parts: parts, to: target)
+            return parts.reduce(0) { $0 + $1.0.count }
+        }
+        do {
+            let triangles = try await bounded(work, deadline: deadline)
+            MediaTrace.record("ar.export-end", ["success": "true", "format": "usdz", "parts": String(urls.count), "triangles": String(triangles)])
+            return target
+        } catch {
+            MediaTrace.record("ar.export-end", ["success": "false", "format": "usdz", "parts": String(urls.count)])
+            return nil
+        }
+    }
+
     struct Deadline: Error {}
 
     /// `work`'s result, or `Deadline` once `deadline` passes, or `CancellationError` when the caller is cancelled: whichever
