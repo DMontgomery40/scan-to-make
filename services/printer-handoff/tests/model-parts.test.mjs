@@ -2,7 +2,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {join} from 'node:path';
-import {PART_MESHES_TOOL, modelPartsFrom} from '../dist/index.js';
+import {mkdir, mkdtemp, realpath, rm, symlink, writeFile} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {PART_MESHES_TOOL, confinedParts, modelPartsFrom} from '../dist/index.js';
 
 const out = '/work/parts-out', folder = join(out, 'model-parts-1');
 const part = (extra = {}) => ({id: '1/2', name: 'Letters and inscription', plate: 1, color: '#1a1a1a', filament: 2,
@@ -19,6 +21,7 @@ test('the part-mesh answer becomes parts with their mesh, name, filament, colour
       {id: '2/1', stlPath: join(folder, '2-bar.stl')},
     ],
     skipped: [],
+    folder,
   });
   // A garbled optional field is dropped, never the part: its mesh still draws, in the neutral material.
   assert.deepEqual(modelPartsFrom(answer([part({color: 'black', filament: 0, plate: 0, name: 7})]), out).parts, [{id: '1/2', stlPath: join(folder, '1-letters-and-inscription.stl')}]);
@@ -39,4 +42,25 @@ test('an answer this version cannot trust is no parts at all', () => {
     ['not an STL', answer([part({stl_path: join(folder, 'bar.obj')})])],
     ['no id', answer([part({id: undefined})])], ['duplicate ids', answer([part(), part()])],
   ]) assert.equal(modelPartsFrom(value, out), undefined, why);
+});
+
+test('#874 P2-3: a mesh or folder that is a symlink escaping the output folder is no parts; real files inside it are kept', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'model-parts-'));
+  t.after(() => rm(root, {recursive: true, force: true}));
+  const outDir = join(root, 'out'), secret = join(root, 'secret');
+  await mkdir(join(outDir, 'model-parts-1'), {recursive: true}); await mkdir(secret);
+  await writeFile(join(secret, 'key.stl'), 'solid secret\nendsolid secret\n');
+  await writeFile(join(outDir, 'model-parts-1', '1-bar.stl'), 'solid bar\nendsolid bar\n');
+  const folder = join(outDir, 'model-parts-1'), ok = {id: '1/1', stlPath: join(folder, '1-bar.stl')};
+  assert.deepEqual(await confinedParts([ok], folder, outDir), [{...ok, stlPath: await realpath(join(folder, '1-bar.stl'))}]);
+  // An STL that is a link to a file elsewhere, though its path is inside the folder.
+  await symlink(join(secret, 'key.stl'), join(folder, '2-link.stl'));
+  assert.equal(await confinedParts([ok, {id: '1/2', stlPath: join(folder, '2-link.stl')}], folder, outDir), undefined, 'a linked STL');
+  // A folder that is a link out of out_dir: lexically inside, really elsewhere.
+  await symlink(secret, join(outDir, 'model-parts-2'));
+  assert.equal(await confinedParts([{id: '1/1', stlPath: join(outDir, 'model-parts-2', 'key.stl')}], join(outDir, 'model-parts-2'), outDir), undefined, 'a linked folder');
+  // modelPartsFrom's lexical check passes both; the runner applies confinedParts after it.
+  assert.ok(modelPartsFrom(answer([part({stl_path: join(outDir, 'model-parts-2', 'key.stl')})], {folder: join(outDir, 'model-parts-2')}), outDir));
+  // A missing mesh is no parts either.
+  assert.equal(await confinedParts([{id: '1/1', stlPath: join(folder, 'gone.stl')}], folder, outDir), undefined);
 });

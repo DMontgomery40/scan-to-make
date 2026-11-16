@@ -1,3 +1,4 @@
+import {lstat, realpath} from 'node:fs/promises';
 import {resolve, sep} from 'node:path';
 
 /**
@@ -27,7 +28,7 @@ const within = (path: string, dir: string) => resolve(path).startsWith(resolve(d
  * version can read. `skipped` names parts the MCP couldn't mesh (over its bounds): a design is drawn with all of its
  * parts or as one piece, never with some missing, so the caller treats any skipped part as no parts.
  */
-export function modelPartsFrom(structuredContent: unknown, outDir: string): {parts: McpModelPart[]; skipped: string[]} | undefined {
+export function modelPartsFrom(structuredContent: unknown, outDir: string): {parts: McpModelPart[]; skipped: string[]; folder: string} | undefined {
   // String keys: services/companion/tests/mcp-contract.test.mjs holds every MCP name the app reads to the contract doc.
   if (!record(structuredContent) || !Array.isArray(structuredContent['parts']) || structuredContent['units'] !== 'mm') return undefined;
   const folder = structuredContent['folder'];
@@ -50,5 +51,27 @@ export function modelPartsFrom(structuredContent: unknown, outDir: string): {par
   const skipped = Array.isArray(structuredContent['skipped'])
     ? (structuredContent['skipped'] as unknown[]).map(item => (record(item) ? text(item['name'], 128) ?? text(item['id'], 64) : undefined) ?? 'a part')
     : [];
-  return {parts, skipped};
+  return {parts, skipped, folder: resolve(folder)};
+}
+
+/**
+ * The parts, only when every mesh is really inside the call's folder and that folder really inside `outDir`: the
+ * lexical check above can't see a symlinked folder or STL, which would then be copied and served (#874 review, P2-3).
+ * Each mesh must be a regular file, not a link; paths are compared after `realpath`, so an `outDir` reached through a
+ * link of its own (macOS's /tmp) still counts. Undefined when any part escapes.
+ */
+export async function confinedParts(parts: McpModelPart[], folder: string, outDir: string): Promise<McpModelPart[] | undefined> {
+  try {
+    const realOut = await realpath(outDir), realFolder = await realpath(folder);
+    if (!within(realFolder, realOut) || (await lstat(folder)).isSymbolicLink()) return undefined;
+    const confined: McpModelPart[] = [];
+    for (const part of parts) {
+      const info = await lstat(part.stlPath);
+      if (!info.isFile()) return undefined;
+      const real = await realpath(part.stlPath);
+      if (!within(real, realFolder)) return undefined;
+      confined.push({...part, stlPath: real});
+    }
+    return confined;
+  } catch { return undefined; }
 }
