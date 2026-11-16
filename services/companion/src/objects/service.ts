@@ -507,6 +507,12 @@ function forgetOwnSettings(object: StmObject): Pick<StmObject, 'current'> {
 function isMultipart(object: Pick<StmObject, 'current'>): boolean {
   return object.current?.model.toLowerCase().endsWith('.3mf') === true;
 }
+/** #874 P2-3: a part mesh the printer MCP writes is read only up to these sizes (all of a design's parts or none). */
+const MiB = 1024 * 1024, PART_MESH_LIMIT = 64 * MiB, PART_MESHES_LIMIT = 256 * MiB;
+type ModelParts = NonNullable<NonNullable<StmObject['current']>['parts']>;
+/** A design's parts, made and checked, in a folder beside `current/parts` until they land. */
+interface BuiltParts {folder: string; sha256: string; parts: ModelParts}
+
 /** #858: a 3MF a design pass made here (`current/model.3mf`) carries its whole mesh; a designer's file keeps the import limits. */
 function madeByPass(object: Pick<StmObject, 'current' | 'files'>): boolean {
   return isMultipart(object) && !object.files?.receipts?.some(file => file.path === object.current!.model);
@@ -1984,12 +1990,17 @@ export class ObjectService {
       if (!Number.isSafeInteger(fileIndex) || !Number.isSafeInteger(plateIndex) || !projectPlates(object).some(p => p.fileIndex === fileIndex && p.plateIndex === plateIndex))
         throw new InvalidStateError('Choose a plate in this model.');
       const file = object.files?.receipts?.[fileIndex]?.path;
-      // #691: another file's parts are its own; another plate of the same file keeps them (each part names its plate).
-      const parts = file && file !== object.current?.model ? {parts: await this.#partMeshes(object, file)} : {};
-      return this.#changed(await this.#deps.store.update(id, o => {
+      // #691: another file's parts are its own, made after the choice is saved (#874 P1-1); another plate of the same
+      // file keeps them (each part names its plate).
+      const another = !!file && file !== object.current?.model;
+      const updated = this.#changed(await this.#deps.store.update(id, o => {
         const next = selectingPlate(o, fileIndex, plateIndex);
-        return 'parts' in parts && next.current ? {...next, current: {...next.current, parts: parts.parts}} : next;
+        if (!another || !next.current) return next;
+        const {parts: _old, ...rest} = next.current;
+        return {...next, current: rest};
       }));
+      if (another) this.#queueParts(id, file!);
+      return updated;
     });
   }
 
@@ -2573,44 +2584,125 @@ export class ObjectService {
     return false;
   }
 
+  /** Part meshes being made (#691), newest request per project, and the jobs running (tests wait on them). */
+  readonly #partsWanted = new Map<string, symbol>();
+  readonly #partsRunning = new Set<Promise<void>>();
+  /** Waits until every part-mesh job has landed or given up (tests). */
+  async partsMeshed(): Promise<void> { while (this.#partsRunning.size) await Promise.allSettled([...this.#partsRunning]); }
+
+  /**
+   * #691, #874 P1-1: a model's parts are made out of band, after the model is kept and the project is ready, so a slow
+   * printer MCP never holds a pass's end or a plate choice. The newest request for a project wins; its parts land only
+   * while that model is still the project's (same path, same bytes), with an update event so clients redraw. A 3MF
+   * design that has them also gives them to the sealed design of the same bytes that has none yet.
+   */
+  #queueParts(id: string, model: string, declared?: {name?: string; colour?: string}[]): void {
+    const token = Symbol(model);
+    this.#partsWanted.set(id, token);
+    const job = (async () => {
+      const built = await this.#buildParts(id, model, declared);
+      try {
+        if (this.#partsWanted.get(id) !== token) return;
+        await this.#gate(id, () => this.#landParts(id, model, built, () => this.#partsWanted.get(id) === token));
+      } finally {
+        if (built) await rm(built.folder, {recursive: true, force: true});
+        if (this.#partsWanted.get(id) === token) this.#partsWanted.delete(id);
+      }
+    })().catch(error => console.error(`project ${id}: couldn’t keep this design’s parts in their colours, so it shows as one piece: ${error instanceof Error ? error.message : String(error)}`));
+    const running = job.finally(() => this.#partsRunning.delete(running));
+    this.#partsRunning.add(running);
+  }
+
   /**
    * #691: a 3MF model's parts, each meshed by the printer MCP into its own STL in the 3MF's build frame (counterpart/1
-   * `counterpart_part_meshes`), kept as `current/parts/part-<n>.stl` with the MCP's id, the name, the colour and the
-   * plate. The colour is the one the pass declared for that part (by name, then by filament), as the print sheet
-   * reads it, else the 3MF's own. All of a design's parts or none: a part the MCP skipped, any other model, an MCP
-   * without the tool, or a failure leaves no parts (the design is drawn as its merged mesh, as before), and a skip or
-   * failure is logged. Counterpart meshes nothing itself.
+   * `counterpart_part_meshes`), copied into a folder of their own beside `current/parts` (never into it: clients keep
+   * reading the old ones until the swap), with the MCP's id, the name, the colour and the plate. The colour is the one
+   * the pass declared for that part (by name, then filament), as the print sheet reads it, else the 3MF's own. All of a
+   * design's parts or none, and only for more than one part (a one-part file is drawn by the spool rule, PRD §5.4):
+   * a part the MCP skipped, a mesh over 64 MiB or 256 MiB in all, any other model, an MCP without the tool, or a
+   * failure leaves no parts, and a skip or failure is logged. Counterpart meshes nothing itself.
    */
-  async #partMeshes(object: StmObject, model: string, declared?: {name?: string; colour?: string}[]): Promise<NonNullable<StmObject['current']>['parts']> {
-    const dir = this.dir(object.id), partsDir = join(dir, 'current', 'parts');
-    await rm(partsDir, {recursive: true, force: true});
+  async #buildParts(id: string, model: string, declared?: {name?: string; colour?: string}[]): Promise<BuiltParts | undefined> {
     if (!model.toLowerCase().endsWith('.3mf')) return undefined;
-    const destination = this.#destinationId(object);
+    const object = await this.#deps.store.get(id).catch(() => undefined);
+    if (!object) return undefined;
+    const dir = this.dir(id), destination = this.#destinationId(object);
     const runner = (destination ? this.#deps.print?.destinations?.get(destination) : undefined)?.runner ?? this.#deps.print?.services.runner;
     if (!runner?.modelParts) return undefined;
-    const staging = join(dir, 'current', `.parts-${randomUUID()}`);
+    const bytes = await readFile(join(dir, model)).catch(() => undefined);
+    if (!bytes) return undefined;
+    const sha256 = createHash('sha256').update(bytes).digest('hex');
+    const staging = join(dir, 'current', `.parts-mcp-${randomUUID()}`), folder = join(dir, 'current', `.parts-next-${randomUUID()}`);
     try {
       await mkdir(staging, {recursive: true, mode: 0o700});
       const listed = await runner.modelParts({modelPath: join(dir, model), outputDir: staging, signal: AbortSignal.timeout(120_000)});
-      if (!listed?.parts.length) return undefined;
+      if (!listed || listed.parts.length < 2) return undefined;
       if (listed.skipped.length) throw new Error(`the printer service couldn’t mesh ${listed.skipped.slice(0, 3).join(', ')}${listed.skipped.length > 3 ? ` and ${listed.skipped.length - 3} more` : ''}`);
-      await mkdir(partsDir, {recursive: true, mode: 0o700});
+      // #874 P2-3: sizes before any read, all or nothing.
+      let total = 0;
+      for (const part of listed.parts) {
+        const info = await lstat(part.stlPath);
+        if (!info.isFile()) throw new Error(`the mesh of part ${part.name ?? part.id} isn’t a file`);
+        if (info.size > PART_MESH_LIMIT) throw new Error(`the mesh of part ${part.name ?? part.id} is over ${PART_MESH_LIMIT / MiB} MB`);
+        if ((total += info.size) > PART_MESHES_LIMIT) throw new Error(`its part meshes are over ${PART_MESHES_LIMIT / MiB} MB in all`);
+      }
+      await mkdir(folder, {recursive: true, mode: 0o700});
       const parts: NonNullable<NonNullable<StmObject['current']>['parts']> = [];
       for (const [index, part] of listed.parts.entries()) {
         if (!await isValidStl(part.stlPath)) throw new Error(`the mesh of part ${part.name ?? part.id} isn’t a complete STL`);
-        const mesh = join('current', 'parts', `part-${index + 1}.stl`);
-        await copyFile(part.stlPath, join(dir, mesh));
+        const name = `part-${index + 1}.stl`;
+        await copyFile(part.stlPath, join(folder, name));
         const said = declared?.find(item => item.name && part.name && item.name.toLowerCase() === part.name.toLowerCase()) ?? (part.filament ? declared?.[part.filament - 1] : undefined);
         const colour = said?.colour ?? part.colour;
         parts.push({id: part.id, ...(part.name ? {name: part.name} : {}), ...(colour ? {colour} : {}), ...(part.plate !== undefined ? {plate: part.plate} : {}),
-          ...(part.painted ? {painted: true} : {}), mesh});
+          ...(part.painted ? {painted: true} : {}), mesh: join('current', 'parts', name)});
       }
-      return parts;
+      return {folder, sha256, parts};
     } catch (error) {
-      await rm(partsDir, {recursive: true, force: true});
-      console.error(`project ${object.id}: couldn’t keep this design’s parts in their colours, so it shows as one piece: ${error instanceof Error ? error.message : String(error)}`);
-      return undefined;
+      await rm(folder, {recursive: true, force: true});
+      throw error;
     } finally { await rm(staging, {recursive: true, force: true}); }
+  }
+
+  /**
+   * Lands a part-mesh job inside the project's gate: only for the newest request and while `model` is still the
+   * project's model with the same bytes. The parts folder is swapped in whole; with no parts, the old folder goes.
+   */
+  async #landParts(id: string, model: string, built: BuiltParts | undefined, newest: () => boolean): Promise<void> {
+    if (!newest()) return;
+    const store = this.#deps.store, dir = this.dir(id), object = await store.get(id).catch(() => undefined);
+    if (!object?.current || object.current.model !== model) return;
+    if (built && createHash('sha256').update(await readFile(join(dir, model)).catch(() => Buffer.alloc(0))).digest('hex') !== built.sha256) return;
+    const target = join(dir, 'current', 'parts');
+    if (!built) {
+      await rm(target, {recursive: true, force: true});
+      if (!object.current.parts) return;
+    } else {
+      const old = join(dir, 'current', `.parts-old-${randomUUID()}`);
+      await rename(target, old).catch(error => { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; });
+      await rename(built.folder, target);
+      await rm(old, {recursive: true, force: true});
+    }
+    // A sealed design of the same bytes, sealed before its parts came, gets its own copy of them.
+    const versions: Record<string, NonNullable<NonNullable<StmObject['current']>['parts']>> = {};
+    for (const version of built ? object.versions ?? [] : []) {
+      if (version.modelSha256 !== built!.sha256 || version.result.parts) continue;
+      const folder = join(dir, 'versions', version.id, 'parts'), temp = `${folder}.sealing`;
+      await rm(temp, {recursive: true, force: true});
+      await mkdir(temp, {recursive: true});
+      for (const part of built!.parts) await copyFile(join(dir, part.mesh), join(temp, basename(part.mesh)));
+      await rm(folder, {recursive: true, force: true});
+      await rename(temp, folder);
+      versions[version.id] = built!.parts.map(part => ({...part, mesh: join('versions', version.id, 'parts', basename(part.mesh))}));
+    }
+    const updated = await store.update(id, o => {
+      if (o.current?.model !== model) return o;
+      const {parts: _old, ...rest} = o.current;
+      return {...o, current: built ? {...rest, parts: built.parts} : rest,
+        ...(Object.keys(versions).length ? {versions: o.versions?.map(v => versions[v.id] ? {...v, result: {...v.result, parts: versions[v.id]}} : v)} : {})};
+    }, {keepUpdatedAt: true});
+    this.#deps.onChange?.(updated);
+    await this.#emit({id: randomUUID(), type: 'project.updated', projectId: id, data: {keys: ['current', ...(Object.keys(versions).length ? ['versions'] : [])]}});
   }
 
   async #modelBytes(object: StmObject): Promise<Buffer> {
@@ -3397,9 +3489,7 @@ export class ObjectService {
     const first = receipts[0]!;
     const firstPlate = first.plates[0];
     const summary = info.summary ? this.#publicText(info.summary) : undefined;
-    // #691: the designer's parts, each in its own colour, as the printer MCP meshes them.
-    const parts = await this.#partMeshes(object, first.path);
-    const current = {model: first.path, renders: firstPlate?.thumbnail ? [firstPlate.thumbnail] : [], ...(summary ? {summary} : {}), ...(parts ? {parts} : {})};
+    const current = {model: first.path, renders: firstPlate?.thumbnail ? [firstPlate.thumbnail] : [], ...(summary ? {summary} : {})};
     const published = {original: originals, current: current.model, receipts};
     const credit = {...(first.credit ?? info.credit), ...(first.designer ? {designer: first.designer} : {}), ...(first.licence ? {licence: first.licence} : {})};
     // A starter keeps all its files and plates (the rig's six plates; the caliper and its depth gauge), each printed
@@ -3411,6 +3501,8 @@ export class ObjectService {
       ...(!o.title && (first.title || info.model?.title) ? {title: first.title ?? info.model!.title} : {}), ...(credit.url ? {credit: credit as NonNullable<StmObject['credit']>} : {}),
       ...(ask ? {ask} : o.ask?.status === 'open' ? {ask: {...o.ask, status: 'answered' as const}} : {}),
       passes: info.startedAtMs === undefined ? o.passes : withPassEnded(o.passes, info.startedAtMs, {status: 'done'}, now, summary ? {summary} : {})}));
+    // #691: the designer's parts, each in its own colour, made after the project is ready.
+    this.#queueParts(id, first.path);
     // The file gave no name: the person's words do (Nov 10: a model-file project sat in the list as its request cut
     // off mid-sentence, "First plate from Counterpart's own kernel…", because published projects were never titled).
     this.#title(updated);
@@ -3740,15 +3832,15 @@ export class ObjectService {
       else await rm(join(currentDir, 'model.3mf'), {force: true});
       // Where the scanned object sits: stated by this pass, or kept from a model this pass didn't change; never guessed.
       const before = await store.get(id);
-      // #691: each part's own mesh and colour, as the printer MCP meshes them; a one-colour model has none.
-      const parts = await this.#partMeshes(before, join('current', result.parts ? 'model.3mf' : 'model.stl'), result.parts ? result.partColours : undefined);
       if (passKind(before) === 'fit' && before.scan) {
         seats = carriedSeats(before.current?.seats, result.seats, result.status === 'unchanged');
         const problem = result.seats?.length ? await this.#seatsProblem(before, result.seats, join(currentDir, 'model.stl')) : undefined;
         if (problem) { seats = undefined; seatNote = problem; }
       }
       current = {model: join('current', result.parts ? 'model.3mf' : 'model.stl'), renders, ...(sizeMm ? {sizeMm} : {}), ...(summary ? {summary} : {}),
-        ...(result.parts && result.partColours?.length ? {filaments: result.partColours} : {}), ...(parts ? {parts} : {}),
+        ...(result.parts && result.partColours?.length ? {filaments: result.partColours} : {}),
+        // #874 P2-7: a pass that changed nothing keeps its parts listed (their files stay) until they're made again.
+        ...(result.status === 'unchanged' && result.parts && before.current?.model === join('current', 'model.3mf') && before.current.parts ? {parts: before.current.parts} : {}),
         ...(result.changes?.length ? {changes: result.changes} : {}), ...(result.supports ? {supports: result.supports} : {}), engine, ...(design ? {design} : {}),
         ...(seats?.length ? {seats} : {}),
         // #788: the MCP's reasons, as given (made safe to show by the runner). A pass that changed nothing leaves the model
@@ -3807,6 +3899,8 @@ export class ObjectService {
         ...(result.sessionId ? {sessionId: result.sessionId} : {}), ...(result.sessionCwd ? {sessionCwd: result.sessionCwd} : {}), checkpoints: result.checkpoints,
         ...(result.resume ? {resume: result.resume} : {}),
         ...(result.stats.costUsd !== undefined ? {costUsd: result.stats.costUsd} : {}), dir: result.passDir}))}));
+    // #691, #874 P1-1: each part's own mesh and colour, made after the project is ready (a one-colour model clears them).
+    if (result.model && updated.current) this.#queueParts(id, updated.current.model, result.parts ? result.partColours : undefined);
     const saving = updated.passes.find(p => p.startedAtMs === startedAtMs)?.stages?.find(item => item.id === 'saving');
     if (saving?.endedAtMs !== undefined) void this.#deps.passTimings?.record(kind, result.engine ?? 'blender', 'saving', (saving.endedAtMs - saving.startedAtMs) / 1000).catch(() => undefined);
     const size = sizeText(updated.current?.sizeMm);
