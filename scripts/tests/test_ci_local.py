@@ -181,9 +181,13 @@ class LocalWorkflowTests(unittest.TestCase):
             self.assertEqual(child.returncode,0); self.assertTrue(marker.exists())
             self.assertIn('held by 123 other-seat',out)
 
-    def route(self, kinds, alive):
-        """Run main() on a pretend Mac with Linux hosts a, b, c; `alive` is the set that answers SSH."""
-        jobs=[{'workflow':'w','key':str(i),'matrix':{},'env':{},'defaults':{},'job':{'runs-on':r,'steps':[]}} for i,r in enumerate(kinds)]
+    def route(self, kinds, alive, system='Darwin', this_host='mac'):
+        """Run main() on a pretend Mac with Linux hosts a, b, c; `alive` is the set that answers SSH. A kind
+        'ubuntu-latest@x' is an ubuntu job that names box x (CI_LOCAL_LINUX_HOST)."""
+        def job(r):
+            runner,_,pin=r.partition('@')
+            return {'runs-on':runner,'steps':[],**({'env':{'CI_LOCAL_LINUX_HOST':pin}} if pin else {})}
+        jobs=[{'workflow':'w','key':str(i),'matrix':{},'env':{},'defaults':{},'job':job(r)} for i,r in enumerate(kinds)]
         calls=self.calls=[]; probes=[]
         def fake_linux(spec,workspace,directory,host): calls.append((spec['key'],host)); return {'spec':spec,'status':'PASS','steps':[]}
         def fake_local(spec,workspace,directory): calls.append((spec['key'],'mac')); return {'spec':spec,'status':'PASS','steps':[]}
@@ -194,7 +198,8 @@ class LocalWorkflowTests(unittest.TestCase):
                 return subprocess.CompletedProcess(argv, 0 if up else 255, stderr='' if up else "Can't open user config file /Volumes/Spillover/ssh/config: Operation not permitted\n")
             return real_run(argv,*a,**k)
         with tempfile.TemporaryDirectory() as folder, \
-             patch.object(ci.platform,'system',return_value='Darwin'), patch.dict(os.environ,{'CI_LOCAL_LINUX_HOSTS':'a,b,c'}), \
+             patch.object(ci.platform,'system',return_value=system), patch.dict(os.environ,{'CI_LOCAL_LINUX_HOSTS':'a,b,c'}), \
+             patch.object(ci.socket,'gethostname',return_value=this_host), \
              patch.object(ci.subprocess,'run',side_effect=fake_run), \
              patch.object(ci,'read_workflows',return_value=jobs), patch.object(ci,'run_linux',side_effect=fake_linux), \
              patch.object(ci,'execute_job',side_effect=fake_local), patch.object(ci,'output',side_effect=lambda argv,**k: '' if 'status' in argv else folder), \
@@ -225,6 +230,23 @@ class LocalWorkflowTests(unittest.TestCase):
     def test_every_configured_host_is_probed_and_healthy_ones_take_the_jobs(self):
         code,calls,probes,_=self.route(['ubuntu-latest','ubuntu-latest'],{'a','b','c'})
         self.assertEqual(code,0); self.assertEqual(probes,['a','b','c']); self.assertEqual(calls,[('0','a'),('1','b')])
+
+    def test_a_job_that_names_its_linux_box_runs_there_and_nowhere_else(self):
+        """#818: the Tauri crate's cargo tests need WebKitGTK headers, which only one box has."""
+        code,calls,probes,_=self.route(['ubuntu-latest','ubuntu-latest@b','ubuntu-latest','macos-27'],{'a','b','c'})
+        self.assertEqual(code,0)
+        self.assertEqual(calls,[('0','a'),('1','b'),('2','b'),('3','mac')])
+        self.assertEqual(probes,['a','b','c'])
+
+    def test_a_named_box_is_reached_from_a_linux_gate_too_and_runs_locally_on_itself(self):
+        code,calls,_,_=self.route(['ubuntu-latest','ubuntu-latest@b'],{'b'},system='Linux',this_host='a')
+        self.assertEqual(code,0); self.assertEqual(calls,[('0','mac'),('1','b')])
+        code,calls,probes,_=self.route(['ubuntu-latest@b'],set(),system='Linux',this_host='b.local')
+        self.assertEqual(code,0); self.assertEqual(calls,[('0','mac')]); self.assertEqual(probes,[])
+
+    def test_a_named_box_that_does_not_answer_stops_the_gate(self):
+        with self.assertRaises(ValueError) as caught: self.route(['ubuntu-latest@b'],set(),system='Linux',this_host='a')
+        self.assertIn('Linux host b',str(caught.exception)); self.assertEqual(self.calls,[])
 
     def test_apple_only_runs_do_not_probe_linux_hosts(self):
         _,calls,probes,_=self.route(['macos-27','xcode-27.2'],{'a','b','c'})

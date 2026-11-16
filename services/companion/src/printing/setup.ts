@@ -307,6 +307,9 @@ const DiscoverySchema = z.object({
 });
 type DiscoveredPrinter = z.infer<typeof DiscoverySchema>['printers'][number];
 
+/** How a setup read may answer: only from what was read (`cachedOnly`), within a time (`budgetMs`), or asked again (`fresh`). */
+type SetupRead = {cachedOnly?: boolean; budgetMs?: number; fresh?: boolean};
+
 export class PrinterSetupError extends Error {
   constructor(readonly code: 'not-found' | 'unavailable' | 'invalid' | 'conflict', message: string) { super(message); this.name = 'PrinterSetupError'; }
 }
@@ -474,12 +477,14 @@ export class PrinterSetup {
   /**
    * One copy's own setup fields (`counterpart_setup_fields`), kept ten minutes per copy and version: an Update
    * replaces the files in place, so the entry's modification time is part of the key. None from a copy without the tool.
+   * `fresh` asks the MCP again whatever the age (Add printer… opening, #851): the fields say whether the slicer is
+   * installed, and a slicer installed meanwhile was still "not found" for up to ten minutes.
    */
-  async #setupFor(pkg: PrinterBackend, entry: string, options: {cachedOnly?: boolean; budgetMs?: number} = {}): Promise<McpSetup | undefined> {
+  async #setupFor(pkg: PrinterBackend, entry: string, options: SetupRead = {}): Promise<McpSetup | undefined> {
     const key = this.#setupKey(entry);
     const cached = this.#setupCache.get(key);
     // A confirmed answer (its fields, or no such tool) keeps ten minutes; an MCP that didn't start or answer in time, 20 s.
-    if (options.cachedOnly || (cached && Date.now() - cached.at < (cached.failed ? this.deps.retryAfterMs ?? 20_000 : 10 * 60_000))) return cached?.setup;
+    if (options.cachedOnly || (!options.fresh && cached && Date.now() - cached.at < (cached.failed ? this.deps.retryAfterMs ?? 20_000 : 10 * 60_000))) return cached?.setup;
     const answer = await this.#probe(pkg, entry, async (client, tools, remainingMs) => tools.has('counterpart_setup_fields')
       ? readMcpSetup(toolResultJson(await client.callTool('counterpart_setup_fields', {}, {timeoutMs: Math.min(10_000, remainingMs())}))) : undefined,
       options.budgetMs);
@@ -492,7 +497,7 @@ export class PrinterSetup {
    * Each MCP's own setup fields (`counterpart_setup_fields`), from the copy an added printer would run, kept ten
    * minutes per copy. An MCP that isn't on this Mac, or doesn't have the tool, has none.
    */
-  async #setups(options: {cachedOnly?: boolean; budgetMs?: number} = {}): Promise<{package: PrinterBackend; label: string; entry?: string; setup?: McpSetup; installed: boolean}[]> {
+  async #setups(options: SetupRead = {}): Promise<{package: PrinterBackend; label: string; entry?: string; setup?: McpSetup; installed: boolean}[]> {
     // Both MCPs at once: a slow one never delays the other's fields.
     type Setup = {package: PrinterBackend; label: string; entry?: string; setup?: McpSetup; installed: boolean; unanswered?: boolean};
     const out = await Promise.all(MCP_PACKAGES.map(async (item): Promise<Setup> => {
@@ -600,7 +605,8 @@ export class PrinterSetup {
     const [folders, saved, setups] = await Promise.all([
       (this.deps.folders?.() ?? Promise.resolve([])).catch(() => []),
       readProfiles(this.#profilesPath),
-      this.#setups({budgetMs: Math.round((this.deps.discoverBudgetMs ?? 13_000) * 6 / 13)}),
+      // Asked again each time (#851): Add printer… opens with this, right after the person may have installed the slicer.
+      this.#setups({fresh: true, budgetMs: Math.round((this.deps.discoverBudgetMs ?? 13_000) * 6 / 13)}),
     ]);
     const options = setupOptions(setups);
     const runs = [...this.#runs(), ...saved.profiles.map(profile => profile.process.cwd)];

@@ -142,3 +142,22 @@ python3 scripts/ux_blank.py <folder>/iphone-slow                             # r
 ```
 
 Every project page of a fresh copy of the Mac's projects, with the capture companion slow (1.5 s per reply, files at 1 MB/s), refusing files (413/404) or gone after the list (`ux_screens.py --condition`), through the blank check (`ux_blank.py`). It takes several exclusive lane holds and resumes when run again with the same folder. Exit 1 on any blank frame (listed in `gate.md`), 2 when a capture could not finish (a device and condition asked for no screens, or with fewer frames built from the checked-out commit than the screens `ux_screens.py` was asked for, in its `asked.json`, or a hold that ended with an error; a rerun into the same folder captures again for a new commit, and an earlier build's frames never count; both are listed under "Not captured" in `gate.md`), 0 only when every screen has a frame and every page passed. A condition that captured nothing is a gate that did not run, never a pass (#806). Run it on a train before it merges (`docs/operations.md`, "Waiting, failed and empty are screens too").
+
+## Watching a design pass: `pass_watch.py`
+
+Read-only. It follows a running design pass's worker through its own Claude Code transcript and prints:
+- each tool call, and how long it took;
+- each model turn: the seconds before its first output and its output tokens;
+- `thinking for Ns` while the model is still thinking.
+
+It flags the #859 patterns: a single turn over 20,000 tokens, and a turn that hit `max_tokens`, whose work is lost. Ctrl-C prints the totals. It never writes, moves or starts anything on the host it reads.
+
+```sh
+python3 scripts/pass_watch.py --host mac                            # the most recently active pass on the Mac, live
+python3 scripts/pass_watch.py --host mac --project b8158144 --once  # that project's latest pass: timeline and totals
+python3 scripts/pass_watch.py --file copied/session.jsonl --once    # a transcript copied elsewhere
+```
+
+The companion starts each worker in its pass folder, so the transcript is
+`~/.claude/projects/-Users-<you>-Library-Application-Support-Scan-to-Make-capture-objects-<project>-passes-pass-<pass>/<session>.jsonl`.
+Tokens are counted once per message: Claude Code writes one entry per content block, and each entry repeats its message's usage.

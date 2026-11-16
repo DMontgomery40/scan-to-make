@@ -36,6 +36,13 @@ data class ProjectFit(val sizeSource: String, val measured: List<Size> = emptyLi
 private val Double.wireNumber: Number get() =
     if (this == Math.rint(this) && kotlin.math.abs(this) < 1e15) toLong() else this
 
+/**
+ * The kind New sends (#867): only one the person chose — copy or fit for their scan, or the kind the screen was opened
+ * for. "Just save this scan" and no choice send none, and the computer decides from the words and files, so
+ * "A replica of …" becomes a copy rather than a fit nobody picked.
+ */
+fun chosenNewKind(scanUse: String?, openedFor: String?): String? = scanUse?.takeIf { it != "later" } ?: openedFor
+
 /** The body of a create request. `instructions` is what the person typed; how a fit's size is settled goes beside
  *  it as `fit`, never inside it. */
 fun createBody(instructions: String, kind: String?, url: String?, fit: ProjectFit?): JsonObject {

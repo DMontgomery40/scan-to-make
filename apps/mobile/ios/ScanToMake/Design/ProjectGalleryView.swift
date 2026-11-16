@@ -78,6 +78,8 @@ struct ProjectGalleryView: View {
                 .frame(height: height)
                 .clipped()
                 .overlay(alignment: .bottom) { controls }
+            // #848: at accessibility sizes the size line is under the stage, not a two-line chip over the model.
+            if typeSize.isAccessibilitySize, let entry { sizeLine(entry, under: true) }
             if let entry { unavailable(entry) }
             if gallery.entries.count > 1 { labels }
         }
@@ -242,6 +244,11 @@ struct ProjectGalleryView: View {
     /// The stage of a project with nothing to draw (no scan, no model, no photo): while the Mac works, that it's coming;
     /// otherwise one calm line that names no failure and offers no Try Again (review of #831). Kept as a stage rather
     /// than dropped: the page's toolbar floats over it on every layout, and it is where the scan appears once it comes.
+    /// No gallery entry and no photo: the stage only says "Nothing to show yet." (#842, `ProjectView.emptyStage`).
+    static func nothingToShow(_ project: Project, localScan: URL?) -> Bool {
+        ProjectGallery(project: project, scanOnThisDevice: localScan != nil).entries.isEmpty && project.photoPicture == nil
+    }
+
     static func emptyStage(_ project: Project, busy: Bool) -> (still: Project.Still, line: String) {
         (busy ? .waiting : .notAvailable, "Nothing to show yet.")
     }
@@ -278,7 +285,9 @@ struct ProjectGalleryView: View {
                     controlRow(entry, stacked: false)
                     controlRow(entry, stacked: true)
                 }
-                .labelStyle(.titleAndIcon).font(.caption.weight(.semibold))
+                // #848: at accessibility sizes each chip was two lines tall over the model: there they are their symbols,
+                // named as before for VoiceOver. A chip that says something went wrong keeps its words.
+                .labelStyle(typeSize.isAccessibilitySize ? AnyLabelStyle(.iconOnly) : AnyLabelStyle(.titleAndIcon)).font(.caption.weight(.semibold))
             }
             .padding(14)
             .sheet(isPresented: $showingPhotos) { ScanPhotos(project: project, photos: entry.photos) }
@@ -299,7 +308,18 @@ struct ProjectGalleryView: View {
                     .accessibilityHint("Your Mac works out where the scanned object sits in this part, without changing it")
             }
             if !stacked { Spacer(minLength: 0) }
-            if let size = entry.sizeText(measured[entry.id]) {
+            if !typeSize.isAccessibilitySize { sizeLine(entry, under: false, stacked: stacked) }
+        }
+    }
+
+    /// The size of what is shown: a chip on the stage, or at accessibility sizes a line under it (#848).
+    @ViewBuilder private func sizeLine(_ entry: ProjectGallery.Entry, under: Bool, stacked: Bool = false) -> some View {
+        if let size = entry.sizeText(measured[entry.id]) {
+            if under {
+                Text(size).font(.footnote.monospacedDigit().weight(.semibold)).foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center).frame(maxWidth: .infinity).padding(.horizontal, 16)
+                    .accessibilityLabel("\(entry.measures) size \(size)").accessibilityIdentifier("gallery-size")
+            } else {
                 // In a column a long size goes on to a second line rather than past the stage's edge (#844).
                 Text(size).font(.caption.monospacedDigit().weight(.semibold)).lineLimit(stacked ? 2 : 1).minimumScaleFactor(0.8)
                     .fixedSize(horizontal: false, vertical: stacked)
@@ -379,10 +399,10 @@ struct ProjectGalleryView: View {
                 .stageButton().disabled(true).accessibilityValue("preparing").accessibilityIdentifier("gallery-ar")
         case .failed(let stl):
             Button { prepareAR(stl) } label: { Label("AR didn’t open. Try Again", systemImage: "arkit") }
-                .stageButton().accessibilityValue("failed").accessibilityIdentifier("gallery-ar")
+                .labelStyle(.titleAndIcon).stageButton().accessibilityValue("failed").accessibilityIdentifier("gallery-ar")
         case .failedScan(let url):
             Button { arFailed = !ARModel.show(url) } label: { Label("AR didn’t open. Try Again", systemImage: "arkit") }
-                .stageButton().accessibilityValue("failed").accessibilityIdentifier("gallery-ar")
+                .labelStyle(.titleAndIcon).stageButton().accessibilityValue("failed").accessibilityIdentifier("gallery-ar")
         case .coming:
             Button {} label: { HStack(spacing: 6) { ProgressView().controlSize(.small); Text("AR") } }
                 .stageButton().disabled(true).accessibilityLabel("AR").accessibilityValue("loading")
@@ -394,7 +414,7 @@ struct ProjectGalleryView: View {
                 .accessibilityHint("The model didn’t come from your Mac; Try Again on the stage asks for it again").accessibilityIdentifier("gallery-ar")
         case .needsMac:
             Button {} label: { Label("AR needs your Mac", systemImage: "arkit") }
-                .stageButton().disabled(true).accessibilityValue("needs-mac")
+                .labelStyle(.titleAndIcon).stageButton().disabled(true).accessibilityValue("needs-mac")
                 .accessibilityHint("Your Mac isn’t answering and the model isn’t on this iPhone yet").accessibilityIdentifier("gallery-ar")
         }
     }
@@ -482,4 +502,11 @@ private struct ScanPhotos: View {
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
         }
     }
+}
+
+/// A label style chosen at run time (#848: symbols alone at accessibility sizes).
+struct AnyLabelStyle: LabelStyle {
+    private let make: (Configuration) -> AnyView
+    init<S: LabelStyle>(_ style: S) { make = { AnyView(style.makeBody(configuration: $0)) } }
+    func makeBody(configuration: Configuration) -> some View { make(configuration) }
 }

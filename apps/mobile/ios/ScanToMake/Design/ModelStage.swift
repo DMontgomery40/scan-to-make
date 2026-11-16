@@ -43,6 +43,7 @@ struct ModelStage: View {
     @State private var settledZoom: Float = 1
 
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.dynamicTypeSize) private var typeSize
     @State private var poster: CGImage?
     @State private var live = false
     @State private var lastTouch = Date.distantPast
@@ -92,7 +93,9 @@ struct ModelStage: View {
                 VStack { Spacer(); Button("Try 3D Again") { retryGeneration += 1 }.stageButton() }.padding(16)
             }
             if interactive && url != nil && !live && !failed {
-                VStack { HStack { Spacer(); Button("Explore in 3D", systemImage: "rotate.3d") { touch() }.stageButton() }; Spacer() }.padding(16)
+                // #848: at accessibility sizes its symbol alone, named "Explore in 3D" for VoiceOver, not two lines over the model.
+                VStack { HStack { Spacer(); Button("Explore in 3D", systemImage: "rotate.3d") { touch() }
+                    .labelStyle(typeSize.isAccessibilitySize ? AnyLabelStyle(.iconOnly) : AnyLabelStyle(.titleAndIcon)).stageButton() }; Spacer() }.padding(16)
             }
         }
         .contentShape(Rectangle())
