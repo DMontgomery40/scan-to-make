@@ -16,7 +16,12 @@ data class ProjectGallery(val entries: List<Entry>) {
         data class Picture(val path: String) : Drawing
         /** The part with the scanned object in each seat. */
         data class Assembly(val part: String, val obj: String, val seats: List<Project.Seat>) : Drawing
+        /** #691: a multi-part design, each part's mesh in its own colour (neutral when it has none), all in one frame. */
+        data class Parts(val parts: List<DrawnPart>) : Drawing
     }
+
+    /** One mesh of a [Drawing.Parts] and the colour the MCP or the pass gave it ([Colour.Spool]), else [Colour.Neutral]. */
+    data class DrawnPart(val mesh: String, val colour: Colour)
 
     sealed interface Colour {
         data object Neutral : Colour
@@ -61,8 +66,10 @@ data class ProjectGallery(val entries: List<Entry>) {
             val part = parts.singleOrNull()
             val seats = project.current?.seats.orEmpty()
             // Only where it is drawn right today: a USDZ scan. A handheld STL scan gets no Together until the project carries its frame.
-            if (part != null && part.drawing is Drawing.Model && seats.isNotEmpty() && scans.isNotEmpty() && scans[0].lowercase(Locale.ROOT).endsWith(".usdz"))
-                entries += Entry("together", Kind.Together, "Together", Drawing.Assembly(part.drawing.path, scans[0], seats), part.colour, "Together")
+            // A multi-part design's Together places its merged mesh (#691: its parts turn on the part's own entry).
+            val together = (part?.drawing as? Drawing.Model)?.path ?: (part?.drawing as? Drawing.Parts)?.let { partMesh(project) }
+            if (part != null && together != null && seats.isNotEmpty() && scans.isNotEmpty() && scans[0].lowercase(Locale.ROOT).endsWith(".usdz"))
+                entries += Entry("together", Kind.Together, "Together", Drawing.Assembly(together, scans[0], seats), if (part.drawing is Drawing.Parts) Colour.Neutral else part.colour, "Together")
             scans.forEachIndexed { index, scan ->
                 entries += Entry("scan-$index", Kind.Scan, if (scans.size > 1) "Scan ${index + 1}" else "What you scanned", Drawing.Model(scan), Colour.Own, "Scan",
                     photos = scanPhotos(project))
@@ -80,6 +87,8 @@ data class ProjectGallery(val entries: List<Entry>) {
             }
             val current = project.current ?: return emptyList()
             val label = when (project.kind) { "copy" -> "Your copy"; "published" -> "Model"; else -> "Your part" }
+            // #691: a multi-part design whose parts the printer MCP meshed turns part by part, each in its own colour.
+            drawnParts(project)?.let { return listOf(PrintablePart("result", label, Drawing.Parts(it), Colour.Own, current.sizeMm)) }
             val mesh = partMesh(project)
             if (mesh == null) {
                 // A designer's 3MF has no merged mesh: the Mac's drawing of all the file's objects first, as on the other
@@ -104,6 +113,21 @@ data class ProjectGallery(val entries: List<Entry>) {
             if (!model.lowercase(Locale.ROOT).endsWith(".3mf")) return if (!model.lowercase(Locale.ROOT).endsWith(".stl")) null else if (model.startsWith("versions/")) model else "model.stl"
             if (project.kind == "published" || !(model.startsWith("current/") || model.startsWith("versions/"))) return null
             return versionMesh(model).takeIf { it == project.current?.mergedMesh }
+        }
+
+        /**
+         * What the stage turns for a multi-part design (#691; packages/contracts/fixtures/project-parts.json `draw`): each
+         * part's mesh with its own colour, or neutral for a part with none. A designer's kit shows only the chosen plate's
+         * parts (`publishedSelection.plateIndex`); a part with no plate is on every plate. Null without parts: the merged
+         * mesh turns, neutral, as before.
+         */
+        fun drawnParts(project: Project): List<DrawnPart>? {
+            val parts = project.current?.parts.orEmpty()
+            if (parts.isEmpty()) return null
+            val plate = (project.raw["publishedSelection"] as? kotlinx.serialization.json.JsonObject)?.get("plateIndex")
+                ?.let { (it as? kotlinx.serialization.json.JsonPrimitive)?.content?.toIntOrNull() }
+            val shown = parts.filter { plate == null || it.plate == null || it.plate == plate }
+            return shown.map { DrawnPart(it.mesh, it.colour?.let(::hex)?.let { c -> Colour.Spool(c) } ?: Colour.Neutral) }.ifEmpty { null }
         }
 
         /** The one spool the result prints in: the last print's spools, else the colour the printer reported printing it. */
@@ -207,6 +231,19 @@ val Project.canLocate: Boolean get() = kind == "fit" && scan?.lowercase(Locale.R
 fun drawnColour(colour: ProjectGallery.Colour): ProjectGallery.Colour = when (colour) {
     is ProjectGallery.Colour.Spool -> ProjectGallery.Colour.Spool(drawnColour(colour.hex))
     else -> colour
+}
+
+/** The stage's neutral material, the same grey on every layout (Linux `ModelStage`, CounterpartKit `StageMaterial`). */
+const val NEUTRAL_MATERIAL = "#94949A"
+
+/**
+ * #691, #706: the colour the stage draws one part of a multi-part design in, as 0–1 RGB: its spool through the dark-part
+ * floor ([drawnColour]), so a black part is charcoal on the dark stage, or the neutral material when it has none.
+ */
+fun stageRgb(colour: ProjectGallery.Colour): FloatArray {
+    val hex = (drawnColour(colour) as? ProjectGallery.Colour.Spool)?.hex ?: NEUTRAL_MATERIAL
+    val value = hex.removePrefix("#").take(6).toIntOrNull(16) ?: NEUTRAL_MATERIAL.removePrefix("#").toInt(16)
+    return floatArrayOf(((value shr 16) and 255) / 255f, ((value shr 8) and 255) / 255f, (value and 255) / 255f)
 }
 
 fun drawnColour(hex: String): String {

@@ -205,6 +205,33 @@ class HomeLayoutTests {
         assertEquals("Your project’s picture. No picture came with this question.", AskPicture.caption(null))
     }
 
+    /** #691 with projects present: a multi-part design's stage turns its parts, each in its own colour, and shows its
+     *  picture until the meshes are here (here they never come, so it says so); a one-colour design keeps its picture. */
+    @Test fun aMultiPartDesignsStageDrawsEachPartInItsOwnColourWithProjectsPresent() {
+        val id = "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a05"
+        val case = WireJson.parseToJsonElement(contractFixture("project-parts.json").readText()).jsonObject["cases"]!!.jsonArray[0].jsonObject
+        val data = JsonObject(mapOf("id" to JsonPrimitive(id), "title" to JsonPrimitive("Desk sign"), "state" to JsonPrimitive("ready"),
+            "createdAtMs" to JsonPrimitive(1), "updatedAtMs" to JsonPrimitive(2), "photos" to JsonArray(emptyList()),
+            "passes" to WireJson.parseToJsonElement("[{\"startedAtMs\":1,\"endedAtMs\":2,\"status\":\"done\"}]")) + case["object"]!!.jsonObject)
+        app.pairingStore.save(v2Record(ADDRESSES[0]), false)
+        val fake = FakeTransport { request, _ -> when {
+            request.url.endsWith("/v1/objects/$id") -> HttpReply(200, WireJson.encodeToString(JsonElement.serializer(), JsonObject(mapOf("object" to data))).toByteArray())
+            else -> json(404, mapOf("error" to mapOf("code" to "not-found", "message" to "not here")))
+        } }
+        app.pairing = PairingClient(app.pairingStore, fake)
+        app.companion = CompanionClient(app.pairing, fake, null, null, app.cacheDir)
+        state.projects.value = listOf(project("other", "Existing project", "ready"), requireNotNull(Project.decode(data)))
+        state.loaded.value = true
+        compose.setContent { WithApp { com.scantomake.counterpart.ui.ProjectScreen(id, back = {}, print = {}, printing = {}, scan = {}) } }
+        compose.onNode(hasTestTag("gallery-stage-parts")).assertExists()
+        compose.onNode(hasContentDescription("Your copy in 2 parts, each in its own colour")).assertExists()
+        compose.waitUntil(5_000) { fake.paths.any { "/current/parts/part-2.stl" in it } }
+        compose.waitForIdle()
+        // Its meshes didn't come: the stage keeps the design's picture, never an empty stage.
+        compose.onNode(hasTestTag("gallery-stage-picture")).assertExists()
+        compose.onNode(hasTestTag("gallery-stage-parts") and androidx.compose.ui.test.SemanticsMatcher.expectValue(androidx.compose.ui.semantics.SemanticsProperties.StateDescription, "not available")).assertExists()
+    }
+
     /** Design §3.3 with projects present (AGENTS.md "Every layout"): a copy whose scan is really the thing a case must fit
      *  offers Make something else from this scan on its page, and its New opens holding that scan, asking first. */
     @Test fun aCopysPageOffersMakeSomethingElseFromItsScanWithProjectsPresent() {

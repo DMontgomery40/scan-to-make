@@ -136,7 +136,23 @@ data class Project(
                                     /** #769: the merged mesh beside a multi-part design's 3MF, listed only while the file is there. */
                                     val mergedMesh: String? = null,
                                     /** #788: a draft, never a finished design: the design engine's last valid run of a pass with no final run. */
-                                    val draft: Draft? = null)
+                                    val draft: Draft? = null,
+                                    /** #691: each part of a multi-part design as its own mesh and colour, read leniently ([parts]). */
+                                    @SerialName("parts") val partsRaw: JsonElement? = null) {
+        /**
+         * #691: the parts the printer MCP meshed (`counterpart_part_meshes`, packages/contracts/fixtures/project-parts.json):
+         * each mesh a project path in the 3MF's build frame, so all of them line up drawn together. An entry without a mesh
+         * path is left out; an unreadable list is none, and the stage turns the merged mesh as before.
+         */
+        val parts: List<Part> get() = (partsRaw as? kotlinx.serialization.json.JsonArray)?.mapNotNull { item ->
+            val o = item as? JsonObject ?: return@mapNotNull null
+            fun text(key: String) = (o[key] as? JsonPrimitive)?.takeIf { it.isString }?.content
+            val mesh = text("mesh")?.takeIf { it.isNotEmpty() && !it.startsWith("/") && ".." !in it.split("/") } ?: return@mapNotNull null
+            Part(text("id") ?: mesh, text("name"), text("colour"), (o["plate"] as? JsonPrimitive)?.content?.toIntOrNull(), mesh)
+        }.orEmpty()
+    }
+    /** One part of a multi-part design (#691): `plate` is 0-based, absent for a plain 3MF (on every plate). */
+    data class Part(val id: String, val name: String?, val colour: String?, val plate: Int?, val mesh: String)
     /**
      * #788: why a design is a draft, in the printer MCP's own words (`final_refused`, or its failing purpose requirements),
      * shown as given and never interpreted. None from an MCP before engine round 4. Reasons that aren't words are left out.

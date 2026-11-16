@@ -226,11 +226,17 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
                 // With nothing in the gallery yet (photos sent, no model): the subject the computer cut out, as on its card.
                 // The one stage picture (review B1/S7 on #539): this entry's own picture, or that it is coming, or that it can't be had.
                 val photo = shown.photoPicture()
-                StagePicture(shown,
-                    still = entry?.let(shown::still) ?: photo?.let { Still.Picture(it) } ?: if (shownWords.busy) Still.Waiting else Still.NotAvailable,
-                    label = entry?.label ?: if (photo != null) "Your photo" else words.title,
-                    unavailableLine = when { entry == null -> "Nothing to show yet."; entry.kind == ProjectGallery.Kind.Plate -> "No picture of this plate came with the file."; else -> "Your computer couldn't draw a picture of this." },
-                    modifier = Modifier.fillMaxSize())
+                val picture: @Composable () -> Unit = {
+                    StagePicture(shown,
+                        still = entry?.let(shown::still) ?: photo?.let { Still.Picture(it) } ?: if (shownWords.busy) Still.Waiting else Still.NotAvailable,
+                        label = entry?.label ?: if (photo != null) "Your photo" else words.title,
+                        unavailableLine = when { entry == null -> "Nothing to show yet."; entry.kind == ProjectGallery.Kind.Plate -> "No picture of this plate came with the file."; else -> "Your computer couldn't draw a picture of this." },
+                        modifier = Modifier.fillMaxSize())
+                }
+                // #691: a multi-part design turns part by part, each in its own colour; its picture until the meshes are here.
+                val parts = (entry?.drawing as? ProjectGallery.Drawing.Parts)?.parts
+                if (entry != null && parts != null) PartsStage(shown, parts, entry.label, Modifier.fillMaxSize(), still = picture)
+                else picture()
                 val draftCapsule = shownWords.phase == ProjectPhase.Ready && shown.current?.draft != null
                 StatusCapsule(shownWords.phase, text = if (draftCapsule) Project.Draft.CAPSULE else null,
                     modifier = Modifier.padding(12.dp).testTag("status-capsule"), icon = if (draftCapsule) CIcons.Warning else null)

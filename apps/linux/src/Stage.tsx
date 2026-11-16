@@ -72,8 +72,13 @@ export function Picture({
     </div>
   );
 }
-/** `tint` is the spool the part prints in (`#RRGGBB`); without one, the neutral material every layout uses. */
-export function ModelStage({ bytes, tint }: { bytes: Uint8Array; tint?: string }) {
+/** The neutral material every layout uses for a part with no spool. */
+export const NEUTRAL_MATERIAL = 0x94949a;
+/**
+ * `tint` is the spool the part prints in (`#RRGGBB`); without one, the neutral material every layout uses. `parts` (#691)
+ * draws several meshes in one frame instead, each in its own tint, centred together so they keep their places.
+ */
+export function ModelStage({ bytes, tint, parts }: { bytes?: Uint8Array; tint?: string; parts?: { bytes: Uint8Array; tint?: string }[] }) {
   const element = useRef<HTMLDivElement>(null);
   const action = useRef<(a: string) => void>(() => {});
   const [error, setError] = useState("");
@@ -90,20 +95,27 @@ export function ModelStage({ bytes, tint }: { bytes: Uint8Array; tint?: string }
       .then(([T, { STLLoader }, { OrbitControls }]) => {
         if (disposed || !element.current) return;
         let renderer: InstanceType<typeof T.WebGLRenderer> | undefined;
+        const pieces = parts ?? (bytes ? [{ bytes, tint }] : []);
+        const geometries: ReturnType<InstanceType<typeof STLLoader>["parse"]>[] = [];
+        const materials: InstanceType<typeof T.MeshStandardMaterial>[] = [];
         try {
-          const geometry = new STLLoader().parse(
-            bytes.buffer.slice(
-              bytes.byteOffset,
-              bytes.byteOffset + bytes.byteLength,
-            ) as ArrayBuffer,
-          );
-          if (!geometry.getAttribute("position")?.count)
-            throw new Error("This STL has no viewable geometry.");
-          geometry.computeBoundingBox();
-          const box = geometry.boundingBox!;
+          const box = new T.Box3();
+          for (const piece of pieces) {
+            const geometry = new STLLoader().parse(
+              piece.bytes.buffer.slice(piece.bytes.byteOffset, piece.bytes.byteOffset + piece.bytes.byteLength) as ArrayBuffer,
+            );
+            geometries.push(geometry);
+            if (!geometry.getAttribute("position")?.count)
+              throw new Error("This STL has no viewable geometry.");
+            geometry.computeBoundingBox();
+            box.union(geometry.boundingBox!);
+          }
+          if (!geometries.length) throw new Error("This STL has no viewable geometry.");
           const centre = box.getCenter(new T.Vector3());
-          geometry.translate(-centre.x, -centre.y, -centre.z);
-          geometry.computeVertexNormals();
+          for (const geometry of geometries) {
+            geometry.translate(-centre.x, -centre.y, -centre.z);
+            geometry.computeVertexNormals();
+          }
           const span = box.getSize(new T.Vector3());
           const radius = Math.max(span.x, span.y, span.z);
           if (!Number.isFinite(radius) || radius <= 0)
@@ -124,15 +136,20 @@ export function ModelStage({ bytes, tint }: { bytes: Uint8Array; tint?: string }
           canvas.setAttribute("role", "img");
           element.current.replaceChildren(canvas);
           const scene = new T.Scene();
-          const material = new T.MeshStandardMaterial({
-            color: tint ? parseInt(tint.slice(1), 16) : 0x94949a,
-            metalness: 0.08,
-            roughness: 0.6,
-            side: T.DoubleSide,
+          const model = new T.Group();
+          geometries.forEach((geometry, i) => {
+            const colour = pieces[i]!.tint;
+            const material = new T.MeshStandardMaterial({
+              color: colour ? parseInt(colour.slice(1), 16) : NEUTRAL_MATERIAL,
+              metalness: 0.08,
+              roughness: 0.6,
+              side: T.DoubleSide,
+            });
+            materials.push(material);
+            model.add(new T.Mesh(geometry, material));
           });
-          const mesh = new T.Mesh(geometry, material);
-          mesh.rotation.x = -Math.PI / 2;
-          scene.add(mesh);
+          model.rotation.x = -Math.PI / 2;
+          scene.add(model);
           scene.add(new T.HemisphereLight(0xffffff, 0x4e5b57, 1.4));
           const light = new T.DirectionalLight(0xffffff, 2);
           light.position.set(4, 6, 5);
@@ -191,21 +208,23 @@ export function ModelStage({ bytes, tint }: { bytes: Uint8Array; tint?: string }
           const gl = renderer.getContext();
           const info = gl.getExtension("WEBGL_debug_renderer_info");
           setFacts(
-            `${(geometry.getAttribute("position").count / 3) | 0} triangles · WebGL 2 · ${info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER)}`,
+            `${(geometries.reduce((n, g) => n + g.getAttribute("position").count, 0) / 3) | 0} triangles${geometries.length > 1 ? ` in ${geometries.length} parts` : ""} · WebGL 2 · ${info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER)}`,
           );
           cleanup = () => {
             cancelAnimationFrame(frame);
             observer.disconnect();
             document.removeEventListener("visibilitychange", render);
             controls.dispose();
-            geometry.dispose();
-            material.dispose();
+            geometries.forEach((g) => g.dispose());
+            materials.forEach((m) => m.dispose());
             renderer?.dispose();
             renderer?.forceContextLoss();
             canvas.remove();
             action.current = () => {};
           };
         } catch (e) {
+          geometries.forEach((g) => g.dispose());
+          materials.forEach((m) => m.dispose());
           renderer?.dispose();
           setError(
             e instanceof Error
@@ -219,7 +238,7 @@ export function ModelStage({ bytes, tint }: { bytes: Uint8Array; tint?: string }
       disposed = true;
       cleanup();
     };
-  }, [bytes, tint]);
+  }, [bytes, tint, parts]);
   return (
     <div className="model-view">
       <div className="canvas" ref={element} />
@@ -313,11 +332,15 @@ export function Stage({ project, locate }: { project: Project; locate?: () => vo
   const entry = entries.find((e) => e.id === chosen) ?? entries[0];
   const [mode, setMode] = useState<"still" | "3d">("still");
   const [bytes, setBytes] = useState<Uint8Array>();
+  const [partBytes, setPartBytes] = useState<{ bytes: Uint8Array; tint?: string }[]>();
   const [error, setError] = useState("");
   const [renderIndex, setRenderIndex] = useState(0);
   const model = project.current?.model;
   const renders = project.current?.renders ?? [];
-  const turnable = entry?.kind === "part" && "model" in entry.drawing && !!model;
+  // #691: a multi-part design turns part by part, each in its own colour (floored on the dark stage).
+  const parts = entry?.kind === "part" && "parts" in entry.drawing ? entry.drawing.parts : undefined;
+  const turnable = entry?.kind === "part" && ("model" in entry.drawing || !!parts) && !!model;
+  const canTurn = turnable && (!!parts || filePath(project, "model.stl").toLowerCase().endsWith(".stl"));
   // The pass's own views stay one click away on the part while the computer hasn't drawn its picture.
   const showRenders = entry?.kind === "part" && !project.pictures?.part && renders.length > 1;
   // With nothing in the gallery yet (photos sent, no model): the subject the computer cut out, as on its card; a
@@ -331,11 +354,28 @@ export function Stage({ project, locate }: { project: Project; locate?: () => vo
   useEffect(() => {
     setMode("still");
     setBytes(undefined);
+    setPartBytes(undefined);
     setError("");
     setRenderIndex(0);
   }, [project.id, model, project.passes.at(-1)?.endedAtMs, entry?.id]);
   useEffect(() => {
-    if (mode !== "3d" || !turnable) return;
+    if (mode !== "3d" || !parts) return;
+    let live = true;
+    void Promise.all(parts.map((part) => artifact(project.id, part.mesh))).then(
+      (all) => {
+        if (live) setPartBytes(all.map((data, i) => ({ bytes: data, ...(parts[i]!.colour.startsWith("#") ? { tint: drawnColour(parts[i]!.colour) } : {}) })));
+      },
+      (e) => {
+        if (live) setError(String(e));
+      },
+    );
+    return () => {
+      live = false;
+      setPartBytes(undefined);
+    };
+  }, [mode, parts?.map((part) => part.mesh).join("|"), project.id, model]);
+  useEffect(() => {
+    if (mode !== "3d" || !turnable || parts) return;
     let live = true;
     void artifact(project.id, filePath(project, "model.stl")).then(
       (data) => {
@@ -355,14 +395,16 @@ export function Stage({ project, locate }: { project: Project; locate?: () => vo
   return (
     <section className="stage" aria-label="Project pictures">
       {mode === "3d" && turnable ? (
-        bytes ? (
+        parts && partBytes ? (
+          <ModelStage parts={partBytes} />
+        ) : !parts && bytes ? (
           <ModelStage bytes={bytes} tint={tint} />
         ) : (
           <p>{error || "Opening model…"}</p>
         )
       ) : (
         <StagePicture project={project} still={shown} label={entry?.label ?? (first ? "Your photo" : project.title ?? "Your project")}
-          role={entry?.kind} also={turnable && filePath(project, "model.stl").toLowerCase().endsWith(".stl") ? "Explore in 3D shows the model itself." : undefined}
+          role={entry?.kind} also={canTurn ? (parts && parts.length > 1 ? `Explore in 3D shows its ${parts.length} parts, each in its own colour.` : "Explore in 3D shows the model itself.") : undefined}
           unavailableLine={!entry ? "Nothing to show yet." : entry.kind === "plate" ? "No picture of this plate came with the file." : "Your computer couldn't draw a picture of this."} />
       )}
       {entries.length > 1 && (
@@ -378,7 +420,7 @@ export function Stage({ project, locate }: { project: Project; locate?: () => vo
         <button aria-pressed={mode === "still"} onClick={() => setMode("still")}>
           Still
         </button>
-        <button aria-pressed={mode === "3d"} disabled={!turnable || !filePath(project, "model.stl").toLowerCase().endsWith(".stl")} onClick={() => setMode("3d")}>
+        <button aria-pressed={mode === "3d"} disabled={!canTurn} onClick={() => setMode("3d")}>
           Explore in 3D
         </button>
         {entry?.kind === "part" && locate && canLocate(project) && <button onClick={locate}>See it together</button>}

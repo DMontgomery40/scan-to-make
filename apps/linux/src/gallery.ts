@@ -11,7 +11,10 @@ export type Seat = { name?: string; translationMm: number[]; rotationDeg: number
 export type Drawing =
   | { model: string }
   | { picture: string }
-  | { assembly: { part: string; object: string; seats: Seat[] } };
+  | { assembly: { part: string; object: string; seats: Seat[] } }
+  /** #691: a multi-part design, each part's mesh in its own colour ("neutral" for none), all in one frame. */
+  | { parts: DrawnPart[] };
+export type DrawnPart = { mesh: string; colour: Colour };
 /** "neutral", "own", or the spool's `#RRGGBB`. */
 export type Colour = string;
 export interface GalleryEntry {
@@ -58,6 +61,9 @@ export function printableParts(p: Project): PrintablePart[] {
   const current = p.current;
   if (!current) return [];
   const label = p.kind === "copy" ? "Your copy" : p.kind === "published" ? "Model" : "Your part";
+  // #691: a multi-part design whose parts the printer MCP meshed turns part by part, each in its own colour.
+  const parts = drawnParts(p);
+  if (parts) return [{ id: "result", label, drawing: { parts }, colour: "own", sizeMm: current.sizeMm }];
   const mesh = partMesh(p);
   if (!mesh) {
     // A designer's 3MF has no merged mesh: the computer's drawing of all the file's objects first, as on the other
@@ -68,6 +74,19 @@ export function printableParts(p: Project): PrintablePart[] {
   // A multi-part design turns from its merged mesh, neutral until the MCPs report each part's colour (#769, #645).
   const multipart = current.model.toLowerCase().endsWith(".3mf");
   return [{ id: "result", label, drawing: { model: mesh }, colour: multipart ? "neutral" : spoolColour(p) ?? "neutral", sizeMm: current.sizeMm }];
+}
+
+/**
+ * What the stage turns for a multi-part design (#691; project-parts.json `draw`): each part's mesh with its own colour,
+ * or "neutral" for a part with none. A designer's kit shows only the chosen plate's parts (`publishedSelection.plateIndex`);
+ * a part with no plate is on every plate. Undefined without parts: the merged mesh turns, neutral, as before.
+ */
+export function drawnParts(p: Project): DrawnPart[] | undefined {
+  const plate = p.publishedSelection?.plateIndex;
+  const shown = (p.current?.parts ?? [])
+    .filter((part) => typeof part.mesh === "string" && part.mesh && !part.mesh.startsWith("/") && !part.mesh.split("/").includes(".."))
+    .filter((part) => plate === undefined || part.plate === undefined || part.plate === plate);
+  return shown.length ? shown.map((part) => ({ mesh: part.mesh, colour: hex(part.colour) ?? "neutral" })) : undefined;
 }
 
 /**
