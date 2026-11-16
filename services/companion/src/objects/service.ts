@@ -2572,10 +2572,12 @@ export class ObjectService {
   }
 
   /**
-   * #691: a 3MF model's parts, each meshed by the printer MCP into its own STL (counterpart/1, `MODEL_PARTS_TOOL`) and
-   * kept as `current/parts/<id>.stl`, with its name, colour and plate. The colour is the MCP's, else the one the pass
-   * declared for that part (by name, then by filament). Any other model, an MCP without the tool, or a failure leaves
-   * no parts (the design is drawn as its merged mesh, as before); a failure is logged. Counterpart meshes nothing itself.
+   * #691: a 3MF model's parts, each meshed by the printer MCP into its own STL in the 3MF's build frame (counterpart/1
+   * `counterpart_part_meshes`), kept as `current/parts/part-<n>.stl` with the MCP's id, the name, the colour and the
+   * plate. The colour is the one the pass declared for that part (by name, then by filament), as the print sheet
+   * reads it, else the 3MF's own. All of a design's parts or none: a part the MCP skipped, any other model, an MCP
+   * without the tool, or a failure leaves no parts (the design is drawn as its merged mesh, as before), and a skip or
+   * failure is logged. Counterpart meshes nothing itself.
    */
   async #partMeshes(object: StmObject, model: string, declared?: {name?: string; colour?: string}[]): Promise<NonNullable<StmObject['current']>['parts']> {
     const dir = this.dir(object.id), partsDir = join(dir, 'current', 'parts');
@@ -2588,15 +2590,18 @@ export class ObjectService {
     try {
       await mkdir(staging, {recursive: true, mode: 0o700});
       const listed = await runner.modelParts({modelPath: join(dir, model), outputDir: staging, signal: AbortSignal.timeout(120_000)});
-      if (!listed?.length) return undefined;
+      if (!listed?.parts.length) return undefined;
+      if (listed.skipped.length) throw new Error(`the printer service couldn’t mesh ${listed.skipped.slice(0, 3).join(', ')}${listed.skipped.length > 3 ? ` and ${listed.skipped.length - 3} more` : ''}`);
       await mkdir(partsDir, {recursive: true, mode: 0o700});
       const parts: NonNullable<NonNullable<StmObject['current']>['parts']> = [];
-      for (const part of listed) {
-        if (!await isValidStl(part.stlPath)) throw new Error(`the mesh of part ${part.name ?? part.id} isn't a complete STL`);
-        await copyFile(part.stlPath, join(partsDir, `${part.id}.stl`));
-        const colour = part.colour ?? (declared?.find(item => item.name && item.name === part.name) ?? (part.filament ? declared?.[part.filament - 1] : undefined))?.colour;
+      for (const [index, part] of listed.parts.entries()) {
+        if (!await isValidStl(part.stlPath)) throw new Error(`the mesh of part ${part.name ?? part.id} isn’t a complete STL`);
+        const mesh = join('current', 'parts', `part-${index + 1}.stl`);
+        await copyFile(part.stlPath, join(dir, mesh));
+        const said = declared?.find(item => item.name && part.name && item.name.toLowerCase() === part.name.toLowerCase()) ?? (part.filament ? declared?.[part.filament - 1] : undefined);
+        const colour = said?.colour ?? part.colour;
         parts.push({id: part.id, ...(part.name ? {name: part.name} : {}), ...(colour ? {colour} : {}), ...(part.plate !== undefined ? {plate: part.plate} : {}),
-          mesh: join('current', 'parts', `${part.id}.stl`)});
+          ...(part.painted ? {painted: true} : {}), mesh});
       }
       return parts;
     } catch (error) {

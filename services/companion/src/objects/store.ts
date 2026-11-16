@@ -222,12 +222,14 @@ export interface StmObject {
      * belongs in, in filament order, as the pass declared them. The 3MF itself carries none. */
     filaments?: {name?: string; colour?: string; material?: string}[];
     /**
-     * #691: a multi-part 3MF's parts as the printer MCP meshed them, each its own STL in its object's frame
-     * (`current/parts/<id>.stl`, or a sealed design's `versions/<id>/parts/<id>.stl`), with its name, the colour it
-     * prints in (the MCP's, else the pass's declared colour for its filament) and, in a designer's kit, its plate (0-based). Absent when the MCP doesn't mesh parts:
+     * #691: a multi-part 3MF's parts as the printer MCP meshed them (`counterpart_part_meshes`), each its own STL in the
+     * 3MF's build frame, so they line up drawn together (`current/parts/part-<n>.stl`, or a sealed design's
+     * `versions/<id>/parts/part-<n>.stl`), with the MCP's id (a key, never parsed), its name, the colour it prints in
+     * (the pass's declared colour, else the 3MF's own), its plate (0-based, absent for a plain 3MF) and `painted` when
+     * the part carries painting (its colour is then the base filament's). Absent when the MCP doesn't mesh parts:
      * the design is then drawn as its merged mesh, in the neutral material.
      */
-    parts?: {id: string; name?: string; colour?: string; plate?: number; mesh: string}[];
+    parts?: {id: string; name?: string; colour?: string; plate?: number; painted?: true; mesh: string}[];
 
     /** What changed, each tagged (PRD §4 Result). */
     changes?: TouchupChange[];
