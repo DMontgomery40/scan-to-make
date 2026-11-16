@@ -45,12 +45,31 @@ test('a request in several colours keeps the printer MCP\'s multi-part 3MF besid
   ]);
 });
 
-test('a touched.3mf that is not a printable 3MF never becomes the model', async () => {
+test('a pass-made 3MF whose mesh unpacks past 8 MB is kept, with its part colours (#858)', async () => {
+  // The DAD sign: bar and letters, a 2 MB archive whose 3D/3dmodel.model is 14 MB, was dropped for the merged STL.
+  const {pass, inv} = await setup('multicolourbig');
+  const progress = [];
+  const result = await runTouchupWorker(inv, pass, {onProgress: p => progress.push(p)});
+  assert.equal(result.status, 'done');
+  assert.equal(result.model, join(pass.outDir, 'touched.stl'));
+  assert.equal(result.parts, join(pass.outDir, 'touched.3mf'));
+  assert.deepEqual(result.partColours, [{name: 'bar', colour: '#B0855D'}, {name: 'letters and inscription', colour: '#111111'}]);
+  assert.ok(!progress.some(p => p.activity?.some(entry => /couldn’t keep/.test(entry.text))));
+});
+
+test('a touched.3mf that is not a printable 3MF never becomes the model, and the pass says why', async t => {
   const {pass, inv} = await setup('multicolourbroken');
-  const result = await runTouchupWorker(inv, pass);
+  const logged = [];
+  t.mock.method(console, 'error', line => { logged.push(line); });
+  const progress = [];
+  const result = await runTouchupWorker(inv, pass, {onProgress: p => progress.push(p)});
   assert.equal(result.parts, undefined);
   assert.equal(result.partColours, undefined);
   assert.equal(result.model, join(pass.outDir, 'touched.stl'));
+  const said = progress.flatMap(p => p.activity ?? []).filter(entry => entry.kind === 'message' && /couldn’t keep/.test(entry.text));
+  assert.deepEqual(said.map(entry => entry.text), ['Counterpart couldn’t keep the multi-part file this pass made, so it prints as one piece in one colour. It isn’t a readable 3MF file.']);
+  assert.ok(logged.some(line => line === `touch-up: ${said[0].text}`), 'companion.log says it too');
+  assert.ok(!said[0].text.includes(pass.dir), 'no paths of this computer');
 });
 
 test('part colours the worker garbles lose the garbled field but keep their filament’s place', async () => {

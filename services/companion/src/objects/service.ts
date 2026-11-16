@@ -505,6 +505,10 @@ function forgetOwnSettings(object: StmObject): Pick<StmObject, 'current'> {
 function isMultipart(object: Pick<StmObject, 'current'>): boolean {
   return object.current?.model.toLowerCase().endsWith('.3mf') === true;
 }
+/** #858: a 3MF a design pass made here (`current/model.3mf`) carries its whole mesh; a designer's file keeps the import limits. */
+function madeByPass(object: Pick<StmObject, 'current' | 'files'>): boolean {
+  return isMultipart(object) && !object.files?.receipts?.some(file => file.path === object.current!.model);
+}
 
 /** What a designer's 3MF kept as it came says next (#641). */
 const DESIGNER_AS_IS = 'The designer’s file as they made it, with its plates and print settings. It’s ready to print. To change something, say what.';
@@ -2040,7 +2044,7 @@ export class ObjectService {
       : 'Open Print to see what will print, then print it from there.');
     if (!shown.shape.previewed) throw new InvalidStateError(shown.shape.previewSupported ? NOTHING_TO_PREVIEW : previewUnavailable(runner.backend));
     const ask = await this.#legacyColourDesign(object) ? LEGACY_COLOUR_ASK : undefined;
-    const manifest = await bundles.create({...(object.kind === 'published' || isMultipart(object) ? {model: {bytes: stl, format: isMultipart(object) ? '3mf' as const : 'stl' as const}} : {stl}), prompt: '', backend: runner.backend, ...(selected ? {selection:selected} : {})});
+    const manifest = await bundles.create({...(object.kind === 'published' || isMultipart(object) ? {model: {bytes: stl, format: isMultipart(object) ? '3mf' as const : 'stl' as const, ...(madeByPass(object) ? {origin: 'pass' as const} : {})}} : {stl}), prompt: '', backend: runner.backend, ...(selected ? {selection:selected} : {})});
     const printId = randomUUID();
     const plate = selectedPlateIdentity(object);
     // Every print names the design whose bytes it slices (#616): the kept design holding exactly these bytes. A designed

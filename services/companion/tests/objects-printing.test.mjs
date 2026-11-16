@@ -161,6 +161,21 @@ test('a design in several colours prints its multi-part 3MF, not a one-spool STL
   assert.equal(manifest.cleanStl, undefined);
 });
 
+test('a design pass\'s 3MF whose mesh unpacks past 8 MB prints as its parts (#858)', async t => {
+  const f = await setup(t, {reports: [status('RUNNING', 10)]});
+  const {zipSync, strToU8} = fflate();
+  const vertex = '<vertex x="12.345678" y="23.456789" z="34.567891"/>', mesh = `<mesh><vertices>${vertex.repeat(Math.ceil(9 * 1024 * 1024 / vertex.length))}</vertices></mesh>`;
+  const parts = Buffer.from(zipSync({'[Content_Types].xml': strToU8('<Types/>'),
+    '3D/3dmodel.model': strToU8(`<model><resources><object id="1">${mesh}</object><object id="2"><mesh/></object></resources><build><item objectid="1"/><item objectid="2"/></build></model>`)}));
+  await multipart(f, {bytes: parts, filaments: [{name: 'bar', colour: '#B0855D'}, {name: 'letters and inscription', colour: '#111111'}]});
+  await f.service.print(f.object.id);
+  await f.approve();
+  await f.service.settled(f.object.id);
+  const manifest = await f.deps.print.services.store.read(f.runs[0].id);
+  assert.equal(manifest.sourceModel?.format, '3mf', 'the pass\'s parts reach the printer service, not a refusal at Print');
+  assert.equal(manifest.sourceModel.byteLength, parts.length);
+});
+
 const fflate = () => createRequire(new URL('../../printer-handoff/package.json', import.meta.url))('fflate');
 const twoPart3mf = (projectSettings) => {
   const {zipSync, strToU8} = fflate();

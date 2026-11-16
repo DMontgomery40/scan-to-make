@@ -291,6 +291,12 @@ export async function runClaudeWorker(inv: TouchupInvocation, opts: {
     exitCode: ended.code, ...(ended.error ? {error: ended.error} : {}), seconds: seconds(), publicText};
 }
 
+/** Why a pass's 3MF was refused, as a sentence: inspectModelFile's own words, else the zip reader's terse error in ours. */
+function refusal(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return /^[A-Z].*\.$/.test(message) ? message : 'It isn’t a readable 3MF file.';
+}
+
 export async function runTouchupWorker(inv: TouchupInvocation, pass: TouchupPass, opts: {
   spawn?: typeof nodeSpawn; timeoutMs?: number; inactivityMs?: number; maxToolCalls?: number; inputStlSha256?: string;
   onProgress?: (progress: TouchupProgress) => void; signal?: AbortSignal;
@@ -328,8 +334,15 @@ export async function runTouchupWorker(inv: TouchupInvocation, pass: TouchupPass
   // The 3MF becomes the model that prints, so it is validated like one: a truncated
   // archive or a stray zip falls back to the merged mesh instead of becoming the model.
   // It also only counts beside the final mesh it was exported with — never a checkpoint's.
+  // #858: it is read with a pass's limits (its whole mesh is in it), and one that is refused is never dropped silently.
   const parts = model === touched ? await readFile(partsPath).then(bytes => {
-    try { inspectModelFile(bytes, '3mf'); return partsPath; } catch { return undefined; }
+    try { inspectModelFile(bytes, '3mf', {origin: 'pass'}); return partsPath; }
+    catch (error) {
+      const said = publicText(`Counterpart couldn’t keep the multi-part file this pass made, so it prints as one piece in one colour. ${refusal(error)}`);
+      console.error(`touch-up: ${said}`);
+      opts.onProgress?.({seconds: seconds(), toolCalls, activity: [{atMs: Date.now(), kind: 'message', text: said}]});
+      return undefined;
+    }
   }, () => undefined) : undefined;
   const resumeIndex = inv.args.indexOf('--resume'), resumeId = resumeIndex < 0 ? undefined : inv.args[resumeIndex + 1];
   // Claude Code 2.1.321: exact loader error, exit 1, zero API time/turns. Init is not evidence either way.

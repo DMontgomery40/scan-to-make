@@ -13,8 +13,32 @@ export interface ModelFileInfo {
 const words = (value: string) => value.replace(/&(?:amp|lt|gt|quot|apos);/g, entity => ({'&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&apos;': "'"}[entity]!))
   .replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, 256);
 
+const MiB = 1024 * 1024;
+/**
+ * How far a 3MF may inflate when it is read (#858). A file a person brings is held to small limits, because a zip bomb
+ * of a few MB can inflate to gigabytes. A file a design pass made on this computer (`counterpart_make_3mf`) carries its
+ * whole mesh as XML in `3D/3dmodel.model`, at up to about 190 bytes a triangle (the DAD sign: 14.3 MB for 76,830
+ * triangles). 256 MiB holds the largest mesh the companion keeps, a 64 MiB STL of 1.34 million triangles, written that
+ * way. The mesh is held once while it is read, never as one string, so the peak is about 256 MiB plus the file, for a
+ * moment at Print, which an 8 GB Mac can spare. Every other entry keeps the import limits.
+ */
+const LIMITS = {imported: {model: 8 * MiB, total: 16 * MiB}, pass: {model: 256 * MiB, total: 272 * MiB}} as const;
+const OTHER_ENTRY_LIMIT = 8 * MiB, OTHER_TOTAL_LIMIT = 16 * MiB;
+/** Who made a model file: a person brought it (the default), or a design pass made it on this computer. */
+export type ModelFileOrigin = keyof typeof LIMITS;
+
+/** Whether `pattern` occurs in `bytes`, read in windows: a pass's mesh is never decoded as one string. */
+function occurs(bytes: Uint8Array, pattern: RegExp): boolean {
+  const window = 4 * MiB, overlap = 256;
+  for (let start = 0; start < bytes.length; start += window) {
+    const from = Math.max(0, start - overlap), to = Math.min(bytes.length, start + window);
+    if (pattern.test(Buffer.from(bytes.buffer, bytes.byteOffset + from, to - from).toString('latin1'))) return true;
+  }
+  return false;
+}
+
 /** Inspect only bounded package metadata. Never extract paths or execute embedded content. */
-export function inspectModelFile(bytes: Buffer, format: 'stl' | '3mf'): ModelFileInfo {
+export function inspectModelFile(bytes: Buffer, format: 'stl' | '3mf', options: {origin?: ModelFileOrigin} = {}): ModelFileInfo {
   if (!bytes.length || bytes.length > 64 * 1024 * 1024) throw new Error('The model must be at most 64 MiB.');
   const result: ModelFileInfo = {format, sha256: createHash('sha256').update(bytes).digest('hex'), byteLength: bytes.length, plates: []};
   if (format === 'stl') {
@@ -24,17 +48,23 @@ export function inspectModelFile(bytes: Buffer, format: 'stl' | '3mf'): ModelFil
     return result;
   }
   const names = new Set<string>();
-  let total = 0;
+  const limits = LIMITS[options.origin ?? 'imported'];
+  let total = 0, others = 0;
   const files = unzipSync(bytes, {filter: file => {
     if (names.has(file.name)) throw new Error('The model archive has duplicate entries.');
     names.add(file.name);
     const wanted = /^(?:3D\/3dmodel\.model|Metadata\/model_settings\.config|Metadata\/plate_[1-9]\d*\.json)$/.test(file.name);
     if (!wanted) return false;
     total += file.originalSize;
-    if (file.originalSize > 8 * 1024 * 1024 || total > 16 * 1024 * 1024) throw new Error('The model metadata is too large.');
+    if (file.name === '3D/3dmodel.model') {
+      if (file.originalSize > limits.model) throw new Error(`The model’s mesh is too large to read: over ${limits.model / MiB} MB unpacked.`);
+    } else if (file.originalSize > OTHER_ENTRY_LIMIT || (others += file.originalSize) > OTHER_TOTAL_LIMIT) throw new Error('The model metadata is too large.');
+    if (total > limits.total) throw new Error('The model metadata is too large.');
     return true;
   }});
-  const xml = Buffer.from(files['3D/3dmodel.model'] ?? []).toString('utf8');
+  const mesh = files['3D/3dmodel.model'] ?? new Uint8Array();
+  // The model's own metadata comes before its resources (3MF core spec): an import's whole entry is within this.
+  const xml = Buffer.from(mesh.subarray(0, LIMITS.imported.model)).toString('utf8');
   if (!/<(?:\w+:)?model\b/.test(xml) || !names.has('[Content_Types].xml')) throw new Error('That archive is not a 3MF model.');
   const metadata = new Map([...xml.matchAll(/<metadata\s+name="([^"]+)"[^>]*>([^<]*)<\/metadata>/g)].map(match => [match[1]!, words(match[2]!)]));
   if (metadata.get('Title')) result.title = metadata.get('Title');
@@ -70,7 +100,7 @@ export function inspectModelFile(bytes: Buffer, format: 'stl' | '3mf'): ModelFil
   result.plates = [...plates.values()].sort((a, b) => a.index - b.index);
   // A standard single-build 3MF has no Bambu plate metadata.
   if (!result.plates.length) result.plates.push({index: 0, name: 'Plate 1', objects: [], sliced: false});
-  const geometry = /<(?:\w+:)?item\b/.test(xml) && /<(?:\w+:)?(?:mesh|component)\b/.test(xml);
+  const geometry = occurs(mesh, /<(?:\w+:)?item\b/) && occurs(mesh, /<(?:\w+:)?(?:mesh|component)\b/);
   if (!geometry) {
     result.plates = result.plates.filter(plate => plate.sliced);
     if (!result.plates.length) throw new Error('This 3MF contains previews and settings but no model or printable plate. Download the designer’s model file again.');
