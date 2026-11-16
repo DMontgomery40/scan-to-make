@@ -104,7 +104,7 @@ class AppStateTests {
         }
         assertTrue("the events were read: ${transport.paths}", reads >= 2)
         val shown = state.projects.value.single { it.id == id }
-        assertEquals(listOf("current/parts/part-1.stl", "current/parts/part-2.stl"), shown.current!!.parts.map { it.mesh })
+        assertEquals("requests: ${transport.paths.map { java.net.URI(it).path }}; revision ${state.designRevisions.value}", listOf("current/parts/part-1.stl", "current/parts/part-2.stl"), shown.current!!.parts.map { it.mesh })
         assertEquals(6, state.designRevisions.value[id])
         // The gallery now draws the design part by part.
         assertTrue(com.scantomake.counterpart.api.ProjectGallery.of(shown).first!!.drawing is com.scantomake.counterpart.api.ProjectGallery.Drawing.Parts)

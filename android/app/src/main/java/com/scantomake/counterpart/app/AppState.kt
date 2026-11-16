@@ -259,8 +259,11 @@ class AppState(private val app: Counterpart) {
                                 val e = update.event
                                 // In the foreground it shows unless its project's page or Printing screen is showing
                                 // (PRD §9.2: suppress only what the app already shows). Either way it's seen once.
-                                if (e.projectId != null && e.projectId in onScreen.value) Notifications.markSeen(app, e.id, e.seq)
-                                else Notifications.post(app, e)
+                                // A notification that can't be shown never stops the project from being read again.
+                                runCatching {
+                                    if (e.projectId != null && e.projectId in onScreen.value) Notifications.markSeen(app, e.id, e.seq)
+                                    else Notifications.post(app, e)
+                                }
                                 val pid = e.projectId
                                 if (pid != null && e.changesDesign) designRevisions.update { it + (pid to e.seq) }
                                 if (pid != null) { if (e.type == "project.deleted") remove(pid) else reload(pid) }
