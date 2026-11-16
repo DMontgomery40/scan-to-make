@@ -19,11 +19,16 @@ python3 "$app/scripts/materialize-resources.py" "$app/src-tauri/resources" "$app
 "$app/src-tauri/bundle-resources/Payload/node/bin/node" "$app/scripts/check-bundled-runtime.mjs" "$app/src-tauri/bundle-resources"
 PATH="$app/src-tauri/bundle-resources/Payload/node/bin:$PATH" "$app/src-tauri/bundle-resources/Payload/node/bin/npm" --version
 python3 -m unittest discover -s "$app/tests" -p "test_*.py"
+"$app/scripts/check-bundled-python.sh" "$app/src-tauri/bundle-resources"
 cd "$app"
 npm ci
 npm test
 # linuxdeploy scans resource ELFs without Python's wheel-loading context.
 # Make the already bundled private libraries visible during packaging only.
+# The bundled Python's wheels load their own private libraries the same way (#856).
+for wheel_libs in "$app"/src-tauri/bundle-resources/Payload/python/lib/python*/site-packages/*.libs; do
+  [[ ! -d "$wheel_libs" ]] || export LD_LIBRARY_PATH="$wheel_libs${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+done
 reconstruction="$app/src-tauri/bundle-resources/Payload/reconstruction"
 if [[ -d "$reconstruction" ]]; then
   library_paths="$reconstruction/lib:$reconstruction/colmap-root/usr/lib/x86_64-linux-gnu:$reconstruction/python/lib"

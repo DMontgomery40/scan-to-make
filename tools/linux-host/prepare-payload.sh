@@ -4,6 +4,7 @@
 #   OUT_DIR/BUILD-ID                 commit and runtime identity (setup installs one copy per id)
 #   OUT_DIR/host/counterpart-host    setup, user service and credential-resolving model worker
 #   OUT_DIR/Payload/node/            official Node 24 (npm kept: Download/Update installs printer MCPs)
+#   OUT_DIR/Payload/python/          pinned CPython 3.12 with Pillow and usd-core (#856): the scan converter's Python
 #   OUT_DIR/Payload/source/          compiled companion, shared contracts and starters
 #   OUT_DIR/SYMLINKS                 relative links a package must preserve (checked by the helper)
 #
@@ -54,7 +55,12 @@ tar -xf "$work/source.tar" -C "$payload/source" "${source_paths[@]}"
 
 # The helper from the same committed snapshot, with its locked dependencies.
 mkdir -p "$work/host-src"
-tar -xf "$work/source.tar" -C "$work/host-src" tools/linux-host packages/contracts/fixtures
+tar -xf "$work/source.tar" -C "$work/host-src" tools/linux-host packages/contracts/fixtures apps/mac/distribution.json apps/mac/Licenses
+
+# The converter's Python (#856), pinned in distribution.json's linux side and audited by check-python.py.
+python3 "$work/host-src/tools/linux-host/prepare-python.py" "$work/host-src/apps/mac/distribution.json" \
+  "$work/host-src/apps/mac/Licenses" "$payload/python" "$work"
+python_version=$("$payload/python/bin/python3" -I -c 'import platform; print(platform.python_version())')
 CARGO_TARGET_DIR="$work/cargo-target" cargo build --release --locked --manifest-path "$work/host-src/tools/linux-host/Cargo.toml"
 install -m 0755 "$work/cargo-target/release/counterpart-host" "$stage/host/counterpart-host"
 
@@ -89,7 +95,7 @@ if [ -n "${RECONSTRUCTION_PAYLOAD:-}" ]; then
   reconstruction_identity=$(sha256sum "$payload/reconstruction/manifest.json" | cut -c1-12)
 fi
 
-printf 'g%s-node%s-%s-r%s\n' "${commit:0:12}" "$node_version" "$node_arch" "$reconstruction_identity" > "$stage/BUILD-ID"
+printf 'g%s-node%s-py%s-%s-r%s\n' "${commit:0:12}" "$node_version" "$python_version" "$node_arch" "$reconstruction_identity" > "$stage/BUILD-ID"
 chmod -R go-w "$stage"
 # These links must survive packaging: the workspace packages and npm (Settings → Printers → Download/Update).
 find "$stage" -type l -not -path '*/node_modules/.bin/*' -printf '%P -> %l\n' | sort > "$stage/SYMLINKS"

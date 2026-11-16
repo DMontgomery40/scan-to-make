@@ -16,6 +16,8 @@ for root in "$work/deb/usr/lib/Counterpart" "$work/appimage/squashfs-root/usr/li
   "$root/Payload/node/bin/node" "$app/scripts/check-bundled-runtime.mjs" "$root"
   PATH="$root/Payload/node/bin:$PATH" "$root/Payload/node/bin/npm" --version
   PATH="$root/Payload/node/bin:$PATH" "$root/Payload/node/bin/npx" --version
+  # #856: the package's own Python converts a scan over 32 MiB, with no system Python or user pip packages.
+  "$app/scripts/check-bundled-python.sh" "$root"
   if [[ -d "$root/Payload/reconstruction" ]]; then
     reconstruction="$root/Payload/reconstruction"
     python3 - "$reconstruction" <<'PY'
