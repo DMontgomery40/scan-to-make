@@ -1,6 +1,6 @@
 // Stands in for `claude -p ... --output-format stream-json` in the touch-up runner tests.
 // Usage: node fake-claude.mjs <scenario>; cwd is the pass folder.
-import {mkdirSync, writeFileSync, copyFileSync} from 'node:fs';
+import {mkdirSync, writeFileSync, copyFileSync, symlinkSync} from 'node:fs';
 import {spawn} from 'node:child_process';
 import {crc32 as zlibCrc32, deflateRawSync} from 'node:zlib';
 const scenario = process.argv[2];
@@ -71,6 +71,12 @@ switch (scenario) {
   case 'multicolourbroken':
     toolUse('mcp__printer__counterpart_make_3mf');
     writeFileSync('out/touched.stl', stl); writeFileSync('out/touched.3mf', Buffer.from('PK\x03\x04 truncated archive'));
+    result({status: 'done', summary: 'Two colours.', parts: [{name: 'body', colour: '#111111'}]});
+    break;
+  // #870 review: a touched.3mf that is a link is never followed (a runaway or planted file can't be read past its limit).
+  case 'multicolourlink':
+    toolUse('mcp__printer__counterpart_make_3mf');
+    writeFileSync('out/touched.stl', stl); writeFileSync('out/elsewhere.3mf', threeMf); symlinkSync('elsewhere.3mf', 'out/touched.3mf');
     result({status: 'done', summary: 'Two colours.', parts: [{name: 'body', colour: '#111111'}]});
     break;
   case 'multicolourjunk':

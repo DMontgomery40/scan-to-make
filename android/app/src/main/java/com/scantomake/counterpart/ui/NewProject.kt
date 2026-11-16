@@ -115,7 +115,7 @@ fun NewProjectScreen(job: String?, close: () -> Unit, started: (String) -> Unit,
         uris.take(24 - photos.size).forEach { uri -> Media.keep(context, uri)?.let(photos::add) }
     }
 
-    fun chosenKind(): String? = scanUse?.takeIf { it != "later" } ?: job
+    fun chosenKind(): String? = com.scantomake.counterpart.api.chosenNewKind(scanUse, job)
     fun kind(): String? = chosenKind()
 
     /** For a fit made from a scan: how its exact size is settled, sent as fields beside the request. The computer

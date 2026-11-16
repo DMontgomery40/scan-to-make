@@ -614,7 +614,10 @@ struct NewObjectView: View {
 
     /// `fit` or `copy`, only once it is known: a starting card, or the answer after a scan. A scan by
     /// itself no longer means copy. Nil lets the Mac infer a text-only request.
-    private var chosenKind: String? {
+    private var chosenKind: String? { Self.kindToSend(job: job, scanUse: scanUse) }
+    /// #867: a kind goes only with the person's own choice (a starting card on the empty Home, or the answer about a
+    /// scan); otherwise none, and the Mac decides from the words and files. "Scan later" chooses nothing.
+    static func kindToSend(job: NewProjectJob?, scanUse: ScanUse?) -> String? {
         if let scanUse { return scanUse == .later ? nil : scanUse.rawValue }
         return job?.rawValue
     }

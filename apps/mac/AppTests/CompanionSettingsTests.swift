@@ -74,8 +74,24 @@ final class CompanionSettingsTests: XCTestCase {
     func testGeneralSnapshotKeepsPendingRegistrationAndLeavesUnknownStatusUnowned() {
         XCTAssertEqual(SettingsMigration.currentGeneral(loginStatus: .requiresApproval, showInDock: false, keepAwake: true)["openAtLogin"], true)
         XCTAssertEqual(SettingsMigration.currentGeneral(loginStatus: .enabled, showInDock: false, keepAwake: true)["openAtLogin"], true)
-        XCTAssertEqual(SettingsMigration.currentGeneral(loginStatus: .notRegistered, showInDock: false, keepAwake: true)["openAtLogin"], false)
         XCTAssertNil(SettingsMigration.currentGeneral(loginStatus: .notFound, showInDock: false, keepAwake: true)["openAtLogin"])
+    }
+
+    /// #829: a fresh install showed Open at login off. A login item that isn't registered yet is the default (on) unless the
+    /// person turned it off here; carrying "off" up made one failed or late `register()` permanent.
+    func testUnregisteredLoginItemGoesUpOffOnlyWhenThePersonTurnedItOff() throws {
+        XCTAssertEqual(SettingsMigration.currentGeneral(loginStatus: .notRegistered, showInDock: true, keepAwake: true)["openAtLogin"], true)
+        XCTAssertEqual(SettingsMigration.currentGeneral(loginStatus: .notRegistered, turnedOff: true, showInDock: true, keepAwake: true)["openAtLogin"], false)
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "settings-fresh-login-\(UUID().uuidString)"))
+        let fresh = CompanionSettings(general: .init(autoUpdateMcps: true)) // the companion's own default keeps no openAtLogin
+        let current = SettingsMigration.currentGeneral(loginStatus: .notRegistered, turnedOff: defaults.bool(forKey: "openAtLoginOff"), showInDock: true, keepAwake: true)
+        guard case .object(let general)? = SettingsMigration.patch(defaults: defaults, companion: fresh, currentGeneral: current)["general"] else { return XCTFail("general goes up") }
+        XCTAssertEqual(general["openAtLogin"], .bool(true))
+        XCTAssertEqual(LoginRegistrationAction.resolve(on: true, status: .notRegistered), .register, "applying it registers the login item")
+        XCTAssertTrue(LoginRegistrationAction.shownOn(.requiresApproval), "registered, waiting for approval: shown on, with the approval line")
+        XCTAssertEqual(LoginRegistrationAction.line(.requiresApproval), "Allow Counterpart in System Settings → General → Login Items.")
+        XCTAssertFalse(LoginRegistrationAction.shownOn(.notRegistered))
+        XCTAssertNil(LoginRegistrationAction.line(.enabled))
     }
 
     func testPendingLoginApprovalPreservesTheSavedRequestWithoutOverridingAnOptOut() throws {

@@ -33,8 +33,11 @@ resource_dir()/
   BUILD-ID
   host/counterpart-host
   Payload/node/
+  Payload/python/
   Payload/source/
 ```
+
+`Payload/python/` (#856) is the converter's Python: the same pinned CPython 3.12, Pillow and usd-core releases as the Mac's, as Linux x86_64 builds, from `apps/mac/distribution.json`'s `linux` side (`tools/linux-host/prepare-python.py`; audited by `check-python.py`). The helper points `SCAN_TO_MAKE_CAPTURE_PYTHON` at its `bin/python3`, so a scan reaches the code engine without `pip install`. `scripts/check-bundled-python.sh` converts a USDZ over 32 MiB geometry-only through it with an empty environment; `bundle.sh` and `verify-packages.sh` run it on the resources and on both unpacked packages. usd-core 26.8 has no aarch64 Linux wheel, so the payload refuses aarch64.
 
 Before Tauri packaging, `materialize-resources.py` resolves **all** internal directory links, recursively including npm `file:` dependencies. Executable symlinks become relocatable launchers, preserving npm/npx package-relative imports. The bundle is checked by importing every internal package export and the LAN-address module with its own Node runtime; this is engineering evidence only.
 

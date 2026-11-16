@@ -15,7 +15,9 @@ struct NewProjectPane: View {
     @ObservedObject private var opened = OpenedFiles.shared
     @State private var request = ""
     @State private var files: [URL]
-    @State private var kind = "fit"
+    /// The kind the person chose, or nil: then none is sent and the companion decides from the words and files (#867:
+    /// "A replica of this DAD desk thing" ran as a fit because the picker's default went with it).
+    @State private var kind: String?
     @State private var targeted = false
     @State private var starting = false
     @State private var problem: String?
@@ -34,7 +36,6 @@ struct NewProjectPane: View {
         _seed = State(initialValue: draft.seed)
         _files = State(initialValue: draft.files)
         _refusal = State(initialValue: ObjectsModel.refusal(for: draft.refused))
-        _kind = State(initialValue: ObjectsModel.draftKind(for: draft.files))
     }
 
     private var available: Bool { model.capabilities?.objectsCreate == true }
@@ -51,16 +52,18 @@ struct NewProjectPane: View {
                         seeded(seed)
                     } else {
                         Picker("", selection: $kind) {
-                            Text("Make something that fits").tag("fit")
-                            Text("Copy something").tag("copy")
+                            Text("Make something that fits").tag(Optional("fit"))
+                            Text("Copy something").tag(Optional("copy"))
                         }
+                        .accessibilityIdentifier("new-project-kind")
                         .pickerStyle(.segmented).labelsHidden().frame(width: 380)
                         dropZone
                         if files.isEmpty { existingScans }
                     }
                     VStack(alignment: .leading, spacing: 8) {
                         Text("What do you need?").font(.headline)
-                        TextField(kind == "fit" ? "A hook for my stroller handle…" : "Copy this, and close up the bottom…", text: $request, axis: .vertical)
+                        TextField(kind == "fit" ? "A hook for my stroller handle…" : kind == "copy" ? "Copy this, and close up the bottom…"
+                                  : "A hook for my stroller handle, or a copy of this…", text: $request, axis: .vertical)
                             .textFieldStyle(.plain).lineLimit(3...5)
                             .padding(14).glassEffect(.regular.interactive(), in: .rect(cornerRadius: 16))
                     }
@@ -247,7 +250,6 @@ struct NewProjectPane: View {
         refusal = ObjectsModel.refusal(for: urls)
         let usable = ObjectsModel.usable(urls, besides: files)
         files += usable
-        if ObjectsModel.draftKind(for: usable) == "copy" { kind = "copy" }
         return !usable.isEmpty
     }
 

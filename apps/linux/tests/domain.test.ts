@@ -8,7 +8,7 @@ import { ProjectPage } from "../src/ProjectView";
 import { NEWEST_WAITS, earlierOnStage, designAnswer, designHistory, designThumbnail, inheritedConversation, sealedLine, showingDesign, twoTruthsLine, viewingLine } from "../src/designs";
 import {
   MAKE_FROM_SCAN, FIT_CHOICE, COPY_CHOICE, USE_EXISTING_SCAN, canMakeFromScan, scanLineage, scansToReuse, scannedLine,
-  FIT_SIZE_SOURCES, fitSizeDetail, fitMissing, makeFromScanParams, newFitChoice,
+  FIT_SIZE_SOURCES, fitSizeDetail, fitMissing, makeFromScanParams, newFitChoice, newProjectParams,
   pageActions,
   projectPage,
   codeEngineRow,
@@ -1540,4 +1540,12 @@ test("a question beside an empty stage is in the inspector, never under the stag
   const question = html.indexOf('data-testid="ask-wait"');
   assert.ok(inspector > 0 && question > inspector, "the question is in the inspector");
   assert.ok(html.indexOf('class="project-main"') < inspector, "the stage's column ends before the inspector starts");
+});
+
+test("New project sends a kind only when the person chose one (#867)", () => {
+  // "A replica of …" with nothing chosen: no kind, so the companion reads the words and makes a copy.
+  assert.deepEqual(newProjectParams("A replica of this desk thing", undefined, ""), { instructions: "A replica of this desk thing" });
+  assert.deepEqual(newProjectParams("A belt case", "fit", ""), { instructions: "A belt case", kind: "fit" });
+  assert.deepEqual(newProjectParams("", "copy", "https://ignored.example"), { instructions: "", kind: "copy" });
+  assert.deepEqual(newProjectParams("", "published", "https://makerworld.com/x"), { instructions: "", kind: "published", url: "https://makerworld.com/x" });
 });

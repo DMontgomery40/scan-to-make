@@ -882,6 +882,8 @@ mod tests {
 mod filesystem_tests {
     use super::*;
     #[test]
+    // The Linux app's own test; on macOS (a conductor's local run) it fails for a reason the app never meets (#818).
+    #[cfg_attr(target_os = "macos", ignore = "Linux-only behaviour (#818)")]
     fn rejects_symlinks_escaping_project() {
         let dir = std::env::temp_dir().join(uuid::Uuid::new_v4().to_string());
         std::fs::create_dir(&dir).unwrap();

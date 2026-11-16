@@ -73,6 +73,25 @@ test('a touched.3mf that is not a printable 3MF never becomes the model, and the
   assert.ok(!said[0].text.includes(pass.dir), 'no paths of this computer');
 });
 
+test('a touched.3mf that is a link is not followed, and the pass says why instead of dropping it silently', async t => {
+  const {pass, inv} = await setup('multicolourlink');
+  t.mock.method(console, 'error', () => {});
+  const progress = [];
+  const result = await runTouchupWorker(inv, pass, {onProgress: p => progress.push(p)});
+  assert.equal(result.parts, undefined);
+  assert.equal(result.model, join(pass.outDir, 'touched.stl'));
+  const said = progress.flatMap(p => p.activity ?? []).filter(entry => entry.kind === 'message' && /couldn’t keep/.test(entry.text));
+  assert.deepEqual(said.map(entry => entry.text), ['Counterpart couldn’t keep the multi-part file this pass made, so it prints as one piece in one colour. It isn’t a regular file of at most 64 MiB.']);
+});
+
+test('a one-colour pass that made no 3MF says nothing about one', async () => {
+  const {pass, inv} = await setup('done');
+  const progress = [];
+  const result = await runTouchupWorker(inv, pass, {onProgress: p => progress.push(p)});
+  assert.equal(result.parts, undefined);
+  assert.ok(!progress.some(p => p.activity?.some(entry => /couldn’t keep/.test(entry.text))));
+});
+
 test('part colours the worker garbles lose the garbled field but keep their filament’s place', async () => {
   const {pass, inv} = await setup('multicolourjunk');
   const result = await runTouchupWorker(inv, pass);

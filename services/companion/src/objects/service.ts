@@ -73,6 +73,8 @@ function completionCheckReason(message: string): string {
 }
 
 const STAGE_DEFAULTS = (kind: PassKind) => ({...STAGE_DEFAULT_SEC[kind]});
+/** A design pass that made a model or worked until a limit: its working time is how long a design takes (#859). */
+const designed = (result: TouchupResult) => result.status === 'done' || result.status === 'unchanged' || result.status === 'capped';
 
 /** Copies an Ask's picture as JPEG: PNG through macOS's sips; where there is no sips, the bytes as they are. */
 async function askPicture(source: string, target: string): Promise<void> {
@@ -2979,8 +2981,12 @@ export class ObjectService {
     const controller = new AbortController();
     this.#controllers.set(object.id, controller);
     let writing = Promise.resolve();
-    /** Moves the pass to its next stage: closes the current one, records its real time, re-estimates, announces it. */
-    const stage = (id: StageId, nextEngine: DesignEngine = engine) => {
+    /**
+     * Moves the pass to its next stage: closes the current one, records its real time, re-estimates, announces it.
+     * `record: false` closes it unrecorded: a design stage that ended in a question or a failure says nothing about how
+     * long a design takes (#859: seven of fifteen code-engine samples were 3–66 s questions, and the estimate read 4 min).
+     */
+    const stage = (id: StageId, nextEngine: DesignEngine = engine, record = true) => {
       writing = writing.then(async () => {
         const now = Date.now();
         if (nextEngine !== engine) { engine = nextEngine; typical = await this.#typical(kind, engine); }
@@ -2997,7 +3003,7 @@ export class ObjectService {
           return;
         }
         // A locate pass's time says nothing about how long a design takes: it never feeds the estimates.
-        if (previous && previous.endedAtMs === undefined && !opts.locate) void this.#deps.passTimings?.record(kind, engine, previous.id, (now - previous.startedAtMs) / 1000).catch(() => undefined);
+        if (previous && previous.endedAtMs === undefined && !opts.locate && record) void this.#deps.passTimings?.record(kind, engine, previous.id, (now - previous.startedAtMs) / 1000).catch(() => undefined);
         const next: PassStage = {id, words: passWords(id, engine, kind), startedAtMs: now, typicalSec: typical[id]};
         const stages = [...(latest?.stages ?? []).map(item => item.endedAtMs === undefined ? {...item, endedAtMs: now} : item), next];
         const estimate = passEstimate(stages, plan, typical, now);
@@ -3063,8 +3069,9 @@ export class ObjectService {
         ...(fromCurrent && !opts.locate && object.current?.design ? designInput(dir, object.current.engine, object.current.design) : {}),
         ...(workerRequest(object) ? {instructions: workerRequest(object)!} : {}),
         ...(opts.note !== undefined ? {note: opts.note, ...(object.current?.summary ? {summary: object.current.summary} : {})} : {})};
-      try { return await this.#deps.runTouchup({...input, signal: controller.signal, onProgress}); }
-      finally { stage('saving'); await writing; }
+      let result: TouchupResult | undefined;
+      try { return result = await this.#deps.runTouchup({...input, signal: controller.signal, onProgress}); }
+      finally { stage('saving', engine, result !== undefined && designed(result)); await writing; }
     })()
       .then(result => opts.locate ? this.#finishLocate(object.id, startedAtMs, result, stateBefore) : this.#finish(object.id, startedAtMs, result, kind))
       .catch(error => opts.locate ? this.#finishLocate(object.id, startedAtMs, {error}, stateBefore)
@@ -3649,10 +3656,11 @@ export class ObjectService {
     if (!pass?.stages?.length || pass.endedAtMs !== undefined) return object;
     const kind: PassKind = passKind(object);
     const typical = {...await this.#typical(kind, pass.engine ?? 'blender')};
+    const history = await this.#deps.passTimings?.samples?.(kind, pass.engine ?? 'blender').catch(() => undefined);
     for (const stage of pass.stages) typical[stage.id] = stage.typicalSec;
     const plan = passPlan(pass.stages.some(stage => stage.id === 'building'),
       pass.stages.some(stage => stage.id === 'preparing' || stage.id === 'working') || this.#touchupAsked(object, pass.note, kind));
-    const estimate = passEstimate(pass.stages, plan, typical, Date.now());
+    const estimate = passEstimate(pass.stages, plan, typical, Date.now(), history);
     return {...object, passes: [...object.passes.slice(0, -1), {...pass, estimate}]};
   }
 
