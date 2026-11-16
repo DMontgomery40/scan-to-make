@@ -45,6 +45,16 @@ public struct ProjectGallery: Equatable, Sendable {
         case picture(String)
         /// The part (a project path) with the scanned object (a project path) in each seat.
         case assembly(part: String, object: String, seats: [Project.Seat])
+        /// #691: a multi-part design drawn part by part, each mesh (a project path, all in one frame) in its own colour.
+        case parts([DrawnPart])
+    }
+
+    /// One mesh of a design drawn part by part, and the colour it is drawn in: its filament's (`spool`), or `neutral`
+    /// when neither the MCP nor the pass gave it one. The stage floors a dark colour (`StageMaterial`).
+    public struct DrawnPart: Equatable, Sendable {
+        public var mesh: String
+        public var colour: Colour
+        public init(mesh: String, colour: Colour) { self.mesh = mesh; self.colour = colour }
     }
 
     public enum Colour: Equatable, Sendable {
@@ -99,6 +109,11 @@ public struct ProjectGallery: Equatable, Sendable {
             case .together, .plate: break
             }
         }
+        // #691, #845: a design drawn part by part opens AR too, written from its parts in their colours. `ar` names the
+        // first part's mesh; the AR file holds them all.
+        for index in entries.indices where entries[index].kind == .part || entries[index].kind == .plate {
+            if case .parts(let drawn) = entries[index].drawing, let first = drawn.first { entries[index].ar = first.mesh }
+        }
         self.entries = entries
     }
 }
@@ -124,14 +139,20 @@ extension Project {
     /// picture is its still (#769). A designer's published 3MF has no merged mesh: its picture stands for it.
     public var printableParts: [PrintablePart] {
         if let plates, plates.count > 1 {
-            // Every plate the file has is an entry; one whose picture the MCP didn't send shows the placeholder ("").
+            // Every plate the file has is an entry; one whose picture the MCP didn't send shows the placeholder (""). With
+            // the file's parts meshed (#691), a plate turns in 3D, its own parts in their colours.
             return plates.enumerated().map { index, plate in
-                PrintablePart(id: "plate-\(plate.id)", label: plate.name.isEmpty ? "Plate \(index + 1)" : plate.name,
-                              drawing: .picture(plate.thumbnail ?? ""), colour: .own, isPlate: true)
+                let drawn = drawnParts(plate: index)
+                return PrintablePart(id: "plate-\(plate.id)", label: plate.name.isEmpty ? "Plate \(index + 1)" : plate.name,
+                                     drawing: drawn.isEmpty ? .picture(plate.thumbnail ?? "") : .parts(drawn), colour: .own, isPlate: true)
             }
         }
         guard let current else { return [] }
         let label = usesCopyWorkflow ? "Your copy" : kind == "published" ? "Model" : "Your part"
+        // #691: a multi-part design whose parts the MCP meshed turns part by part, each in its own colour. A designer's kit
+        // shows the plate it prints (`publishedSelection`).
+        let drawn = drawnParts(plate: kind == "published" ? publishedSelection?.plateIndex : nil)
+        if !drawn.isEmpty { return [PrintablePart(id: "result", label: label, drawing: .parts(drawn), colour: .own, sizeMm: current.sizeMm)] }
         guard let mesh = partMesh else {
             // A designer's 3MF: its parts and colours are in the file, which only the printer MCP reads, and no merged mesh
             // is written beside it. A picture stands for it, the Mac's drawing of all its objects first (Nov 10: a 3MF with
@@ -143,6 +164,14 @@ extension Project {
         // Several parts are several colours: neutral, never one spool's, until the MCPs report each part's (#645).
         let colour: ProjectGallery.Colour = preservesPublishedFilaments ? .neutral : spoolColour.map { .spool($0) } ?? .neutral
         return [PrintablePart(id: "result", label: label, drawing: .model(mesh), colour: colour, sizeMm: current.sizeMm)]
+    }
+
+    /// #691: the design's parts to draw, in order, each in its colour (`neutral` without one). Only `plate`'s parts when a
+    /// plate is given; a part with no plate is on every plate. Empty without parts (an MCP without `counterpart_part_meshes`).
+    public func drawnParts(plate: Int? = nil) -> [ProjectGallery.DrawnPart] {
+        (current?.parts ?? []).filter { plate == nil || $0.plate == nil || $0.plate == plate }.map { part in
+            .init(mesh: part.mesh, colour: part.colour.flatMap(Self.hex).map { .spool($0) } ?? .neutral)
+        }
     }
 
     /// The mesh the part's stage turns and its AR is written from, as a project path the Mac serves (#769):
@@ -265,7 +294,8 @@ extension Project {
     public func picture(for entry: ProjectGallery.Entry) -> String? {
         let path: String? = switch entry.kind {
         case .part: if case .picture(let path) = entry.drawing { path } else { pictures?["part"] ?? current?.renders.first.map(Self.renderPath) }
-        case .plate: if case .picture(let path) = entry.drawing { path } else { nil }
+        // A plate drawn from its parts (#691) keeps the file's picture of it until the parts are drawn.
+        case .plate: if case .picture(let path) = entry.drawing { path } else { plates?.first { "plate-\($0.id)" == entry.id }?.thumbnail }
         case .together: pictures?["together"]
         case .scan: pictures?["scan"] ?? pictures?["photo"]
         }
