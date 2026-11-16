@@ -1506,12 +1506,10 @@ test("a multi-part design is drawn part by part, each in its own colour, from th
     const entry = gallery(p).find((e) => e.kind === "part")!;
     if ("parts" in entry.drawing) return entry.drawing.parts;
     assert.ok("model" in entry.drawing, `${entry.id} turns`);
-    // `model.stl` is the companion's name for the current STL model (project-gallery.json); this fixture names the file.
-    return [{ mesh: filePath(p, entry.drawing.model), colour: entry.colour }];
+    return [{ mesh: entry.drawing.model, colour: entry.colour }];
   };
   for (const c of fixture.cases) {
     const p = { ...project, id: "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a99", state: "ready", ...c.object, passes: [] } as Project;
-    if (p.current) p.current = { ...p.current, renders: p.current.renders ?? [] };
     assert.deepEqual(drawn(p), c.draw, c.name);
     for (const [id, draw] of Object.entries(c.drawVersion ?? {})) assert.deepEqual(drawn(showingDesign(p, id)), draw, `${c.name}, design ${id}`);
   }
@@ -1522,7 +1520,6 @@ test("a multi-part design is drawn part by part, each in its own colour, from th
 test("a multi-part design's page offers Explore in 3D with other projects present", () => {
   const fixture = JSON.parse(readFileSync(new URL("../../../packages/contracts/fixtures/project-parts.json", import.meta.url), "utf8")) as { cases: { object: Partial<Project> }[] };
   const withParts = { ...project, id: "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a98", state: "ready", title: "Desk sign", ...fixture.cases[0]!.object, passes: [] } as Project;
-  withParts.current = { ...withParts.current!, renders: withParts.current!.renders ?? [] };
   const html = pageOf(withParts, undefined, [project, withParts]);
   assert.doesNotMatch(buttonTag(html, "Explore in 3D"), /disabled/);
   // The same design without parts, before the computer lists its merged mesh: nothing to turn, as before.

@@ -75,21 +75,15 @@ class ProjectGalleryTests {
             val entry = ProjectGallery.of(p).entries.first { it.kind == ProjectGallery.Kind.Part }
             return when (val d = entry.drawing) {
                 is ProjectGallery.Drawing.Parts -> d.parts.map { it.mesh to word(it.colour) }
-                // `model.stl` is the companion's name for the current STL model (project-gallery.json); the parts
-                // fixture names the file itself.
-                is ProjectGallery.Drawing.Model -> listOf((if (d.path == "model.stl") p.current!!.model else d.path) to word(entry.colour))
+                is ProjectGallery.Drawing.Model -> listOf(d.path to word(entry.colour))
                 else -> error("${entry.drawing} is not turned")
             }
         }
         fun want(e: JsonElement) = e.jsonArray.map { it.jsonObject["mesh"]!!.jsonPrimitive.content to it.jsonObject["colour"]!!.jsonPrimitive.content }
         for (item in cases) {
             val name = item["name"]!!.jsonPrimitive.content
-            // Every sealed design the companion writes carries when it was sealed and its model's hash; the shared case
-            // leaves out what it doesn't test, so they are filled in here.
-            val obj = item["object"]!!.jsonObject.let { o -> o["versions"]?.let { v -> JsonObject(o + ("versions" to JsonArray(v.jsonArray.map { version ->
-                JsonObject(mapOf("sealedAtMs" to JsonPrimitive(1), "modelSha256" to JsonPrimitive("0".repeat(64))) + version.jsonObject) }))) } ?: o }
             val record = JsonObject(mapOf("id" to JsonPrimitive("6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a99"), "createdAtMs" to JsonPrimitive(1),
-                "updatedAtMs" to JsonPrimitive(2), "state" to JsonPrimitive("ready")) + obj)
+                "updatedAtMs" to JsonPrimitive(2), "state" to JsonPrimitive("ready")) + item["object"]!!.jsonObject)
             val project = Project.decode(record)!!
             assertEquals(name, want(item["draw"]!!), drawn(project))
             item["drawVersion"]?.jsonObject?.forEach { (id, draw) -> assertEquals("$name, design $id", want(draw), drawn(project.showingDesign(id))) }
