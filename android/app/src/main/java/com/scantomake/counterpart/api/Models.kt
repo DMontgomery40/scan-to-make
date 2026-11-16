@@ -141,15 +141,20 @@ data class Project(
                                     @SerialName("parts") val partsRaw: JsonElement? = null) {
         /**
          * #691: the parts the printer MCP meshed (`counterpart_part_meshes`, packages/contracts/fixtures/project-parts.json):
-         * each mesh a project path in the 3MF's build frame, so all of them line up drawn together. An entry without a mesh
-         * path is left out; an unreadable list is none, and the stage turns the merged mesh as before.
+         * each mesh a project path in the 3MF's build frame, so all of them line up drawn together. All or nothing (review
+         * of #869, P2-4): one unreadable entry (no safe mesh path, a plate that isn't a number) makes the whole list none
+         * and the stage turns the merged mesh as before, never a design with a part silently missing.
          */
-        val parts: List<Part> get() = (partsRaw as? kotlinx.serialization.json.JsonArray)?.mapNotNull { item ->
-            val o = item as? JsonObject ?: return@mapNotNull null
-            fun text(key: String) = (o[key] as? JsonPrimitive)?.takeIf { it.isString }?.content
-            val mesh = text("mesh")?.takeIf { it.isNotEmpty() && !it.startsWith("/") && ".." !in it.split("/") } ?: return@mapNotNull null
-            Part(text("id") ?: mesh, text("name"), text("colour"), (o["plate"] as? JsonPrimitive)?.content?.toIntOrNull(), mesh)
-        }.orEmpty()
+        val parts: List<Part> get() {
+            val list = partsRaw as? kotlinx.serialization.json.JsonArray ?: return emptyList()
+            return list.map { item ->
+                val o = item as? JsonObject ?: return emptyList()
+                fun text(key: String) = (o[key] as? JsonPrimitive)?.takeIf { it.isString }?.content
+                val mesh = text("mesh")?.takeIf { it.isNotEmpty() && !it.startsWith("/") && ".." !in it.split("/") } ?: return emptyList()
+                val plate = o["plate"]?.let { (it as? JsonPrimitive)?.takeIf { p -> !p.isString }?.content?.toIntOrNull() ?: return emptyList() }
+                Part(text("id") ?: mesh, text("name"), text("colour"), plate, mesh)
+            }
+        }
     }
     /** One part of a multi-part design (#691): `plate` is 0-based, absent for a plain 3MF (on every plate). */
     data class Part(val id: String, val name: String?, val colour: String?, val plate: Int?, val mesh: String)
