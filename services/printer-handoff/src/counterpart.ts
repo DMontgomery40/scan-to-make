@@ -36,6 +36,12 @@ export const counterpartPrinterInfoSchema = z.object({
     slicing: z.object({supports: z.boolean(), copies: z.boolean(), orient: z.boolean()}).optional(),
     /** `counterpart_diagnostics` is there: the MCP hands over its own redacted bundle for Export Diagnostics (#799). */
     diagnostics: z.boolean().optional().catch(undefined),
+    /**
+     * #691, #858: `counterpart_part_meshes` is there, and the same release takes each part's colour (`project_3mf()`'s
+     * `add_part(color=…)`, `counterpart_make_3mf` `parts[].color`) and refuses a slice short of loaded filaments with
+     * `needs-more-filaments`. Optional: an older MCP leaves it out.
+     */
+    partMeshes: z.boolean().optional().catch(undefined),
   }),
 });
 export type CounterpartPrinterInfo = z.infer<typeof counterpartPrinterInfoSchema>;
@@ -200,6 +206,23 @@ export async function readPrinterInfo(session: PrinterSession, options: SessionC
   const result = await session.call('counterpart_printer_info', argsFor(session.getTool('counterpart_printer_info'), routeArgs(session.config)), {timeoutMs: 15000, ...options});
   const parsed = counterpartPrinterInfoSchema.safeParse(toolResultJson(result));
   return parsed.success ? parsed.data : undefined;
+}
+
+/**
+ * #858: whether the printer MCP advertises `capabilities.partMeshes` (its release that takes each part's colour), read
+ * through any connected client. False when it has no `counterpart_printer_info`, doesn't answer, or says otherwise.
+ */
+export async function advertisesPartMeshes(client: {hasTool(name: string): boolean; getTool(name: string): Tool;
+  callTool(name: string, args?: Record<string, unknown>, options?: {signal?: AbortSignal; timeoutMs?: number}): Promise<unknown>}, config: PrinterHandoffConfig, signal?: AbortSignal): Promise<boolean> {
+  if (!client.hasTool('counterpart_printer_info')) return false;
+  try {
+    const result = await client.callTool('counterpart_printer_info', argsFor(client.getTool('counterpart_printer_info'), routeArgs(config)), {timeoutMs: 15000, ...(signal ? {signal} : {})});
+    const parsed = counterpartPrinterInfoSchema.safeParse(toolResultJson(result as Parameters<typeof toolResultJson>[0]));
+    return parsed.success && parsed.data.capabilities.partMeshes === true;
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    return false;
+  }
 }
 
 /**

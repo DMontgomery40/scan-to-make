@@ -3,7 +3,7 @@ import {link, lstat, mkdir, readFile, rename, rm, unlink, writeFile} from 'node:
 import {randomUUID} from 'node:crypto';
 import {homedir} from 'node:os';
 import {basename, dirname, join, resolve} from 'node:path';
-import {PrinterMcpClient, type PrinterHandoffConfig} from '@scan-to-make/printer-handoff';
+import {PrinterMcpClient, advertisesPartMeshes, type PrinterHandoffConfig} from '@scan-to-make/printer-handoff';
 import {defaultBlenderLaunch, ensureBlenderMcp, resetBlenderScene, stopOwnedBlender} from './blender.js';
 import {prepareTouchupPass, type TouchupPass} from './inputs.js';
 import {buildTouchupInvocation, type DesignEngine, type DesignGuidance, type ScanFrame, type TouchupInvocation} from './invocation.js';
@@ -159,7 +159,9 @@ export async function printerDesignGuidance(handoff: PrinterHandoffConfig, signa
     const slicing = await client.prompt('fdm_slicing', options);
     // The code engine's own rules (PRD §8.9): how its scripts look, run and are checked are the MCP's to say.
     const cad = client.hasTool('cad_run') ? await client.prompt('cad_design', options) : undefined;
-    return {...(design ? {design} : {}), ...(slicing ? {slicing} : {}), ...(cad ? {cad} : {})};
+    // #858: an MCP that takes each part's colour says so (capabilities.partMeshes); the colour rules then name it.
+    const partColours = await advertisesPartMeshes(client, handoff, signal);
+    return {...(design ? {design} : {}), ...(slicing ? {slicing} : {}), ...(cad ? {cad} : {}), ...(partColours ? {partColours} : {})};
   } catch (error) {
     if (signal?.aborted) throw error;
     return undefined;

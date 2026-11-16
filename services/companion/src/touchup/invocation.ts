@@ -169,14 +169,20 @@ Settle the sizes the part must fit in this order, before modelling anything that
  * made is the engine's: the code engine makes them in the same cad_run as the model (project_3mf, #859 fix 5); the
  * others combine one STL per colour with counterpart_make_3mf. Either way they end as out/touched.3mf.
  */
-const COLOUR_RULES = (code: boolean) => `${RULE_SECTIONS.colours}
+const COLOUR_RULES = (code: boolean, coloured: boolean) => `${RULE_SECTIONS.colours}
 - Make the model in more than one colour when the person asks for colours. A copy is also made as the original is, without being asked: when its photos plainly show it made of more than one material or colour (black letters standing in a wooden base, a red cap on a clear bottle), make it in those colours, one part per colour. Ink stays ink: a printed colour may become a part flush with the surface it is printed on, never raised. When the photos leave it unclear, make it in one colour.
 - Whether and how the person's printer prints several colours is the printer MCP's judgement, not yours: read its fdm_multicolor guidance (its design_guidance tool) and follow it.
 ${code
-    ? "- Make the colour parts in the same cad_run as the model: build() in the run you mark final returns project_3mf(), with one add_part per colour (the first colour on filament 1, and so on), and the parts of one piece share one object= so they print together. That run writes its 3MF beside its STL, and Counterpart keeps it as out/touched.3mf. Never run the design again for each colour, and never combine colour parts with counterpart_make_3mf. The run you mark final is still the whole model."
-    : "- Model each colour as its own body or object, export each one as an STL, and combine them with the printer MCP's counterpart_make_3mf into out/touched.3mf, one part per colour (part 1 on filament 1, and so on). Still export the whole model to out/touched.stl."}
+    ? coloured
+      // #858, the MCP implementer's rule for an MCP that takes each part's colour (capabilities.partMeshes).
+      ? "- When the design has more than one colour, make the colours in the same cad_run as the model: build() in the run you mark final returns project_3mf(), with one add_part per colour body, each with its filament number (the first colour on filament 1, and so on) and its colour from the request or the photos as color=\"#RRGGBB\", named as the person would name it (\"Bar\", \"Letters and inscription\"); the parts of one piece share one object= so they print together. That one run writes the model's STL and its 3MF together, and Counterpart keeps the 3MF as out/touched.3mf. Never run the design again for each colour, and never export one STL per colour for counterpart_make_3mf. The run you mark final is still the whole model."
+      : "- Make the colour parts in the same cad_run as the model: build() in the run you mark final returns project_3mf(), with one add_part per colour (the first colour on filament 1, and so on), and the parts of one piece share one object= so they print together. That run writes its 3MF beside its STL, and Counterpart keeps it as out/touched.3mf. Never run the design again for each colour, and never combine colour parts with counterpart_make_3mf. The run you mark final is still the whole model."
+    : coloured
+      ? "- Model each colour as its own body or object, export each one as an STL, and combine them with the printer MCP's counterpart_make_3mf into out/touched.3mf, one part per colour (part 1 on filament 1, and so on), each named as the person would name it and given its colour from the request or the photos as color: \"#RRGGBB\". Still export the whole model to out/touched.stl."
+      : "- Model each colour as its own body or object, export each one as an STL, and combine them with the printer MCP's counterpart_make_3mf into out/touched.3mf, one part per colour (part 1 on filament 1, and so on). Still export the whole model to out/touched.stl."}${coloured ? `
+- Slice the 3MF once with slice_stl. If the slice refuses with needs-more-filaments, say its slicer_report.message in your summary, as it is, and offer the one-colour print.` : ''}
 - Order the parts as the request names their colours, or for a copy from the largest part to the smallest. Build them lying the way the object should print: a 3MF keeps its placement exactly as made (Counterpart never re-orients a 3MF), so the orientation you model is the orientation that prints, supports included.
-- Report every part under "parts" in your answer, in that same order, with its name and its colour as #RRGGBB (the one the person asked for, or the original's from the photos), and its material only when the person named one: the 3MF itself carries no colours, so this list is how Counterpart knows which spool each part belongs on.
+- Report every part under "parts" in your answer, in that same order, with its name and its colour as #RRGGBB (the one the person asked for, or the original's from the photos), and its material only when the person named one: this list is how Counterpart knows which spool each part belongs on.
 - Say it plainly in the summary's first sentence, naming colours, not materials you can't confirm, for example: "Made as the original is: black letters in a wood-colour base. Prints as one piece in two colours."
 - Counterpart prints the 3MF and puts each part on a spool; never tell the person how to slice, which filament slot to use or which layer height to pick.`;
 
@@ -327,7 +333,15 @@ export const BLENDER_RULES = `${ON_ENGINE.blender}\n` + "- Reach Blender only th
  * The printer MCP's own guidance for a pass: how to design for its printers (`fdm_design`) and how its slicer
  * orients, supports and checks a slice (`fdm_slicing`). The app holds no slicer knowledge (PRD §8.0 item 10).
  */
-export interface DesignGuidance {design?: string; slicing?: string; cad?: string}
+export interface DesignGuidance {
+  design?: string; slicing?: string; cad?: string;
+  /**
+   * #858: the printer MCP advertises `capabilities.partMeshes`, the release that takes each part's colour (`project_3mf()`
+   * `add_part(color=…)`, `counterpart_make_3mf` `parts[].color`) and refuses a slice short of filaments with
+   * `needs-more-filaments`. Without it the colour rules name neither.
+   */
+  partColours?: boolean;
+}
 
 /** What decides a pass's rules: the inputs `buildTouchupInvocation` already has. */
 export interface PassRules {
@@ -366,7 +380,7 @@ export function systemRules(pass: PassRules, guidance: DesignGuidance = {}): str
   const text: Record<keyof typeof RULE_SECTIONS, () => string> = {
     newDesign: () => NEW_DESIGN_RULES(engineName), captured: () => CAPTURED_RULES(code ? '' : " Use Blender's existing sculpt, modelling and modifier tools for that cleanup."),
     fitSizes: () => FIT_SIZE_RULES(code ? CODE_FIT_CHECK : ''),
-    colours: () => COLOUR_RULES(code), designerCopy: () => DESIGNER_COPY_RULES, namedModel: () => NAMED_MODEL_RULES,
+    colours: () => COLOUR_RULES(code, guidance.partColours === true), designerCopy: () => DESIGNER_COPY_RULES, namedModel: () => NAMED_MODEL_RULES,
     seats: () => SEAT_RULES(code),
   };
   if (pass.locate) return [code ? CODE_LOCATE_CORE : BLENDER_RULES, LOCATE_RULES(code)].join('\n\n')
