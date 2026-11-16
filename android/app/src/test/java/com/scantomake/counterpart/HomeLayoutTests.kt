@@ -225,11 +225,12 @@ class HomeLayoutTests {
         compose.setContent { WithApp { com.scantomake.counterpart.ui.ProjectScreen(id, back = {}, print = {}, printing = {}, scan = {}) } }
         compose.onNode(hasTestTag("gallery-stage-parts")).assertExists()
         compose.onNode(hasContentDescription("Your copy in 2 parts, each in its own colour")).assertExists()
-        compose.waitUntil(5_000) { fake.paths.any { "/current/parts/part-2.stl" in it } }
-        compose.waitForIdle()
+        val notAvailable = hasTestTag("gallery-stage-parts") and androidx.compose.ui.test.SemanticsMatcher.expectValue(androidx.compose.ui.semantics.SemanticsProperties.StateDescription, "not available")
+        compose.waitUntil(5_000) { compose.onAllNodes(notAvailable).fetchSemanticsNodes().isNotEmpty() }
+        assertTrue("the stage asked for the part's mesh: ${fake.paths}", fake.paths.any { "/current/parts/part-1.stl" in it })
         // Its meshes didn't come: the stage keeps the design's picture, never an empty stage.
         compose.onNode(hasTestTag("gallery-stage-picture")).assertExists()
-        compose.onNode(hasTestTag("gallery-stage-parts") and androidx.compose.ui.test.SemanticsMatcher.expectValue(androidx.compose.ui.semantics.SemanticsProperties.StateDescription, "not available")).assertExists()
+        compose.onNode(notAvailable).assertExists()
     }
 
     /** Design §3.3 with projects present (AGENTS.md "Every layout"): a copy whose scan is really the thing a case must fit
