@@ -152,6 +152,11 @@ export interface PrintOptions {
   };
 }
 export interface Project {
+  /**
+   * Client-only (#691): how many times an event said this project's design files changed in place (`project.updated`
+   * with keys `current` or `versions`). Parts remade after the project is ready keep their names, so the stage keys on it.
+   */
+  designRevision?: number;
   id: string;
   title: string;
   instructions?: string;

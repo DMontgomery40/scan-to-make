@@ -442,6 +442,24 @@ export function buildScaleAnswer(
     throw new Error("That side has no size in the current model. Choose another side.");
   return { type: "scale", meshSha256: review.meshSha256, axis, extentMm };
 }
+/**
+ * #691: the events that say a project's design files changed in place (`project.updated` with keys `current` or
+ * `versions`: its parts landed after it was ready), counted per project. The stage redraws its parts when the count moves.
+ */
+export function noteDesignChanges(revisions: Record<string, number>, events: { type: string; projectId?: string; data?: { keys?: string[] } }[]) {
+  const next = { ...revisions };
+  for (const event of events)
+    if (event.type === "project.updated" && event.projectId && event.data?.keys?.some((key) => key === "current" || key === "versions"))
+      next[event.projectId] = (next[event.projectId] ?? 0) + 1;
+  return next;
+}
+
+/** A project as read, with the design revision this client counted for it (a read never carries one). */
+export function withDesignRevision(project: Project, revisions: Record<string, number>): Project {
+  const revision = revisions[project.id];
+  return revision ? { ...project, designRevision: revision } : project;
+}
+
 export function newerProject(existing: Project | undefined, incoming: Project) {
   return existing && existing.updatedAtMs > incoming.updatedAtMs
     ? existing

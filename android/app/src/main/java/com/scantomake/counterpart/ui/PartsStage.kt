@@ -34,8 +34,9 @@ fun partsStageLine(label: String, count: Int): String =
  * if one can't be had, [still] shows: the same stage picture as any other entry, so the stage is never empty.
  */
 @Composable
-fun PartsStage(project: Project, parts: List<ProjectGallery.DrawnPart>, label: String, modifier: Modifier = Modifier, still: @Composable () -> Unit) {
-    val key = "${project.id}/${project.mediaVersion}/" + parts.joinToString("|") { it.mesh }
+fun PartsStage(project: Project, parts: List<ProjectGallery.DrawnPart>, label: String, modifier: Modifier = Modifier, revision: Int = 0, still: @Composable () -> Unit) {
+    // `revision` (#691): parts remade after the project was ready keep their names, so the event that says so redraws them.
+    val key = "${project.id}/${project.mediaVersion}/$revision/" + parts.joinToString("|") { it.mesh }
     var meshes by remember(key) { mutableStateOf<List<Pair<StlMesh, FloatArray>>?>(null) }
     var failed by remember(key) { mutableStateOf(false) }
     LaunchedEffect(key) {
@@ -44,7 +45,7 @@ fun PartsStage(project: Project, parts: List<ProjectGallery.DrawnPart>, label: S
         val budget = maxOf(2_000, StlParser.MAX_RENDERED_TRIANGLES / parts.size)
         val loaded = withContext(Dispatchers.IO) {
             try {
-                parts.map { part -> (StlParser.parse(companion.download(project, part.mesh).readBytes(), budget) ?: return@withContext null) to stageRgb(part.colour) }
+                parts.map { part -> (StlParser.parse(companion.download(project, part.mesh, revalidate = true).readBytes(), budget) ?: return@withContext null) to stageRgb(part.colour) }
             } catch (_: Exception) { null }
         }
         if (loaded == null) failed = true else meshes = loaded

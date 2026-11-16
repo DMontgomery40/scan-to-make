@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { ar, canLocate, gallery, partMesh, drawnColour, drawnParts, photoPicture, still, filePath, stageStill, pictureClock, PICTURE_PATIENCE_MS, NOT_DRAWN_LINE } from "../src/gallery";
+import { ar, canLocate, gallery, partMesh, drawnColour, drawnParts, pictureFor, photoPicture, still, filePath, stageStill, pictureClock, PICTURE_PATIENCE_MS, NOT_DRAWN_LINE } from "../src/gallery";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { ProjectPage } from "../src/ProjectView";
@@ -1548,4 +1548,76 @@ test("New project sends a kind only when the person chose one (#867)", () => {
   assert.deepEqual(newProjectParams("A belt case", "fit", ""), { instructions: "A belt case", kind: "fit" });
   assert.deepEqual(newProjectParams("", "copy", "https://ignored.example"), { instructions: "", kind: "copy" });
   assert.deepEqual(newProjectParams("", "published", "https://makerworld.com/x"), { instructions: "", kind: "published", url: "https://makerworld.com/x" });
+});
+
+// Review of #869 (P1-2, P2-4, P2-6, P3): the same rules as CounterpartKit, from the shared parts fixture.
+const partsFixture = () => JSON.parse(readFileSync(new URL("../../../packages/contracts/fixtures/project-parts.json", import.meta.url), "utf8")) as {
+  plates: { object: Partial<Project>; drawPlates: Record<string, { mesh: string; colour: string }[] | { picture: string }> };
+  unreadable: { object: Partial<Project>; draw: { mesh: string; colour: string }[] };
+  cases: { object: Partial<Project> }[];
+};
+const asProject = (o: Partial<Project>, extra: Partial<Project> = {}) => ({ ...project, id: "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a96", state: "ready", passes: [], ...o, ...extra }) as Project;
+
+test("each plate of a kit turns its own parts in the gallery, and offers AR from them", () => {
+  const { plates } = partsFixture();
+  const kit = asProject(plates.object);
+  const entries = gallery(kit);
+  assert.deepEqual(entries.map((e) => e.id), Object.keys(plates.drawPlates));
+  for (const entry of entries) {
+    assert.equal(entry.kind, "plate");
+    const want = plates.drawPlates[entry.id]!;
+    if (Array.isArray(want)) {
+      assert.deepEqual("parts" in entry.drawing ? entry.drawing.parts : entry.drawing, want, entry.id);
+      assert.equal(ar(entry), want[0]!.mesh, `#845: ${entry.id}'s AR is its first part`);
+    } else {
+      assert.deepEqual(entry.drawing, want, entry.id);
+      assert.equal(ar(entry), undefined);
+    }
+  }
+  assert.equal(pictureFor(kit, entries[1]!), "renders/k-1.png", "a plate drawn by its parts keeps its own picture as the still");
+});
+
+test("one unreadable part means no parts at all: the merged mesh turns, neutral", () => {
+  const { unreadable } = partsFixture();
+  const p = asProject(unreadable.object);
+  assert.equal(drawnParts(p), undefined);
+  const entry = gallery(p).find((e) => e.kind === "part")!;
+  assert.deepEqual([{ mesh: "model" in entry.drawing ? entry.drawing.model : "", colour: entry.colour }], unreadable.draw);
+  const badPlate = asProject({ kind: "fit", current: { model: "current/model.3mf", renders: [], parts: [{ id: "1/1", mesh: "current/parts/part-1.stl", plate: "one" as unknown as number }] } });
+  assert.equal(drawnParts(badPlate), undefined);
+});
+
+test("a copy's Together is the copy in the scan's place, drawn as the part is; a fit's keeps the object in its seats", () => {
+  const first = partsFixture().cases[0]!.object;
+  const current = { ...first.current!, seats: [{ rotationDeg: [0, 0, 0], translationMm: [0, -19.5, 3] }] };
+  const copy = gallery(asProject({ ...first, current }, { scan: "scan.usdz", photos: [] }));
+  const part = copy.find((e) => e.kind === "part")!, together = copy.find((e) => e.kind === "together")!;
+  assert.deepEqual(together.drawing, part.drawing);
+  assert.equal(ar(together), undefined);
+  const fit = gallery(asProject({ ...first, current, kind: "fit" }, { scan: "scan.usdz", photos: [] })).find((e) => e.kind === "together")!;
+  assert.deepEqual(fit.drawing, { assembly: { part: "current/model.stl", object: "scan/scan.usdz", seats: current.seats } });
+});
+
+// #691: a design's parts land after the project is ready, with project.updated (keys current, and versions when a sealed
+// design gets them). The read after that event carries them, and the stage's design revision moves so it draws them again
+// even under the same mesh names; other updates (status, print) don't redraw the stage.
+test("parts that land after the project is ready are drawn again when their event arrives", async () => {
+  const { noteDesignChanges, withDesignRevision } = await import("../src/domain");
+  const id = "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a95";
+  let revisions = noteDesignChanges({}, [
+    { type: "project.updated", projectId: id, data: { keys: ["status"] } },
+    { type: "print.started", projectId: id },
+  ]);
+  assert.deepEqual(revisions, {}, "a status or print event leaves the stage alone");
+  revisions = noteDesignChanges(revisions, [{ type: "project.updated", projectId: id, data: { keys: ["current"] } }]);
+  assert.equal(revisions[id], 1);
+  revisions = noteDesignChanges(revisions, [{ type: "project.updated", projectId: id, data: { keys: ["current", "versions"] } }]);
+  assert.equal(revisions[id], 2);
+  const first = partsFixture().cases[0]!.object;
+  const before = asProject({ ...first, id, current: { ...first.current!, parts: undefined } });
+  assert.equal(withDesignRevision(before, {}).designRevision, undefined, "a read never carries a revision of its own");
+  assert.ok("model" in gallery(before)[0]!.drawing, "before: the merged mesh");
+  const after = withDesignRevision(asProject({ ...first, id }), revisions);
+  assert.equal(after.designRevision, 2);
+  assert.ok("parts" in gallery(after)[0]!.drawing, "after the event's read: part by part");
 });

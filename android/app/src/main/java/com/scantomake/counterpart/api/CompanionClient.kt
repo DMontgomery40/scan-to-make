@@ -397,7 +397,12 @@ class CompanionClient(
     fun stored(project: Project, name: String): File? = library?.latest(project.id, name)?.first
 
     /** Downloads one project file into the library (or the cache, for kinds not kept), once per project version, and returns where it is. */
-    suspend fun download(project: Project, name: String): File {
+    /**
+     * [revalidate]: ask the computer every time, with the copy's validator, and never serve the library's or the cache's
+     * copy unasked. For files whose bytes can change under the same name and media version: a part's mesh (#691) is
+     * remade after the project is ready, with no new pass (a 304 keeps the copy).
+     */
+    suspend fun download(project: Project, name: String, revalidate: Boolean = false): File {
         if (!Pattern(UUID).matches(project.id) || !allowed.matches(name) || name.contains("..")) throw CompanionException.transport("invalid-request")
         val version = project.mediaVersion.toString()
         val folder = File(File(cache, project.id), version)
@@ -415,11 +420,23 @@ class CompanionClient(
         }
         // The library first: its copy of this version is the file, with no network.
         val active = library?.takeIf { it.isActive }
-        val kept = active?.takeIf { it.keep.keeps(OnDeviceLibrary.Kind.of(name)) }
+        val kept = active?.takeIf { !revalidate && it.keep.keeps(OnDeviceLibrary.Kind.of(name)) }
         kept?.file(project.id, name, project.mediaVersion, filename)?.let { return it }
         // A refusal for size is remembered for any file, kept or not, so it is never asked for again.
         if (active?.isTooLarge(project.id, name, project.mediaVersion, filename) == true) throw CompanionException("file-too-large", "This file is too large for this phone.")
         val target = File(folder, filename)
+        if (target.exists() && revalidate) {
+            val reply = send("GET", "/v1/objects/${project.id}/${encodePath(resource)}", limit = SCAN_LIMIT, ifNoneMatch = cachedValidator(target))
+            if (reply.status == 304) return target
+            if (reply.status != 200 || reply.body.isEmpty())
+                throw if (reply.status == 404) CompanionException("not-found", "This is no longer on your computer.") else CompanionException("download-failed", "That file couldn't be saved on this phone.")
+            val temp = File(folder, "$filename.part")
+            try { temp.writeBytes(reply.body); temp.renameTo(target) } catch (_: Exception) {
+                throw CompanionException("download-failed", "That file couldn't be saved on this phone.")
+            }
+            reply.header("ETag")?.let { setCachedValidator(it, target) } ?: File(target.path + ".etag").delete()
+            return target
+        }
         if (target.exists()) {
             if (kept == null) return target
             // Fetched before this kind was kept: into the library as it is, with its validator (as the iPhone's

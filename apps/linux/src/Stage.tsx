@@ -338,8 +338,9 @@ export function Stage({ project, locate }: { project: Project; locate?: () => vo
   const model = project.current?.model;
   const renders = project.current?.renders ?? [];
   // #691: a multi-part design turns part by part, each in its own colour (floored on the dark stage).
-  const parts = entry?.kind === "part" && "parts" in entry.drawing ? entry.drawing.parts : undefined;
-  const turnable = entry?.kind === "part" && ("model" in entry.drawing || !!parts) && !!model;
+  // A kit's plate drawn by its parts turns too.
+  const parts = (entry?.kind === "part" || entry?.kind === "plate") && "parts" in entry.drawing ? entry.drawing.parts : undefined;
+  const turnable = !!parts || (entry?.kind === "part" && "model" in entry.drawing && !!model);
   const canTurn = turnable && (!!parts || filePath(project, "model.stl").toLowerCase().endsWith(".stl"));
   // The pass's own views stay one click away on the part while the computer hasn't drawn its picture.
   const showRenders = entry?.kind === "part" && !project.pictures?.part && renders.length > 1;
@@ -373,7 +374,8 @@ export function Stage({ project, locate }: { project: Project; locate?: () => vo
       live = false;
       setPartBytes(undefined);
     };
-  }, [mode, parts?.map((part) => part.mesh).join("|"), project.id, model]);
+    // #691: parts remade after the project was ready keep their names; the event that says so (designRevision) redraws them.
+  }, [mode, parts?.map((part) => part.mesh).join("|"), project.id, model, project.designRevision]);
   useEffect(() => {
     if (mode !== "3d" || !turnable || parts) return;
     let live = true;
