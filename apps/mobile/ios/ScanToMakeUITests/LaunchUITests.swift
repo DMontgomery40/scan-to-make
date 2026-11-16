@@ -1889,7 +1889,9 @@ final class LayoutParityUITests: XCTestCase {
         let stage = app.descendants(matching: .any)["model-stage"]
         XCTAssertTrue(stage.waitForExistence(timeout: 20))
         let drawn = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value IN %@", ["still", "live"]), object: stage)
-        XCTAssertEqual(XCTWaiter().wait(for: [drawn], timeout: 60), .completed, "both parts drawn: \(String(describing: stage.value))")
+        let unavailable = app.descendants(matching: .any)["gallery-model-unavailable"]
+        XCTAssertEqual(XCTWaiter().wait(for: [drawn], timeout: 60), .completed,
+                       "both parts drawn: \(String(describing: stage.value)); \(unavailable.exists ? unavailable.label : "no line under the stage")")
         XCTAssertTrue(app.buttons["gallery-ar"].waitForExistence(timeout: 10), "AR for a design drawn part by part (#845)")
         let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "691 two-part \(regular ? "iPad" : "iPhone")"; shot.lifetime = .keepAlways; add(shot)
         let together = app.buttons["gallery-together"]
