@@ -558,8 +558,9 @@ struct SocketObjects: ObjectsCompanion {
 
     /// Starts a project on this Mac (PRD §7.2): the request, then each dropped file, then the pass. Photos
     /// (JPEG, HEIC, PNG) go in as photos; STL, 3MF and USDZ as the thing to copy. Returns one sentence when it
-    /// didn't go through; the project is selected when it did.
-    func startProject(instructions: String, files: [URL], kind: String = "fit", url: String? = nil) async -> String? {
+    /// didn't go through; the project is selected when it did. `kind` is only the person's own choice: with none, none is
+    /// sent and the companion decides from the words and files (#867).
+    func startProject(instructions: String, files: [URL], kind: String? = nil, url: String? = nil) async -> String? {
         if url != nil && capabilities?.publishedModels != true { return "Update Counterpart’s companion to get the designer’s model file." }
         guard capabilities?.objectsCreate == true else { return Self.createUnavailable }
         let text = String(instructions.trimmingCharacters(in:.whitespacesAndNewlines).prefix(4000))

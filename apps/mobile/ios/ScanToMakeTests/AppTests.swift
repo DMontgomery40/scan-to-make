@@ -24,6 +24,17 @@ import CounterpartKit
         XCTAssertEqual(models.file(project, "scan/scan.usdz"), file)
     }
 
+    /// #867: "A replica of this DAD desk thing" ran as a fit because a picker's default kind went with it. On the iPhone and
+    /// the iPad (one New sheet) a kind goes only with the person's choice: words alone, or a scan kept for later, send none.
+    func testNewSendsAKindOnlyWhenThePersonChoseOne() {
+        XCTAssertNil(NewObjectView.kindToSend(job: nil, scanUse: nil), "words alone: the Mac decides")
+        XCTAssertNil(NewObjectView.kindToSend(job: nil, scanUse: .later))
+        XCTAssertEqual(NewObjectView.kindToSend(job: .fit, scanUse: nil), "fit", "the empty Home's Make Something That Fits card")
+        XCTAssertEqual(NewObjectView.kindToSend(job: .copy, scanUse: nil), "copy")
+        XCTAssertEqual(NewObjectView.kindToSend(job: .fit, scanUse: .copy), "copy", "the answer after a scan wins over the card")
+        XCTAssertEqual(NewObjectView.kindToSend(job: nil, scanUse: .fit), "fit")
+    }
+
     func testAPairingLinkIsTakenOnceEvenWhenAColdStartDeliversItTwice() {
         let app = AppModel(store: MemoryStore())
         let link = URL(string: "scantomake://pair?v=2&c=\(String(repeating: "A", count: 32))&e=9999999999999&k=\(String(repeating: "ab", count: 32))&a=https%3A%2F%2F192.168.1.2%3A9077")!

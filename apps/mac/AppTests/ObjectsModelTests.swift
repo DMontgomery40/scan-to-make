@@ -1290,6 +1290,22 @@ private func project(_ item: [String: Any]) throws -> Project {
         XCTAssertEqual(model.groups(matching: "").starters.count, StarterProject.all.count, "and with no projects")
     }
 
+    /// #867: "A replica of this DAD desk thing" (b8158144) ran as a fit: New Project's picker sent its default kind though
+    /// nobody chose one. Words alone, nothing chosen: no kind is sent and the companion decides (it reads a copy from the
+    /// scan when one comes). A choice the person made is still sent.
+    func testANewProjectSendsAKindOnlyWhenThePersonChoseOne() async {
+        let companion = FakeObjects()
+        await companion.setCapabilities(.init(objectsCreate: true, structuredPasses: true))
+        let model = ObjectsModel(companion: companion)
+        await model.refresh()
+        let words = await model.startProject(instructions: "A replica of this DAD desk thing", files: [])
+        let copy = await model.startProject(instructions: "Copy this", files: [], kind: "copy")
+        let fit = await model.startProject(instructions: "A hook for my stroller", files: [], kind: "fit")
+        XCTAssertNil(words); XCTAssertNil(copy); XCTAssertNil(fit)
+        let creates = await companion.calls.filter { $0.hasPrefix("create") }
+        XCTAssertEqual(creates, ["create -", "create copy", "create fit"])
+    }
+
     func testANewProjectWaitsForACompanionThatCanStartOne() async {
         let model = ObjectsModel(companion:FakeObjects())
         await model.refresh()
@@ -1347,12 +1363,13 @@ private func project(_ item: [String: Any]) throws -> Project {
                 await companion.setCapabilities(.init(objectsCreate: true, structuredPasses: true))
                 let model = ObjectsModel(companion: companion)
                 await model.refresh()
-                let refused = await model.startProject(instructions: "", files: draft.files, kind: ObjectsModel.draftKind(for: draft.files))
+                // Nothing chosen in New Project: no kind goes with it (#867); the companion makes a model a copy.
+                let refused = await model.startProject(instructions: "", files: draft.files)
                 XCTAssertNil(refused, ext)
                 made.append(await companion.calls.filter { $0.hasPrefix("create") || $0.hasPrefix("addFile") })
             }
             let kind = ObjectsModel.modelExtensions.contains(ext) ? "scan" : "photos"
-            XCTAssertEqual(made[0], ["create \(kind == "scan" ? "copy" : "fit")", "addFile \(kind) holder.\(ext)"], ext)
+            XCTAssertEqual(made[0], ["create -", "addFile \(kind) holder.\(ext)"], ext)
             XCTAssertEqual(made[1], made[0], "an opened .\(ext) makes the project a dropped one does")
         }
     }
