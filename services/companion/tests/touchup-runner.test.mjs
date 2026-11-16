@@ -1,3 +1,4 @@
+import {createRequire} from 'node:module';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
@@ -386,6 +387,36 @@ test('a code pass files the runs marked final as checkpoints and keeps the lates
   assert.equal(await readFile(join(pass.outDir, '1-contact.png'), 'utf8'), 'contact');
   assert.deepEqual(result.design, {script: join(last, 'holder.py'), parameters: join(last, 'holder.parameters.json'),
     inputs: join(last, 'holder.inputs.json'), step: join(last, 'holder.step'), result: join(last, 'cad-result.json')});
+});
+
+test('a code pass whose final run returned project_3mf() keeps that 3MF as its parts, made in the same run (#858, #859 fix 5)', async () => {
+  const {mkdir} = await import('node:fs/promises');
+  const {zipSync, strToU8} = createRequire(new URL('../../printer-handoff/package.json', import.meta.url))('fflate');
+  const root = await tempDir('touchup-code-3mf-');
+  const pass = await prepareTouchupPass({root, objectId: 'obj', scan: [join(fixtures, 'scan.obj')], photos: [join(fixtures, 'photo.jpg')]});
+  const cadDir = join(pass.dir, 'cad');
+  await mkdir(cadDir, {recursive: true});
+  const project = Buffer.from(zipSync({'[Content_Types].xml': strToU8('<Types/>'),
+    '3D/3dmodel.model': strToU8('<model><resources><object id="1"><mesh/></object><object id="2"><mesh/></object></resources><build><item objectid="1"/><item objectid="2"/></build></model>')}));
+  // As cad_run leaves one (bambu-printer-mcp src/cad-engine.ts project3mf): <name>.3mf beside the merged STL, `three_mf` in the receipt.
+  const t0 = Date.now() - 60_000;
+  const early = await cadRun(cadDir, 'cad-dad_sign-1', 'dad_sign', {at: t0, final: true});
+  await writeFile(join(early, 'dad_sign.3mf'), 'an earlier run\'s parts');
+  const run = join(cadDir, 'cad-dad_sign-2');
+  await cadRun(cadDir, 'cad-dad_sign-2', 'dad_sign', {at: t0 + 1000, final: true, extra: {three_mf: join(run, 'dad_sign.3mf')}});
+  await writeFile(join(run, 'dad_sign.3mf'), project);
+  const result = await runTouchupWorker(codeInv(pass, codeWorker({status: 'done', summary: 'Made as the original is: black letters in a wood-colour base. Prints as one piece in two colours.',
+    parts: [{name: 'bar', colour: '#B0855D'}, {name: 'letters', colour: '#111111'}]})), pass);
+  assert.equal(result.model, join(pass.outDir, 'touched.stl'));
+  assert.equal(result.parts, join(pass.outDir, 'touched.3mf'));
+  assert.deepEqual(await readFile(result.parts), project, 'the final run\'s own 3MF, not an earlier run\'s');
+  assert.deepEqual(result.partColours, [{name: 'bar', colour: '#B0855D'}, {name: 'letters', colour: '#111111'}]);
+
+  // A final run without project_3mf() has no parts; a receipt naming a file outside its run folder is not followed.
+  const plain = await prepareTouchupPass({root: join(root, 'b'), objectId: 'obj', scan: [join(fixtures, 'scan.obj')], photos: [join(fixtures, 'photo.jpg')]});
+  await mkdir(join(plain.dir, 'cad'), {recursive: true});
+  await cadRun(join(plain.dir, 'cad'), 'cad-holder-1', 'holder', {final: true, extra: {three_mf: join(run, 'dad_sign.3mf')}});
+  assert.equal((await runTouchupWorker(codeInv(plain, codeWorker({status: 'done', summary: 'One colour.'})), plain)).parts, undefined);
 });
 
 test('a final run that failed, is invalid or has no receipt is never the model; an unselected run never is', async () => {

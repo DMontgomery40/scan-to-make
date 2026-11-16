@@ -303,7 +303,8 @@ test("a copy of a designer's 3MF is told to edit that project in place and compa
 test('each pass gets the core and only the sections it needs', async () => {
   const S = RULE_SECTIONS;
   const cases = [
-    ['a scan sent for cleanup with no words', {kind: 'copy'}, [S.captured]],
+    // #858: a copy is made in the colours its photos show, asked or not.
+    ['a scan sent for cleanup with no words', {kind: 'copy'}, [S.captured, S.colours]],
     ['a copy with a request', {kind: 'copy', request: true}, [S.captured, S.colours, S.namedModel]],
     ['a copy revision of its current model', {kind: 'copy', request: true}, [S.captured, S.colours, S.namedModel]],
     ["a designer's 3MF with no words", {kind: 'copy', designerCopy: true}, [S.designerCopy]],
@@ -337,6 +338,34 @@ test('each pass gets the core and only the sections it needs', async () => {
     systemRules({kind: 'fit', request: true, scan: true}), 'a change to it restates the seats it is given');
   assert.equal(rulesOf({pass: await pass(), kind: 'fit', note: 'Taller.', summary: 'A holder.', currentModel: true}), systemRules({kind: 'fit', request: true}), 'a change to a fit with no seats has none to restate');
   assert.equal(rulesOf({pass: await pass(), instructions: '   '}), systemRules({kind: 'copy'}), 'blank words are no request');
+});
+
+test('a copy is made in the colours its photos show, and the code engine makes the parts in the model\'s own run (#858, #859 fix 5)', () => {
+  const S = RULE_SECTIONS;
+  // The DAD sign: "A replica of this DAD desk thing", black letters in a wooden bar, made as one grey piece.
+  for (const shape of [{kind: 'copy'}, {kind: 'copy', request: true}, {kind: 'copy', scan: true}, {kind: 'fit', request: true}])
+    assert.ok(ruleSections(shape).includes('colours'), JSON.stringify(shape));
+  assert.ok(!ruleSections({kind: 'fit'}).includes('colours'), 'a new design with no words has no colours to make');
+  assert.ok(!ruleSections({kind: 'copy', designerCopy: true}).includes('colours'), 'a designer\'s 3MF keeps its own colours');
+  for (const engine of ['blender', 'fusion', 'code']) {
+    const rules = systemRules({kind: 'copy', engine});
+    const colours = rules.slice(rules.indexOf(`\n\n${S.colours}\n`)).split(/\n\n(?=\S)/)[1];
+    assert.match(colours, /A copy is also made as the original is, without being asked: when its photos plainly show it made of more than one material or colour/, engine);
+    assert.match(colours, /one part per colour/, engine);
+    assert.match(colours, /read its fdm_multicolor guidance/, `${engine}: the printer's judgement is the MCP's`);
+    assert.match(colours, /"Made as the original is: black letters in a wood-colour base\. Prints as one piece in two colours\."/, engine);
+    assert.match(colours, /out\/touched\.3mf/, engine);
+    assert.match(colours, /Ink stays ink: a printed colour may become a part flush with the surface it is printed on, never raised/, engine);
+    if (engine === 'code') {
+      assert.match(colours, /same cad_run as the model: build\(\) in the run you mark final returns project_3mf\(\)/);
+      assert.match(colours, /Never run the design again for each colour, and never combine colour parts with counterpart_make_3mf/);
+      assert.doesNotMatch(colours, /export each one as an STL/, 'no re-run per colour (#859 fix 5)');
+    } else {
+      assert.match(colours, /export each one as an STL, and combine them with the printer MCP's counterpart_make_3mf/);
+      assert.doesNotMatch(colours, /project_3mf/);
+    }
+  }
+  assert.match(TOUCHUP_RESULT_SCHEMA.properties.parts.description, /for a copy the original’s from the photos/);
 });
 
 test('a captured object is recognised first, and its manufactured features are rebuilt regular', () => {
