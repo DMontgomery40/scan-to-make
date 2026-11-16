@@ -62,7 +62,12 @@ export async function sealVersion(object: StmObject, dir: string, result: NonNul
     if (mesh !== result.model) await copy(mesh, 'model.stl');
     // #691: each part's own mesh, so a sealed design is drawn in its colours as it was.
     const parts: NonNullable<typeof result.parts> = [];
-    for (const part of result.parts ?? []) { const mesh = await copy(part.mesh, join('parts', basename(part.mesh))); if (mesh) parts.push({...part, mesh}); }
+    for (const part of result.parts ?? []) {
+      const mesh = await copy(part.mesh, join('parts', basename(part.mesh)));
+      // #874 P3: a folder sealed before (reused) is not copied into: a part it lacks is copied now, never listed missing.
+      if (mesh && reused && !await exists(join(dir, mesh))) { await mkdir(dirname(join(dir, mesh)), {recursive: true}); await cp(join(dir, part.mesh), join(dir, mesh)); }
+      if (mesh) parts.push({...part, mesh});
+    }
     const renders: string[] = [];
     for (const [index, path] of result.renders.entries()) { const saved = await copy(path, join('renders', `${index}-${basename(path)}`)); if (saved) renders.push(saved); }
     let design = result.design;

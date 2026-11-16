@@ -9,7 +9,7 @@ import {
 import type {ElicitationContext, ElicitationRelay} from './elicitation.js';
 import {slicedFacts, type SliceEstimate, type SliceSettings} from './slice-estimate.js';
 import {modelPlatesFrom, type McpModelPlates} from './model-plates.js';
-import {PART_MESHES_TOOL, modelPartsFrom, type McpModelPart} from './model-parts.js';
+import {PART_MESHES_TOOL, confinedParts, modelPartsFrom, type McpModelPart} from './model-parts.js';
 import {lacksSlicerReport, logSlicerRefusal, slicerReport} from './slicer-report.js';
 import {slicePreview, type SlicePreview} from './slice-preview.js';
 import {createHash} from 'node:crypto';
@@ -303,9 +303,11 @@ export class PrinterHandoffRunner {
       await session.connect(options);
       if (!session.hasTool(PART_MESHES_TOOL)) return undefined;
       const result = await call(session, PART_MESHES_TOOL, {three_mf_path: input.modelPath, out_dir: input.outputDir}, options);
-      const parts = modelPartsFrom(result.structuredContent, input.outputDir);
-      if (!parts) throw new PrinterMcpError('parts-unreadable', undefined, `Update ${packageLabel(this.#config.backend)} in Settings → Printers to show this design's parts in their colours.`);
-      return parts;
+      const read = modelPartsFrom(result.structuredContent, input.outputDir);
+      // Every mesh really inside the folder the MCP made in outputDir: a symlink never reaches the project (#874 P2-3).
+      const parts = read && await confinedParts(read.parts, read.folder, input.outputDir);
+      if (!read || !parts) throw new PrinterMcpError('parts-unreadable', undefined, `Update ${packageLabel(this.#config.backend)} in Settings → Printers to show this design's parts in their colours.`);
+      return {parts, skipped: read.skipped};
     });
   }
 

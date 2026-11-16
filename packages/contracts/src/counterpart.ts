@@ -534,6 +534,20 @@ export type DesignDraft = z.infer<typeof DesignDraftSchema>;
 export const DRAFT_LINE = "Not finished: the design engine couldn't check everything";
 /** #788: what a print's confirmation adds for a draft design. */
 export const DRAFT_PRINT_NOTE = "This part wasn't fully checked: the design engine couldn't check everything.";
+/**
+ * #691: one part of a multi-part 3MF design, as the printer MCP meshed it: `id` its key (never parse it), `mesh` that
+ * part's STL in the 3MF's build frame, `colour` #RRGGBB (absent: neutral), `plate` 0-based (absent for a plain 3MF),
+ * `painted` when it carries painting. Recorded only for more than one part (docs/protocols/objects-api.md).
+ */
+export const DesignPartSchema = z.object({
+  id: z.string().min(1).max(64),
+  name: z.string().max(128).optional(),
+  colour: z.string().regex(/^#[0-9A-Fa-f]{6}$/).optional(),
+  plate: z.number().int().min(0).max(999).optional(),
+  painted: z.literal(true).optional(),
+  mesh: relativePath,
+}).passthrough();
+export type DesignPart = z.infer<typeof DesignPartSchema>;
 export const DesignVersionSchema = z.object({
   id: z.string().min(1).max(128),
   sealedAtMs: z.number().finite(),
@@ -547,7 +561,9 @@ export const DesignVersionSchema = z.object({
     /** #769: the merged mesh sealed beside a multi-part design's 3MF, listed only while the file is there. */
     mergedMesh: relativePath.optional(),
     /** #788: this design is a draft (above). */
-    draft: DesignDraftSchema.optional()}).passthrough(),
+    draft: DesignDraftSchema.optional(),
+    /** #691: its parts, each its own mesh and colour, sealed with it (more than one, or none). */
+    parts: z.array(DesignPartSchema).min(2).max(256).optional()}).passthrough(),
   picture: relativePath.optional(),
   pictures: z.record(z.string(), relativePath).optional(),
   pictureStates: z.record(z.string(), z.enum(['drawing', 'failed'])).optional(),
