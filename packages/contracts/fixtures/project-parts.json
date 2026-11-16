@@ -1,5 +1,47 @@
 {
   "about": "#691: a multi-part design drawn part by part, each part in its own colour. The companion writes current.parts (and each sealed version's result.parts) when the printer MCP meshes a 3MF's parts (counterpart/1 counterpart_part_meshes, services/printer-handoff/src/model-parts.ts): [{id, name?, colour?, plate?, painted?, mesh}], id the MCP's key (never parsed), mesh a project path to that part's STL in the 3MF's build frame in millimetres (all parts line up drawn together; parts on plate 2 and later lie at that plate's offset), colour #RRGGBB (the pass's declared colour, else the 3MF's own), plate the 0-based plate (absent for a plain 3MF), painted when the part carries painting (colour is then its base filament's). Without parts (an MCP without the tool, a one-colour model) nothing changes: the stage turns the merged mesh in the neutral material, as today, named as project-gallery.json names it: a 3MF design's mergedMesh (current/model.stl), and an STL design's current model as model.stl, the companion's alias for it (GET /v1/objects/<id>/model.stl). Every client (CounterpartKit, Android, Linux) reads each case: draw is what the stage turns for the design shown, in order, each mesh with its colour, or \"neutral\" for none. A designer's kit draws only the chosen plate's parts (publishedSelection.plateIndex); parts with no plate are on every plate. The companion's own test (services/companion/tests/objects-parts.test.mjs) writes the first two cases' records. Every record here has the fields a real one carries (current.renders; a sealed version's sealedAtMs and modelSha256), so a client decodes it as it decodes the companion's.",
+  "plates": {
+    "about": "#691 (review of #869, P1-2): a designer's kit with several plates is one gallery entry per plate (plate-<id>), and each plate turns its own parts in their colours: the parts whose 0-based plate is that plate's position in plates, plus any part with no plate. A plate with no parts of its own keeps its picture. drawPlates is what each plate entry's stage turns, by entry id; its ar is its first part's mesh (#845), or null for a picture.",
+    "object": {
+      "kind": "published",
+      "publishedSelection": {"fileIndex": 0, "plateIndex": 1, "sliced": false},
+      "plates": [
+        {"id": "k:0", "fileIndex": 0, "plateIndex": 0, "name": "Body", "fileName": "kit.3mf", "thumbnail": "renders/k-0.png", "selected": false, "sliced": false, "status": "not-printed"},
+        {"id": "k:1", "fileIndex": 0, "plateIndex": 1, "name": "Gauges", "fileName": "kit.3mf", "thumbnail": "renders/k-1.png", "selected": true, "sliced": false, "status": "not-printed"},
+        {"id": "k:2", "fileIndex": 0, "plateIndex": 2, "name": "Spares", "fileName": "kit.3mf", "thumbnail": "renders/k-2.png", "selected": false, "sliced": false, "status": "not-printed"}
+      ],
+      "current": {
+        "model": "original/0f3c-kit.3mf",
+        "renders": [],
+        "parts": [
+          {"id": "1/1", "name": "Body", "colour": "#FF0000", "plate": 0, "mesh": "current/parts/part-1.stl"},
+          {"id": "2/1", "name": "Depth gauge", "colour": "#FFFFFF", "plate": 1, "painted": true, "mesh": "current/parts/part-2.stl"},
+          {"id": "2/2", "name": "Step gauge", "plate": 1, "mesh": "current/parts/part-3.stl"}
+        ]
+      }
+    },
+    "drawPlates": {
+      "plate-k:0": [{"mesh": "current/parts/part-1.stl", "colour": "#FF0000"}],
+      "plate-k:1": [{"mesh": "current/parts/part-2.stl", "colour": "#FFFFFF"}, {"mesh": "current/parts/part-3.stl", "colour": "neutral"}],
+      "plate-k:2": {"picture": "renders/k-2.png"}
+    }
+  },
+  "unreadable": {
+    "about": "Review of #869, P2-4: parts are all or nothing. One entry a client can't read (here, no mesh) makes the whole list absent, so the stage turns the merged mesh in the neutral material as before, never the design with a part silently missing.",
+    "object": {
+      "kind": "copy",
+      "current": {
+        "model": "current/model.3mf",
+        "renders": [],
+        "mergedMesh": "current/model.stl",
+        "parts": [
+          {"id": "1/1", "name": "bar", "colour": "#B0855D", "mesh": "current/parts/part-1.stl"},
+          {"id": "1/2", "name": "letters and inscription", "colour": "#111111"}
+        ]
+      }
+    },
+    "draw": [{"mesh": "current/model.stl", "colour": "neutral"}]
+  },
   "cases": [
     {
       "name": "a pass-made sign in two colours",

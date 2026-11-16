@@ -206,6 +206,33 @@ final class ProjectGalleryTests: XCTestCase {
                 XCTAssertEqual(ProjectGallery(project: project).entries.first { $0.kind == .part }?.ar, parts.first?.mesh, name)
             }
         }
+        func decode(_ block: [String: Any]) throws -> Project {
+            var object = try XCTUnwrap(block["object"] as? [String: Any])
+            for (key, value) in ["id": "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a95", "createdAtMs": 1.0, "updatedAtMs": 2.0, "state": "ready", "photos": [String]()] as [String: Any]
+            where object[key] == nil { object[key] = value }
+            return try JSONDecoder().decode(Project.self, from: JSONSerialization.data(withJSONObject: object))
+        }
+        // `unreadable` (review of #869/#872, P2-4): one entry a client can't read and there are no parts at all.
+        let unreadable = try XCTUnwrap(doc["unreadable"] as? [String: Any])
+        XCTAssertEqual(drawn(try decode(unreadable)), unreadable["draw"] as? [[String: String]], "unreadable: all or nothing")
+        // `plates`: a kit's plates each turn their own parts (and any part with no plate); a plate with none keeps its
+        // picture. Its AR is its first part's mesh, none for a picture.
+        let plates = try XCTUnwrap(doc["plates"] as? [String: Any])
+        let want = try XCTUnwrap(plates["drawPlates"] as? [String: Any])
+        let entries = ProjectGallery(project: try decode(plates)).entries.filter { $0.kind == .plate }
+        XCTAssertEqual(Set(entries.map(\.id)), Set(want.keys), "one entry per plate")
+        func name(_ colour: ProjectGallery.Colour) -> String { colour.hex ?? "neutral" }
+        for entry in entries {
+            switch entry.drawing {
+            case .parts(let parts):
+                XCTAssertEqual(parts.map { ["mesh": $0.mesh, "colour": name($0.colour)] }, want[entry.id] as? [[String: String]], entry.id)
+                XCTAssertEqual(entry.ar, parts.first?.mesh, "\(entry.id)'s AR")
+            case .picture(let path):
+                XCTAssertEqual(path, (want[entry.id] as? [String: String])?["picture"], entry.id)
+                XCTAssertNil(entry.ar, "\(entry.id): a picture offers no AR")
+            default: XCTFail("\(entry.id): \(entry.drawing)")
+            }
+        }
     }
 
     /// Review of #872 (P2-4): `parts` is all or nothing. One malformed entry and the design is drawn as if it had none (the
