@@ -184,7 +184,26 @@ test('pass estimates come from real stage times on this Mac, with defaults until
   const now = 1_000_000;
   assert.deepEqual(passEstimate([{id: 'preparing', words: '', startedAtMs: now - 5000, typicalSec: 20}], ['preparing', 'working', 'saving'], typical, now), {remainingSec: 225, endsAtMs: now + 225_000});
   // An overrunning stage never reads as nothing left.
-  assert.equal(passEstimate([{id: 'working', words: '', startedAtMs: now - 900_000, typicalSec: 200}], ['preparing', 'working', 'saving'], typical, now).remainingSec, 40);
+  assert.ok(passEstimate([{id: 'working', words: '', startedAtMs: now - 900_000, typicalSec: 200}], ['preparing', 'working', 'saving'], typical, now).remainingSec > 40);
+});
+
+test('a pass past its typical time reads what passes that ran this long went on to take (#859)', async () => {
+  const root = await tempDir('touchup-engine-overrun-');
+  const timings = new PassTimings(join(root, 'pass-timings.json'));
+  // The DAD sign, Nov 16: "Designing it · about 4 min" from these, then "about 1 min" for as long as it ran.
+  const working = [3, 5, 18, 30, 35, 41, 66, 226, 258, 343, 384, 442, 792, 1836, 3869];
+  for (const seconds of working) await timings.record('fit', 'code', 'working', seconds);
+  const history = await timings.samples('fit', 'code');
+  assert.deepEqual(history.working, working);
+  const typical = {building: 300, preparing: 20, working: 226, saving: 10}, plan = ['preparing', 'working', 'saving'], now = 10_000_000;
+  const at = seconds => passEstimate([{id: 'working', words: '', startedAtMs: now - seconds * 1000, typicalSec: 226}], plan, typical, now, history).remainingSec;
+  assert.equal(at(60), 166 + 10, 'within its typical time, it counts down as before');
+  // 15 minutes in: the passes that took longer than that took 1836 s and 3869 s; their median is 2852.5 s.
+  assert.equal(at(900), Math.round(2852.5 - 900) + 10);
+  // Past every recorded time, half as long again as it has taken so far: never "about 1 min" an hour in.
+  assert.equal(at(4000), 2000 + 10);
+  // With no history, the same rule, never less than before.
+  assert.equal(passEstimate([{id: 'working', words: '', startedAtMs: now - 900_000, typicalSec: 200}], plan, typical, now).remainingSec, 450 + 10);
 });
 
 test('design passes hold Fusion across processes from opening the document to the end of the worker', async () => {
@@ -455,7 +474,10 @@ test('the composed rules for a code pass: the MCP\'s cad_design prompt plus only
   assert.equal(fit.includes(RULE_SECTIONS.captured), false);
   assert.match(fit, /cad_check_fit/, 'a fit can check itself against the scan');
   assert.doesNotMatch(fit, /out\/touched\.stl/, 'a code worker writes no files itself: the touched run is the whole model');
-  assert.match(fit, /counterpart_make_3mf into out\/touched\.3mf/, 'several colours still combine into the 3MF');
+  // #859 fix 5: a code pass makes its colour parts in the model's own run, never one re-run per colour.
+  assert.match(fit, /same cad_run as the model: build\(\) in the run you mark final returns project_3mf\(\)/, 'several colours come from the final run');
+  assert.match(fit, /Counterpart keeps it as out\/touched\.3mf/, 'and still end as the 3MF');
+  assert.match(systemRules({kind: 'fit', request: true}), /counterpart_make_3mf into out\/touched\.3mf/, 'other engines still combine one STL per colour');
   assert.match(systemRules({kind: 'fit', request: true}), /Still export the whole model to out\/touched\.stl\./);
   // How to prepare the reference and that a fit check never resizes a measured interface are the MCP's (cad_design).
   assert.doesNotMatch(fit.replace('MCP CAD PROMPT', ''), /never rescale|as information|never to choose a size/i, 'no sentence duplicates the MCP\'s cad_design prompt');

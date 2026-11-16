@@ -558,12 +558,20 @@ private func project(_ item: [String: Any]) throws -> Project {
     }
 
     func testDiscoveryDoesNotClaimEmptyPhonesOrPrintersBeforeSuccessfulReads() async {
-        let failed = ObjectsModel(companion: FakeObjects())
+        var clock = Date(timeIntervalSince1970: 1_000_000)
+        let failed = ObjectsModel(companion: FakeObjects(), now: { clock })
         XCTAssertEqual(failed.missingPhoneText, "Checking connected phones…")
         XCTAssertEqual(failed.missingPrinterText, "Reading your printer settings…")
         await failed.refresh()
-        XCTAssertEqual(failed.missingPhoneText, "Couldn't read connected phones.")
         XCTAssertEqual(failed.missingPrinterText, "Couldn't read your printer settings.")
+        // #851: one unanswered read on a Mac with no phone yet said "Couldn't read connected phones." Only reads failing
+        // several times in a row (each extras read is 30 s apart) say so.
+        XCTAssertEqual(failed.missingPhoneText, "Checking connected phones…", "one failed read keeps what was shown")
+        for _ in 1..<ObjectsModel.phoneFailuresShown {
+            clock += ObjectsModel.extrasDelay + 1
+            await failed.refresh()
+        }
+        XCTAssertEqual(failed.missingPhoneText, "Couldn't read connected phones.")
         let companion = FakeObjects()
         await companion.enableDiscovery()
         let empty = ObjectsModel(companion: companion)
@@ -1282,6 +1290,22 @@ private func project(_ item: [String: Any]) throws -> Project {
         XCTAssertEqual(model.groups(matching: "").starters.count, StarterProject.all.count, "and with no projects")
     }
 
+    /// #867: "A replica of this DAD desk thing" (b8158144) ran as a fit: New Project's picker sent its default kind though
+    /// nobody chose one. Words alone, nothing chosen: no kind is sent and the companion decides (it reads a copy from the
+    /// scan when one comes). A choice the person made is still sent.
+    func testANewProjectSendsAKindOnlyWhenThePersonChoseOne() async {
+        let companion = FakeObjects()
+        await companion.setCapabilities(.init(objectsCreate: true, structuredPasses: true))
+        let model = ObjectsModel(companion: companion)
+        await model.refresh()
+        let words = await model.startProject(instructions: "A replica of this DAD desk thing", files: [])
+        let copy = await model.startProject(instructions: "Copy this", files: [], kind: "copy")
+        let fit = await model.startProject(instructions: "A hook for my stroller", files: [], kind: "fit")
+        XCTAssertNil(words); XCTAssertNil(copy); XCTAssertNil(fit)
+        let creates = await companion.calls.filter { $0.hasPrefix("create") }
+        XCTAssertEqual(creates, ["create -", "create copy", "create fit"])
+    }
+
     func testANewProjectWaitsForACompanionThatCanStartOne() async {
         let model = ObjectsModel(companion:FakeObjects())
         await model.refresh()
@@ -1339,12 +1363,13 @@ private func project(_ item: [String: Any]) throws -> Project {
                 await companion.setCapabilities(.init(objectsCreate: true, structuredPasses: true))
                 let model = ObjectsModel(companion: companion)
                 await model.refresh()
-                let refused = await model.startProject(instructions: "", files: draft.files, kind: ObjectsModel.draftKind(for: draft.files))
+                // Nothing chosen in New Project: no kind goes with it (#867); the companion makes a model a copy.
+                let refused = await model.startProject(instructions: "", files: draft.files)
                 XCTAssertNil(refused, ext)
                 made.append(await companion.calls.filter { $0.hasPrefix("create") || $0.hasPrefix("addFile") })
             }
             let kind = ObjectsModel.modelExtensions.contains(ext) ? "scan" : "photos"
-            XCTAssertEqual(made[0], ["create \(kind == "scan" ? "copy" : "fit")", "addFile \(kind) holder.\(ext)"], ext)
+            XCTAssertEqual(made[0], ["create -", "addFile \(kind) holder.\(ext)"], ext)
             XCTAssertEqual(made[1], made[0], "an opened .\(ext) makes the project a dropped one does")
         }
     }

@@ -1,7 +1,8 @@
 // Stands in for `claude -p ... --output-format stream-json` in the touch-up runner tests.
 // Usage: node fake-claude.mjs <scenario>; cwd is the pass folder.
-import {mkdirSync, writeFileSync, copyFileSync} from 'node:fs';
+import {mkdirSync, writeFileSync, copyFileSync, symlinkSync} from 'node:fs';
 import {spawn} from 'node:child_process';
+import {crc32 as zlibCrc32, deflateRawSync} from 'node:zlib';
 const scenario = process.argv[2];
 const emit = event => process.stdout.write(JSON.stringify(event) + '\n');
 const toolUse = (name = 'mcp__printer__blender_mcp_call') => emit({type: 'assistant', message: {content: [{type: 'tool_use', name, input: {}}]}});
@@ -12,14 +13,16 @@ const hang = () => setInterval(() => {}, 1000);
 // A real (stored, uncompressed) minimal 3MF: the runner validates touched.3mf as one.
 const crcTable = Array.from({length: 256}, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
 const crc32 = bytes => (bytes.reduce((crc, b) => (crcTable[(crc ^ b) & 255] ^ (crc >>> 8)) >>> 0, 0xFFFFFFFF) ^ 0xFFFFFFFF) >>> 0;
-const zip = entries => {
+// `deflate`: entries are compressed, as a real 3MF's are (a pass's mesh is mostly repeated digits).
+const zip = (entries, {deflate = false} = {}) => {
   const chunks = [], central = []; let offset = 0;
   for (const [name, text] of Object.entries(entries)) {
-    const data = Buffer.from(text), nameBytes = Buffer.from(name), crc = crc32(data);
-    const local = Buffer.alloc(30); local.writeUInt32LE(0x04034b50, 0); local.writeUInt16LE(20, 4);
-    local.writeUInt32LE(crc, 14); local.writeUInt32LE(data.length, 18); local.writeUInt32LE(data.length, 22); local.writeUInt16LE(nameBytes.length, 26);
-    const entry = Buffer.alloc(46); entry.writeUInt32LE(0x02014b50, 0); entry.writeUInt16LE(20, 4); entry.writeUInt16LE(20, 6);
-    entry.writeUInt32LE(crc, 16); entry.writeUInt32LE(data.length, 20); entry.writeUInt32LE(data.length, 24);
+    const raw = Buffer.from(text), nameBytes = Buffer.from(name), crc = deflate ? zlibCrc32(raw) : crc32(raw);
+    const data = deflate ? deflateRawSync(raw) : raw;
+    const local = Buffer.alloc(30); local.writeUInt32LE(0x04034b50, 0); local.writeUInt16LE(20, 4); local.writeUInt16LE(deflate ? 8 : 0, 8);
+    local.writeUInt32LE(crc, 14); local.writeUInt32LE(data.length, 18); local.writeUInt32LE(raw.length, 22); local.writeUInt16LE(nameBytes.length, 26);
+    const entry = Buffer.alloc(46); entry.writeUInt32LE(0x02014b50, 0); entry.writeUInt16LE(20, 4); entry.writeUInt16LE(20, 6); entry.writeUInt16LE(deflate ? 8 : 0, 10);
+    entry.writeUInt32LE(crc, 16); entry.writeUInt32LE(data.length, 20); entry.writeUInt32LE(raw.length, 24);
     entry.writeUInt16LE(nameBytes.length, 28); entry.writeUInt32LE(offset, 42);
     chunks.push(local, nameBytes, data); central.push(entry, nameBytes); offset += 30 + nameBytes.length + data.length;
   }
@@ -49,9 +52,31 @@ switch (scenario) {
     result({status: 'done', summary: 'Made the pick black with yellow lettering.',
       parts: [{name: 'body', colour: '#111111', material: 'PLA'}, {name: 'letters', colour: '#FFD200'}]});
     break;
+  // #858: the DAD sign's 3MF, two parts whose mesh unpacks to 14 MB (here just over 8 MB) from a 2 MB archive.
+  case 'multicolourbig': {
+    const vertex = '<vertex x="12.345678" y="23.456789" z="34.567891"/>';
+    const mesh = `<mesh><vertices>${vertex.repeat(Math.ceil(4.5 * 1024 * 1024 / vertex.length))}</vertices><triangles><triangle v1="0" v2="1" v3="2"/></triangles></mesh>`;
+    toolUse('mcp__printer__counterpart_make_3mf'); say('Made it as the original is: black letters in a wood-colour bar.');
+    writeFileSync('out/checkpoints/01.stl', stl); writeFileSync('out/touched.stl', stl);
+    writeFileSync('out/touched.3mf', zip({
+      '[Content_Types].xml': '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>',
+      '3D/3dmodel.model': `<model xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02"><resources><object id="1" type="model">${mesh}</object><object id="2" type="model">${mesh}</object>`
+        + '<object id="3" type="model"><components><component objectid="1"/><component objectid="2"/></components></object></resources><build><item objectid="3"/></build></model>',
+      'Metadata/model_settings.config': '<config><object id="3"><metadata key="name" value="DAD"/><part id="1" subtype="normal_part"><metadata key="name" value="bar"/><metadata key="extruder" value="1"/></part><part id="2" subtype="normal_part"><metadata key="name" value="letters and inscription"/><metadata key="extruder" value="2"/></part></object></config>',
+    }, {deflate: true}));
+    result({status: 'done', summary: 'Made as the original is: black letters in a wood-colour bar. Prints as one piece in two colours.',
+      parts: [{name: 'bar', colour: '#B0855D'}, {name: 'letters and inscription', colour: '#111111'}]});
+    break;
+  }
   case 'multicolourbroken':
     toolUse('mcp__printer__counterpart_make_3mf');
     writeFileSync('out/touched.stl', stl); writeFileSync('out/touched.3mf', Buffer.from('PK\x03\x04 truncated archive'));
+    result({status: 'done', summary: 'Two colours.', parts: [{name: 'body', colour: '#111111'}]});
+    break;
+  // #870 review: a touched.3mf that is a link is never followed (a runaway or planted file can't be read past its limit).
+  case 'multicolourlink':
+    toolUse('mcp__printer__counterpart_make_3mf');
+    writeFileSync('out/touched.stl', stl); writeFileSync('out/elsewhere.3mf', threeMf); symlinkSync('elsewhere.3mf', 'out/touched.3mf');
     result({status: 'done', summary: 'Two colours.', parts: [{name: 'body', colour: '#111111'}]});
     break;
   case 'multicolourjunk':

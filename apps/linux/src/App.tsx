@@ -32,6 +32,8 @@ import {
   fitSizeDetail,
   fitMissing,
   makeFromScanParams,
+  newProjectParams,
+  type NewProjectKind,
   newFitChoice,
   type FitChoice,
 } from "./domain";
@@ -514,7 +516,8 @@ function NewProject({
 }) {
   const [seed, setSeed] = useState<Project | undefined>(initialSeed);
   const [instructions, setInstructions] = useState("");
-  const [kind, setKind] = useState("fit");
+  // Nothing is chosen for the person (#867): no kind is sent until they pick one; a second tap clears it.
+  const [kind, setKind] = useState<NewProjectKind>();
   // A kept scan asks first what it becomes: nothing is chosen for the person.
   const [scanUse, setScanUse] = useState<"fit" | "copy">();
   // A fit's exact size, as the iPhone and the Mac ask it: starts on "Use scan", the thing it must fit.
@@ -590,11 +593,7 @@ function NewProject({
   }
   const create = async () => {
     if (draft) return draft;
-    const { object } = await call<{ object: Project }>("objects.create", {
-      instructions,
-      kind,
-      ...(kind === "published" ? { url } : {}),
-    });
+    const { object } = await call<{ object: Project }>("objects.create", newProjectParams(instructions, kind, url));
     setDraft(object);
     if (inputs.length) {
       const tokens = inputs.map((i) => i.token);
@@ -609,16 +608,16 @@ function NewProject({
   return (
     <Modal title="New project" onClose={onClose}>
       <div className="segmented">
-        {[
+        {([
           ["fit", "Make something that fits"],
           ["copy", "Copy an object"],
           ["published", "Print a published model"],
-        ].map(([v, l]) => (
+        ] as const).map(([v, l]) => (
           <button
             key={v}
             disabled={!!draft}
             aria-pressed={kind === v}
-            onClick={() => setKind(v)}
+            onClick={() => setKind(kind === v ? undefined : v)}
           >
             {l}
           </button>

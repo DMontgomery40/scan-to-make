@@ -70,7 +70,7 @@ import ControlKit
         // The first time the companion keeps them, this Mac's own choices go up rather than its defaults coming down.
         if !UserDefaults.standard.bool(forKey: Self.migratedKey), read.general != nil || read.notificationsMac != nil {
             let patch = SettingsMigration.patch(defaults: .standard, companion: read, currentGeneral: SettingsMigration.currentGeneral(
-                loginStatus: SMAppService.mainApp.status, showInDock: DockIcon.shown,
+                loginStatus: SMAppService.mainApp.status, turnedOff: UserDefaults.standard.bool(forKey: "openAtLoginOff"), showInDock: DockIcon.shown,
                 keepAwake: EventRelay.shared.awake.allowed))
             if patch.isEmpty {
                 UserDefaults.standard.set(true, forKey: Self.migratedKey)

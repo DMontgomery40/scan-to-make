@@ -27,8 +27,10 @@ public struct CodeEngineSettingsSection: View {
                     Spacer()
                     if status?.isWorking == true { ProgressView().controlSize(.small) }
                     if status?.canSetUp == true {
-                        Button(status?.state == "ready" ? "Set Up Again" : "Set Up") { action = .setup; revision += 1 }
-                            .modifier(GlassProminent()).accessibilityIdentifier("codeEngine.setUp")
+                        let title = status?.state == "ready" ? "Set Up Again" : "Set Up"
+                        Button(title) { setUp() }
+                            .modifier(GlassProminent()).modifier(MacAccessibleName(name: title, action: setUp))
+                            .accessibilityIdentifier("codeEngine.setUp")
                     }
                 }
                 if let size = status?.size {
@@ -51,6 +53,7 @@ public struct CodeEngineSettingsSection: View {
         let server = status?.server ?? "your printer MCP"
         return "Designs new parts and cleans up scans as a script, without opening Blender or Fusion, and a later change starts from that script. It runs inside \(server) on your computer; Set Up downloads it there. Printing an existing model or reprinting never needs it."
     }
+    private func setUp() { action = .setup; revision += 1 }
     @MainActor private func run() async {
         let requested = action
         action = .status // A view reappearance only reads; an explicit button consumes one Set Up.
@@ -73,6 +76,19 @@ public struct CodeEngineSettingsSection: View {
 private struct GlassTile: ViewModifier {
     func body(content: Content) -> some View {
         if #available(iOS 26, macOS 26, *) { content.glassEffect(.regular, in: .rect(cornerRadius: 10)) } else { content }
+    }
+}
+/// #740: on the Mac, Set Up in its glass style reached accessibility clients as a bare "button". There the accessibility
+/// element is a plain button named as on screen, pressing the same action; iOS keeps the button as it is.
+private struct MacAccessibleName: ViewModifier {
+    let name: String
+    let action: () -> Void
+    func body(content: Content) -> some View {
+        #if os(macOS)
+        content.accessibilityRepresentation { Button(name, action: action) }
+        #else
+        content
+        #endif
     }
 }
 private struct GlassProminent: ViewModifier {

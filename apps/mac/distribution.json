@@ -216,5 +216,86 @@
     "services/project",
     "services/printer-handoff",
     "services/companion"
-  ]
+  ],
+  "linux": {
+    "about": "The Linux packages' Python (#856): the same pinned CPython, Pillow and OpenUSD releases as the Mac's, as Linux builds. Version, licence and notices are the named component's; each notice is byte-identical in these Linux artifacts. tools/linux-host/prepare-python.py builds it and tools/linux-host/check-python.py audits it.",
+    "python": {
+      "component": "CPython standalone",
+      "architectures": {
+        "x86_64": {
+          "downloadUrl": "https://github.com/astral-sh/python-build-standalone/releases/download/20261026/cpython-3.12.16%2B20261026-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
+          "sha256": "ce4f6d0a6cfdb3bed6e44c2f9affd85943c76a42e25ad3a259002f31d6fb8a20",
+          "noticeArchiveUrl": "https://github.com/astral-sh/python-build-standalone/releases/download/20261026/cpython-3.12.16%2B20261026-x86_64-unknown-linux-gnu-pgo%2Blto-full.tar.zst",
+          "noticeArchiveSha256": "789924432efcaaf05fec4bd3e4d8798733326c2ac0540eda33e84913c37a231e"
+        }
+      },
+      "omittedNotices": [
+        "Licenses/python/LICENSE.tcl.txt"
+      ],
+      "removed": {
+        "why": "Never used by the companion. _dbm links Berkeley DB (Sleepycat); _tkinter links Tcl/Tk and X11; share holds ncurses' terminfo; libpython is for embedding (the interpreter is statically linked); the rest are build tools, tests and pip. bin/python3.12 becomes bin/python3.",
+        "paths": [
+          "bin/pip*",
+          "bin/idle3*",
+          "bin/pydoc3*",
+          "bin/2to3*",
+          "bin/python3*-config",
+          "bin/python",
+          "lib/libpython*",
+          "include",
+          "share",
+          "lib/pkgconfig",
+          "lib/libtcl9*",
+          "lib/tcl9*",
+          "lib/tk9*",
+          "lib/itcl*",
+          "lib/thread*",
+          "lib/python3.12/ensurepip",
+          "lib/python3.12/idlelib",
+          "lib/python3.12/tkinter",
+          "lib/python3.12/turtledemo",
+          "lib/python3.12/turtle.py",
+          "lib/python3.12/test",
+          "lib/python3.12/config-3.12-*",
+          "lib/python3.12/lib-dynload/_dbm.*",
+          "lib/python3.12/lib-dynload/_tkinter.*",
+          "lib/python3.12/lib-dynload/_test*",
+          "lib/python3.12/lib-dynload/_ctypes_test.*",
+          "lib/python3.12/lib-dynload/xxlimited*",
+          "lib/python3.12/lib-dynload/xxsubtype*",
+          "lib/python3.12/site-packages/pip",
+          "lib/python3.12/site-packages/pip-*"
+        ]
+      }
+    },
+    "pythonPackages": [
+      {
+        "component": "Pillow",
+        "pythonPaths": [
+          "pillow.libs"
+        ],
+        "architectures": {
+          "x86_64": {
+            "downloadUrl": "https://files.pythonhosted.org/packages/e6/99/fdf65cc539e266ab93546c261bdf98411fe165c6e4e13f9dbf597097192b/pillow-13.0.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
+            "sha256": "42d63be3af4f9b951b199b0a9d23365d37ab14687e6d77b74940432c8515c4ca"
+          }
+        }
+      },
+      {
+        "component": "OpenUSD",
+        "pythonPaths": [
+          "usd_core.libs"
+        ],
+        "architectures": {
+          "x86_64": {
+            "downloadUrl": "https://files.pythonhosted.org/packages/19/0b/efe5c0d7c273149ac94083831e5b36649925a621a73cd2ddf9616e160c8c/usd_core-26.8-cp312-none-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
+            "sha256": "204fb1ef1fc977b827c491f4e9fa39b57518504ed0cacfe12e026e95123cacf1"
+          }
+        }
+      }
+    ],
+    "unsupportedArchitectures": {
+      "aarch64": "usd-core 26.8 publishes no aarch64 Linux wheel, so an aarch64 package could not convert a scan."
+    }
+  }
 }

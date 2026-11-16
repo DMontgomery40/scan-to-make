@@ -124,6 +124,11 @@ struct NotificationPrefs {
 /// A registered login item can still be awaiting approval; turning it off cancels that registration.
 enum LoginRegistrationAction: Equatable {
     case none, register, unregister, approvalRequired, unavailable
+    /// What Settings' Open at login shows from the system's status alone (a companion that doesn't keep settings): on once
+    /// registered, including while System Settings still waits for the person's approval (#829), which `approvalLine` says.
+    static func shownOn(_ status: SMAppService.Status) -> Bool { status == .enabled || status == .requiresApproval }
+    static let approvalLine = "Allow Counterpart in System Settings → General → Login Items."
+    static func line(_ status: SMAppService.Status) -> String? { status == .requiresApproval ? approvalLine : nil }
     static func resolve(on: Bool, status: SMAppService.Status) -> Self {
         switch status {
         case .enabled: return on ? .none : .unregister
@@ -136,11 +141,15 @@ enum LoginRegistrationAction: Equatable {
 
 /// PRD §5.9: the first time the companion keeps settings, this Mac's own choices go up to it.
 enum SettingsMigration {
-    static func currentGeneral(loginStatus: SMAppService.Status, showInDock: Bool, keepAwake: Bool) -> [String: Bool] {
+    /// `turnedOff`: the person switched Open at login off on this Mac (`openAtLoginOff`). Only that carries "off" up: a
+    /// login item that isn't registered yet (a first launch whose `register()` failed or hadn't run) is the default, on,
+    /// and applying it registers it. Carrying "off" up there made one failed registration permanent (#829: a fresh
+    /// install showed Open at login off).
+    static func currentGeneral(loginStatus: SMAppService.Status, turnedOff: Bool = false, showInDock: Bool, keepAwake: Bool) -> [String: Bool] {
         var values = ["showInDock": showInDock, "keepAwake": keepAwake]
         switch loginStatus {
         case .enabled, .requiresApproval: values["openAtLogin"] = true
-        case .notRegistered: values["openAtLogin"] = false
+        case .notRegistered: values["openAtLogin"] = !turnedOff
         default: break // notFound or a future state is unknown, not a new registration request.
         }
         return values

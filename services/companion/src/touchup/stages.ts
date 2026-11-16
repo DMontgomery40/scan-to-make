@@ -24,14 +24,29 @@ export function stageWords(id: StageId, engine: DesignEngine, kind: PassKind): s
   }
 }
 
-/** The pass's time left: what's left of the current stage's typical time, plus the typical time of the stages after it. */
-export function passEstimate(stages: PassStage[], plan: StageId[], typical: Record<StageId, number>, nowMs: number): {remainingSec: number; endsAtMs: number} {
+const median = (list: number[]) => {
+  const sorted = [...list].sort((a, b) => a - b), middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[middle]! : (sorted[middle - 1]! + sorted[middle]!) / 2;
+};
+
+/**
+ * The pass's time left: what's left of the current stage's typical time, plus the typical time of the stages after it.
+ * A stage past its typical time (#859: "about 4 min", then "about 1 min", through a 64-minute design) reads what the
+ * passes on this Mac that ran at least this long went on to take: the median of their remaining time. Past every one of
+ * them, or with none recorded, it reads half as long again as it has taken so far, never less than 30 seconds.
+ */
+export function passEstimate(stages: PassStage[], plan: StageId[], typical: Record<StageId, number>, nowMs: number,
+  history: Partial<Record<StageId, number[]>> = {}): {remainingSec: number; endsAtMs: number} {
   const current = stages.at(-1);
   const index = current ? plan.indexOf(current.id) : -1;
-  const elapsed = current && current.endedAtMs === undefined ? (nowMs - current.startedAtMs) / 1000 : 0;
-  // An overrunning stage still has a little left: never "0 min" while it works.
-  const running = current && current.endedAtMs === undefined ? typical[current.id] - elapsed : 0;
-  const left = current && current.endedAtMs === undefined ? (running > 0 ? running : Math.min(30, typical[current.id])) : 0;
+  const running = current && current.endedAtMs === undefined;
+  const elapsed = running ? (nowMs - current.startedAtMs) / 1000 : 0;
+  let left = 0;
+  if (running && typical[current.id] - elapsed > 0) left = typical[current.id] - elapsed;
+  else if (running) {
+    const longer = (history[current.id] ?? []).filter(seconds => seconds > elapsed);
+    left = longer.length ? median(longer) - elapsed : Math.max(Math.min(30, typical[current.id]), elapsed / 2);
+  }
   const rest = plan.slice(index + 1).reduce((sum, id) => sum + typical[id], 0);
   const remainingSec = Math.round(left + rest);
   return {remainingSec, endsAtMs: nowMs + remainingSec * 1000};
@@ -53,14 +68,13 @@ export class PassTimings {
     return this.#state;
   }
   async typical(kind: PassKind, engine: DesignEngine): Promise<Record<StageId, number>> {
+    const samples = await this.samples(kind, engine), defaults = STAGE_DEFAULT_SEC[kind];
+    return Object.fromEntries((Object.keys(defaults) as StageId[]).map(id => [id, samples[id].length ? Math.round(median(samples[id])) : defaults[id]])) as Record<StageId, number>;
+  }
+  /** The recorded durations behind `typical`, per stage, oldest first: what a stage past its typical time reads (#859). */
+  async samples(kind: PassKind, engine: DesignEngine): Promise<Record<StageId, number[]>> {
     const state = await this.#load();
-    const median = (list: number[] | undefined, fallback: number) => {
-      if (!list?.length) return fallback;
-      const sorted = [...list].sort((a, b) => a - b), middle = Math.floor(sorted.length / 2);
-      return Math.round(sorted.length % 2 ? sorted[middle]! : (sorted[middle - 1]! + sorted[middle]!) / 2);
-    };
-    const defaults = STAGE_DEFAULT_SEC[kind];
-    return Object.fromEntries((Object.keys(defaults) as StageId[]).map(id => [id, median(state[`${kind}:${engine}:${id}`], defaults[id])])) as Record<StageId, number>;
+    return Object.fromEntries((Object.keys(STAGE_DEFAULT_SEC[kind]) as StageId[]).map(id => [id, [...(state[`${kind}:${engine}:${id}`] ?? [])]])) as Record<StageId, number[]>;
   }
   async record(kind: PassKind, engine: DesignEngine, id: StageId, seconds: number): Promise<void> {
     if (!Number.isFinite(seconds) || seconds < 0) return;

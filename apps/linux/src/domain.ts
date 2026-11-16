@@ -1235,6 +1235,16 @@ export function fitMissing(c: FitChoice) {
   return typed > 0 && measuredSizes(c).length === typed ? undefined : "Enter at least one measurement in millimetres.";
 }
 /** `objects.makeFromScan`'s parameters: `fit` only with a fit's words, as the iPhone and the Mac send it. */
+export type NewProjectKind = "fit" | "copy" | "published";
+
+/**
+ * What New project sends (#867): a kind only when the person chose one. With none chosen the companion decides from
+ * the words and files, so "A replica of …" becomes a copy, never a fit the picker happened to start on.
+ */
+export function newProjectParams(instructions: string, kind: NewProjectKind | undefined, url: string) {
+  return { instructions, ...(kind ? { kind } : {}), ...(kind === "published" ? { url } : {}) };
+}
+
 export function makeFromScanParams(id: string, kind: "fit" | "copy", instructions: string, choice: FitChoice) {
   const words = instructions.trim();
   const measured = choice.source === "measured" ? measuredSizes(choice) : [];

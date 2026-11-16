@@ -493,6 +493,17 @@ class ContractTests {
         assertEquals("scan", com.scantomake.counterpart.api.draftBody("A clip.", "fit", com.scantomake.counterpart.api.ProjectFit.of("scan"))["fit"].obj!!["sizeSource"].str)
     }
 
+    @Test fun newSendsAKindOnlyWhenThePersonChoseOne() {
+        // #867: "A replica of …" with nothing chosen sends no kind, so the computer reads the words and makes a copy.
+        val chosen = com.scantomake.counterpart.api.chosenNewKind(null, null)
+        assertNull(chosen)
+        assertNull(com.scantomake.counterpart.api.createBody("A replica of this desk thing", chosen, null, null)["kind"])
+        assertNull(com.scantomake.counterpart.api.chosenNewKind("later", null))
+        assertEquals("copy", com.scantomake.counterpart.api.chosenNewKind("copy", null))
+        assertEquals("fit", com.scantomake.counterpart.api.chosenNewKind("fit", null))
+        assertEquals("fit", com.scantomake.counterpart.api.createBody("A belt case", "fit", null, null)["kind"].str)
+    }
+
     @Test fun cappedPassesOfferRetryAndChangesAsTheSwiftDoes() {
         val rows = com.scantomake.counterpart.core.WireJson.parseToJsonElement(kitFixture("capped-projects.json").readText()).arr!!
         assertEquals(8, rows.size)

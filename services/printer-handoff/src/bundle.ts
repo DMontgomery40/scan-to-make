@@ -3,7 +3,7 @@ import {mkdir, open, readFile, readdir, rename, rm, writeFile} from 'node:fs/pro
 import {constants} from 'node:fs';
 import {join, resolve} from 'node:path';
 import {z} from 'zod';
-import {inspectModelFile} from './model-file.js';
+import {inspectModelFile, type ModelFileOrigin} from './model-file.js';
 import {printerBackendSchema, printerSelectionSchema, type PrinterBackend, type PrinterSelection} from './config.js';
 
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
@@ -69,7 +69,7 @@ export class HandoffBundleStore {
   directory(id: string): string { return join(this.#root, bundleId.parse(id)); }
   private manifestPath(id: string): string { return join(this.directory(id), 'handoff.json'); }
 
-  async create(input: ({stl: Buffer; model?: never} | {model: {bytes: Buffer; format: 'stl' | '3mf'}; stl?: never}) & {prompt: string; backend: PrinterBackend; selection?: PrinterSelection}): Promise<HandoffManifest> {
+  async create(input: ({stl: Buffer; model?: never} | {model: {bytes: Buffer; format: 'stl' | '3mf'; origin?: ModelFileOrigin}; stl?: never}) & {prompt: string; backend: PrinterBackend; selection?: PrinterSelection}): Promise<HandoffManifest> {
     const bytes = input.model?.bytes ?? input.stl;
     if (!Buffer.isBuffer(bytes) || bytes.length < 84 || bytes.length > MAX_STL_BYTES) {
       throw new Error('Clean STL byte limit exceeded');
@@ -79,7 +79,7 @@ export class HandoffBundleStore {
     if (input.selection !== undefined) printerSelectionSchema.parse(input.selection);
     const id = randomUUID();
     const stl = Buffer.from(bytes);
-    if (input.model) inspectModelFile(stl, input.model.format);
+    if (input.model) inspectModelFile(stl, input.model.format, input.model.origin ? {origin: input.model.origin} : {});
     const file = input.model ? `original.${input.model.format}` : 'clean.stl';
     const manifest = handoffManifestSchema.parse({
       schema: 'scan-to-make.printer-handoff/0.1', id, createdAtMs: Date.now(),

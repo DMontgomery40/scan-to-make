@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import platform
 import re
+import socket
 import shlex
 import shutil
 import signal
@@ -358,6 +359,27 @@ def linux_hosts():
     return configured
 
 
+def pinned_linux_host(spec):
+    """The Linux box a job names in its env as CI_LOCAL_LINUX_HOST (hosted Actions ignore it), else None."""
+    if not str(spec['job'].get('runs-on','')).startswith('ubuntu'): return None
+    host = str(spec['job'].get('env', {}).get('CI_LOCAL_LINUX_HOST', '')).strip()
+    return host or None
+
+
+def is_this_host(host):
+    return socket.gethostname().split('.')[0] == host.split('.')[0]
+
+
+def probe_linux_host(host):
+    """A named box must answer SSH: its job never moves to another box, and never is skipped."""
+    done = subprocess.run(['ssh', '-o', 'ConnectTimeout=5', '-o', 'BatchMode=yes', host, 'true'],
+        stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, timeout=15)
+    if done.returncode:
+        lines = (done.stderr or '').strip().splitlines()
+        raise ValueError('Linux host ' + host + ', which a job names (CI_LOCAL_LINUX_HOST), did not answer SSH: '
+            + (lines[-1] if lines else 'ssh exited ' + str(done.returncode))[:300])
+
+
 LINUX_JOBS = '/var/tmp/stm-ci'
 
 
@@ -479,6 +501,8 @@ def main():
         try:
             runner = spec['job']['runs-on']
             if not isinstance(runner,str): raise ValueError('Unsupported runner labels')
+            pinned = pinned_linux_host(spec)
+            if pinned: return execute_job(spec, root, jobdir) if is_this_host(pinned) else run_linux(spec, root, jobdir, pinned)
             if runner.startswith(('macos', 'xcode-')) and platform.system()!='Darwin': return run_mac(spec, root, jobdir, args.mac_host)
             if runner.startswith('ubuntu') and host: return run_linux(spec, root, jobdir, host)
             if (runner.startswith('ubuntu') and platform.system()=='Linux') or (runner.startswith(('macos', 'xcode-')) and platform.system()=='Darwin'): return execute_job(spec, root, jobdir)
@@ -487,12 +511,21 @@ def main():
         except Exception as error:
             return {'spec': spec, 'status':'FAIL', 'steps':[{'name':'Local runner','command':'','status':'FAIL','seconds':0,'note':str(error)}]}
     # On the Mac, ubuntu jobs go to the Linux boxes: one lane per configured box (each checked first), lanes in parallel, while Apple jobs run here.
-    ubuntu = [i for i, spec in enumerate(jobs) if str(spec['job'].get('runs-on','')).startswith('ubuntu')]
+    ubuntu = [i for i, spec in enumerate(jobs) if str(spec['job'].get('runs-on','')).startswith('ubuntu') and not pinned_linux_host(spec)]
+    pinned = {}
+    for i, spec in enumerate(jobs):
+        if pinned_linux_host(spec): pinned.setdefault(pinned_linux_host(spec), []).append(i)
     hosts = linux_hosts() if platform.system()=='Darwin' and ubuntu else []
     remote = ubuntu if hosts else []
     lanes = {host: remote[k::len(hosts)] for k, host in enumerate(hosts)}
+    # A job that names its box (#818: the Tauri crate's tests need cargo and WebKitGTK headers, which only one box has)
+    # runs there, from the Mac or from any Linux box, in a lane of its own after that box's shared jobs.
+    for host, indexes in pinned.items():
+        if not is_this_host(host) and host not in hosts: probe_linux_host(host)
+        lanes[host] = lanes.get(host, []) + indexes
+    remote = remote + [i for indexes in pinned.values() for i in indexes]
     results = [None] * len(jobs)
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(hosts))) as pool:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(lanes))) as pool:
         futures = [pool.submit(lambda host, lane: [(i, run_one(i, jobs[i], host)) for i in lane], host, lane) for host, lane in lanes.items() if lane]
         for index, spec in enumerate(jobs):
             if index not in remote: results[index] = run_one(index, spec)
