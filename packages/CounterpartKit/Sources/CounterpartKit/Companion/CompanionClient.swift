@@ -666,7 +666,8 @@ public final class CompanionClient: @unchecked Sendable {
     }
 
     private func downloadFile(_ project: Project, _ name: String) async throws -> URL {
-        let allowed = Pattern(#"original/[0-9]+|model\.stl|current/model\.stl|renders/[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.png|asks/[a-f0-9-]{36}\.(jpg|png)|prints/[a-f0-9-]{36}/frames/[a-f0-9-]{36}\.jpg|(?:photos|capture|scan)/[A-Za-z0-9][A-Za-z0-9._ -]{0,127}|pictures/[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.png|versions/[a-f0-9-]{36}/(?:(?:renders|pictures)/)?[A-Za-z0-9][A-Za-z0-9._-]{0,120}"#)
+        // #691: a multi-part design's part meshes (`current/parts/…`, `versions/<id>/parts/…`), as the companion serves them.
+        let allowed = Pattern(#"original/[0-9]+|model\.stl|current/model\.stl|current/parts/[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.stl|versions/[a-f0-9-]{36}/parts/[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.stl|renders/[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.png|asks/[a-f0-9-]{36}\.(jpg|png)|prints/[a-f0-9-]{36}/frames/[a-f0-9-]{36}\.jpg|(?:photos|capture|scan)/[A-Za-z0-9][A-Za-z0-9._ -]{0,127}|pictures/[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.png|versions/[a-f0-9-]{36}/(?:(?:renders|pictures)/)?[A-Za-z0-9][A-Za-z0-9._-]{0,120}"#)
         guard Pattern(Self.uuid).matches(project.id), allowed.matches(name), !name.contains("..") else { throw CompanionError.transport("invalid-request") }
         let version = project.mediaVersionTag
         let folder = cache.appending(path: project.id, directoryHint: .isDirectory).appending(path: version, directoryHint: .isDirectory)

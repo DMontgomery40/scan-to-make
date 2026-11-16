@@ -107,15 +107,15 @@ private func loadNode(_ url: URL, zUp: Bool, tint: NSColor?, own: Bool) throws -
         if zUp { node.eulerAngles.x = -.pi / 2 }
         return node
     }
+    // An STL whose facet normals are all zero (exporters needn't write them) drew black: it is drawn flat from its faces'
+    // winding, as a 3MF's meshes are. A file's own normals are kept.
+    if url.pathExtension.lowercased() == "stl", let mesh = unlitSTL(url) {
+        let node = try threeMFNode(ThreeMF(meshes: [mesh]), tint: tint)
+        if zUp { node.eulerAngles.x = -.pi / 2 }
+        return node
+    }
     let asset = MDLAsset(url: url)
     asset.loadTextures()
-    // An STL whose facet normals are all zero (exporters needn't write them) drew black: those are computed from its faces.
-    // A file's own normals are kept; computing them anew for every STL left dark slivers on real parts.
-    if url.pathExtension.lowercased() == "stl" {
-        for case let mesh as MDLMesh in asset.childObjects(of: MDLMesh.self) where !hasNormals(mesh) {
-            mesh.addNormals(withAttributeNamed: MDLVertexAttributeNormal, creaseThreshold: 1)
-        }
-    }
     let scene = SCNScene(mdlAsset: asset)
     let holder = SCNNode()
     for child in scene.rootNode.childNodes { child.removeFromParentNode(); holder.addChildNode(child) }
@@ -137,14 +137,26 @@ private func loadNode(_ url: URL, zUp: Bool, tint: NSColor?, own: Bool) throws -
     return holder
 }
 
-/// Whether a mesh carries a usable normal: any vertex's normal that isn't zero.
-private func hasNormals(_ mesh: MDLMesh) -> Bool {
-    guard let data = mesh.vertexAttributeData(forAttributeNamed: MDLVertexAttributeNormal, as: .float3) else { return false }
-    for i in 0..<mesh.vertexCount {
-        let n = data.dataStart.advanced(by: i * data.stride).assumingMemoryBound(to: Float.self)
-        if abs(n[0]) + abs(n[1]) + abs(n[2]) > 1e-6 { return true }
+/// A binary STL whose every facet normal is zero, as one mesh (millimetres, Z up); nil for any other file.
+func unlitSTL(_ url: URL) -> ThreeMF.Mesh? {
+    guard let data = try? Data(contentsOf: url, options: .mappedIfSafe), data.count >= 84 else { return nil }
+    let count = Int(data.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: 80, as: UInt32.self).littleEndian })
+    guard count > 0, data.count >= 84 + count * 50 else { return nil }
+    var positions: [SIMD3<Float>] = [], triangles: [SIMD3<UInt32>] = []
+    positions.reserveCapacity(count * 3); triangles.reserveCapacity(count)
+    let lit = data.withUnsafeBytes { raw -> Bool in
+        func float(_ at: Int) -> Float { Float(bitPattern: raw.loadUnaligned(fromByteOffset: at, as: UInt32.self).littleEndian) }
+        for i in 0..<count {
+            let at = 84 + i * 50
+            if abs(float(at)) + abs(float(at + 4)) + abs(float(at + 8)) > 1e-6 { return true }
+            let base = UInt32(positions.count)
+            for k in 0..<3 { positions.append(SIMD3(float(at + 12 + k * 12), float(at + 16 + k * 12), float(at + 20 + k * 12))) }
+            triangles.append(SIMD3(base, base + 1, base + 2))
+        }
+        return false
     }
-    return false
+    return lit ? nil : ThreeMF.Mesh(name: url.deletingPathExtension().lastPathComponent, positions: positions, triangles: triangles,
+                                    colours: Array(repeating: nil, count: triangles.count))
 }
 
 /// Scene lights for a printed part: a key from above and in front, a fill, a rim, and enough ambient that black PLA
