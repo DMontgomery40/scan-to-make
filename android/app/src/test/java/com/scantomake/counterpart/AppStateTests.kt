@@ -96,7 +96,13 @@ class AppStateTests {
         }
         pair()
         state.startFollowing()
-        dispatcher.scheduler.runCurrent()
+        // The reads finish off the main thread: run what they queue until the event's read has landed (or 5 s pass).
+        val deadline = System.currentTimeMillis() + 5_000
+        while (System.currentTimeMillis() < deadline &&
+            (state.designRevisions.value[id] == null || state.projects.value.singleOrNull { it.id == id }?.current?.parts.isNullOrEmpty())) {
+            dispatcher.scheduler.runCurrent(); Thread.sleep(20)
+        }
+        assertTrue("the events were read: ${transport.paths}", reads >= 2)
         val shown = state.projects.value.single { it.id == id }
         assertEquals(listOf("current/parts/part-1.stl", "current/parts/part-2.stl"), shown.current!!.parts.map { it.mesh })
         assertEquals(6, state.designRevisions.value[id])
