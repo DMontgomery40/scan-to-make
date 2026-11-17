@@ -114,12 +114,13 @@ class OnDeviceLibrary(val base: File) {
         file
     }
 
-    /** Writes a fully arrived file into place; that one file's older version goes only now. */
-    fun commit(bytes: ByteArray, project: String, name: String, version: Long, variant: String, etag: String? = null): File = synchronized(lock) {
+    /** Writes a fully arrived file into place; that one file's older version goes only now. [replace]: new bytes for the
+     *  same version and variant replace the kept ones (a part's mesh remade under its name, #691). */
+    fun commit(bytes: ByteArray, project: String, name: String, version: Long, variant: String, etag: String? = null, replace: Boolean = false): File = synchronized(lock) {
         val root = mac?.let(::folder) ?: throw IllegalStateException("no computer")
         val k = key(project, name)
         index.entries[k]?.let { current ->
-            if (current.version > version || (current.version == version && current.variant == variant)) return@synchronized File(File(root, project), current.file)
+            if (current.version > version || (!replace && current.version == version && current.variant == variant)) return@synchronized File(File(root, project), current.file)
         }
         val projectFolder = File(root, project).apply { mkdirs() }
         val target = File(projectFolder, "v$version-$variant")

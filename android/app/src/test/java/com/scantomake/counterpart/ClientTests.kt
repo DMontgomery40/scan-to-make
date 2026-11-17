@@ -224,6 +224,81 @@ class CompanionClientTests {
         } finally { dir.deleteRecursively() }
     }
 
+    /** Review of #869 (P2-1, P3-4): a part's mesh is asked about every time the stage opens, by the copy's own validator,
+     *  but a part the phone has is drawn with the computer away; its remade bytes replace it; a 404 is still gone; and a
+     *  413 is remembered, so an oversized part isn't asked for again. Cache and library copies alike. */
+    @Test fun aPartMeshIsRevalidatedButDrawnFromThePhonesCopyWithTheComputerAway() = kotlinx.coroutines.runBlocking {
+        val mesh = "current/parts/part-1.stl"
+        var mode = "ok"
+        var bytes = "solid one"
+        val fake = FakeTransport { request, _ ->
+            val asked = request.headers.entries.firstOrNull { it.key.equals("If-None-Match", true) }?.value
+            when (mode) {
+                "away" -> throw com.scantomake.counterpart.net.TransportException("network")
+                "gone" -> json(404, mapOf("error" to "not-found"))
+                "large" -> HttpReply(413, """{"error":{"code":"file-too-large"}}""".toByteArray())
+                else -> if (asked == "\"$bytes\"") HttpReply(304, ByteArray(0)) else HttpReply(200, bytes.toByteArray(), mapOf("ETag" to "\"$bytes\""))
+            }
+        }
+        val store = PairingStore(MemoryStore()).apply { save(v2Record(), false) }
+        val dir = File(System.getProperty("java.io.tmpdir"), "cp-parts-${System.nanoTime()}")
+        val library = OnDeviceLibrary(File(dir, "library")).apply { use("m") }
+        val companion = CompanionClient(PairingClient(store, fake), fake, "Pixel 8", "David’s Pixel", File(dir, "cache"), library)
+        fun projectOf(pid: String) = Project.decode(parseObject("""{"id":"$pid","createdAtMs":1,"updatedAtMs":2,"state":"ready","photos":[],"passes":[{"startedAtMs":9,"endedAtMs":10,"status":"done"}]}""")!!)!!
+        var project = projectOf("0b6f0f43-7c35-4b8a-9a3c-8f0b4c4b2a13")
+        fun asks() = fake.calls.map { it.request }.filter { it.url.endsWith(mesh) }
+        fun validatorAsked() = asks().last().headers.entries.firstOrNull { it.key.equals("If-None-Match", true) }?.value
+        try {
+            for (keep in listOf(OnDeviceLibrary.Keep.Pictures, OnDeviceLibrary.Keep.Models)) {
+                library.keep = keep
+                // Its own project each time, so the library's copy is the only one the phone has.
+                project = projectOf(if (keep == OnDeviceLibrary.Keep.Models) "0b6f0f43-7c35-4b8a-9a3c-8f0b4c4b2a15" else "0b6f0f43-7c35-4b8a-9a3c-8f0b4c4b2a13")
+                fake.calls.clear(); mode = "ok"; bytes = "solid one"
+                val where = if (keep == OnDeviceLibrary.Keep.Models) "library" else "cache"
+                assertEquals(where, "solid one", companion.download(project, mesh, revalidate = true).readText())
+                if (keep == OnDeviceLibrary.Keep.Models) assertTrue("kept in the library", library.entries.any { it.project == project.id && it.name == mesh })
+                // The computer away: the copy the phone has, asked about by its own validator first.
+                mode = "away"
+                assertEquals(where, "solid one", companion.download(project, mesh, revalidate = true).readText())
+                assertEquals(where, "\"solid one\"", validatorAsked())
+                // Unchanged: 304 keeps it. Remade under the same name: the new bytes replace it.
+                mode = "ok"
+                assertEquals(where, "solid one", companion.download(project, mesh, revalidate = true).readText())
+                bytes = "solid two"
+                assertEquals(where, "solid two", companion.download(project, mesh, revalidate = true).readText())
+                mode = "away"
+                assertEquals(where, "solid two", companion.download(project, mesh, revalidate = true).readText())
+                // Gone from the computer: said so, never the stale copy.
+                mode = "gone"
+                try { companion.download(project, mesh, revalidate = true); fail(where) } catch (e: CompanionException) { assertEquals(where, "not-found", e.code) }
+            }
+            // A 413 is remembered: the oversized part is not asked for again.
+            val big = "current/parts/part-9.stl"
+            mode = "large"; fake.calls.clear()
+            repeat(2) { try { companion.download(project, big, revalidate = true); fail("too large") } catch (e: CompanionException) { assertEquals("file-too-large", e.code) } }
+            assertEquals(1, fake.calls.count { it.request.url.endsWith(big) })
+            assertTrue(library.isTooLarge(project.id, big, project.mediaVersion))
+        } finally { dir.deleteRecursively() }
+    }
+
+    /** P3-4 when the phone has a copy and the part grows past the limit: also remembered, also not asked again. */
+    @Test fun aPartThatGrowsTooLargeIsRememberedWhileRevalidating() = kotlinx.coroutines.runBlocking {
+        val mesh = "current/parts/part-1.stl"
+        var large = false
+        val fake = FakeTransport { _, _ -> if (large) HttpReply(413, """{"error":{"code":"file-too-large"}}""".toByteArray()) else HttpReply(200, "solid".toByteArray(), mapOf("ETag" to "\"a\"")) }
+        val store = PairingStore(MemoryStore()).apply { save(v2Record(), false) }
+        val dir = File(System.getProperty("java.io.tmpdir"), "cp-parts-large-${System.nanoTime()}")
+        val library = OnDeviceLibrary(File(dir, "library")).apply { use("m"); keep = OnDeviceLibrary.Keep.Pictures }
+        val companion = CompanionClient(PairingClient(store, fake), fake, null, null, File(dir, "cache"), library)
+        val project = Project.decode(parseObject("""{"id":"0b6f0f43-7c35-4b8a-9a3c-8f0b4c4b2a14","createdAtMs":1,"updatedAtMs":2,"state":"ready","photos":[],"passes":[]}""")!!)!!
+        try {
+            companion.download(project, mesh, revalidate = true)
+            large = true; fake.calls.clear()
+            repeat(2) { try { companion.download(project, mesh, revalidate = true); fail() } catch (e: CompanionException) { assertEquals("file-too-large", e.code) } }
+            assertEquals(1, fake.calls.size)
+        } finally { dir.deleteRecursively() }
+    }
+
     /** #616 (#743): an earlier design's thumbnail and model come from `versions/<id>/…`, as CounterpartKit's
      *  `testASealedDesignsFilesDownloadAndNothingElseUnderVersions`: the allowlist and the scope table both know it, and
      *  nothing else under versions is fetched. Its It works / Needs changes names the design. */
