@@ -51,6 +51,11 @@ export function spoolColour(p: Project): string | undefined {
   return hex(p.print?.live?.activeFilament?.color);
 }
 
+/** Whether a copy still leads with its scan: no spool chosen, and no part with its own colour yet (#858, #691). */
+export function copyLeadsWithScan(p: Project): boolean {
+  return p.kind === "copy" && !spoolColour(p) && !(drawnParts(p) ?? []).some((part) => part.colour !== "neutral");
+}
+
 export function printableParts(p: Project): PrintablePart[] {
   const plates = p.plates ?? [];
   // Every plate the file has is an entry; one whose picture the MCP didn't send shows the placeholder (""). With the
@@ -159,9 +164,10 @@ export function gallery(p: Project, parts: PrintablePart[] = printableParts(p)):
     entries.push({ id: `scan-${index}`, kind: "scan", label: scans.length > 1 ? `Scan ${index + 1}` : "What you scanned", drawing: { model: scan },
       colour: "own", measures: "Scan", photos }),
   );
-  // A copy before a spool is chosen leads with the scanned object in its own colours (the mockup's potato).
+  // A copy leads with the scanned object in its own colours (the mockup's potato) until its result is drawn in its real
+  // colours: a spool chosen, or (#858) the printer MCP's parts carrying theirs. The companion's `copyLeadsWithScan`.
   const scanAt = entries.findIndex((e) => e.kind === "scan");
-  if (p.kind === "copy" && !spoolColour(p) && scanAt > 0) entries.unshift(...entries.splice(scanAt, 1));
+  if (copyLeadsWithScan(p) && scanAt > 0) entries.unshift(...entries.splice(scanAt, 1));
   return entries;
 }
 
