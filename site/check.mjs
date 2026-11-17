@@ -10,6 +10,11 @@ const failures = [];
 // from the same address).
 const PUBLIC = /^https:\/\/(fonts\.(googleapis|gstatic)\.com(\/|$)|dmontgomery40\.github\.io\/(bambu-printer-mcp|mcp-3D-printer-server)\/|www\.npmjs\.com\/package\/(bambu-printer-mcp|mcp-3d-printer-server)$|github\.com\/DMontgomery40\/(bambu-printer-mcp|mcp-3D-printer-server|scan-to-make)$|makerworld\.com\/en\/models\/(1531561|198362-vernier-caliper-ruler-two-lengths#profileId-232006)$)/;
 const RELEASE_LINKS = new Set([
+  'https://github.com/DMontgomery40/scan-to-make/releases/download/v2.0-beta.8/Counterpart-202611170622.zip',
+  'https://github.com/DMontgomery40/scan-to-make/releases/download/v2.0-beta.8/Counterpart-android.apk',
+  'https://github.com/DMontgomery40/scan-to-make/releases/download/v2.0-beta.8/Counterpart-linux-amd64.deb',
+  'https://github.com/DMontgomery40/scan-to-make/releases/download/v2.0-beta.8/Counterpart-linux-x86_64.AppImage',
+  'https://github.com/DMontgomery40/scan-to-make/releases/tag/v2.0-beta.8',
   'https://github.com/DMontgomery40/scan-to-make/releases/download/v2.0-beta.7/Counterpart-202611151935.zip',
   'https://github.com/DMontgomery40/scan-to-make/releases/download/v2.0-beta.7/Counterpart-android.apk',
   'https://github.com/DMontgomery40/scan-to-make/releases/download/v2.0-beta.7/Counterpart-linux-amd64.deb',
