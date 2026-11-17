@@ -80,10 +80,15 @@ data class ProjectGallery(val entries: List<Entry>) {
                 entries += Entry("scan-$index", Kind.Scan, if (scans.size > 1) "Scan ${index + 1}" else "What you scanned", Drawing.Model(scan), Colour.Own, "Scan",
                     photos = scanPhotos(project))
             }
-            // A copy before a spool is chosen leads with the scanned object in its own colours (the mockup's potato).
-            if (project.kind == "copy" && spoolColour(project) == null) entries.indexOfFirst { it.kind == Kind.Scan }.takeIf { it > 0 }?.let { entries.add(0, entries.removeAt(it)) }
+            // A copy leads with the scanned object in its own colours (the mockup's potato) until its result is drawn in its
+            // real colours: a spool chosen, or (#858) the printer MCP's parts carrying theirs. The companion's `copyLeadsWithScan`.
+            if (copyLeadsWithScan(project)) entries.indexOfFirst { it.kind == Kind.Scan }.takeIf { it > 0 }?.let { entries.add(0, entries.removeAt(it)) }
             return ProjectGallery(entries)
         }
+
+        /** Whether a copy still leads with its scan: no spool chosen, and no part with its own colour yet (#858, #691). */
+        fun copyLeadsWithScan(project: Project): Boolean =
+            project.kind == "copy" && spoolColour(project) == null && project.current?.parts.orEmpty().none { it.colour?.let(::hex) != null }
 
         fun printableParts(project: Project): List<PrintablePart> {
             val plates = project.plates.orEmpty()
