@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
 import {existsSync} from 'node:fs';
-import {mkdir, readFile, rm, truncate, writeFile} from 'node:fs/promises';
+import {chmod, mkdir, readFile, readdir, rm, truncate, writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {createServer} from 'node:http';
 import {ObjectStore} from '../dist/objects/store.js';
@@ -43,7 +43,12 @@ function slowTool(answer, slow = () => true) {
   let release;
   const gate = new Promise(resolve => { release = resolve; });
   const tool = partsTool(answer);
-  return {asked: tool.asked, release: () => release(), modelParts: async input => { if (slow(input.modelPath)) await gate; return tool.modelParts(input); }};
+  return {asked: tool.asked, release: () => release(), modelParts: async input => {
+    // As a real call does, it ends when its signal is aborted (the companion closing).
+    input.signal?.throwIfAborted();
+    if (slow(input.modelPath)) await Promise.race([gate, new Promise((_, reject) => input.signal?.addEventListener('abort', () => reject(input.signal.reason), {once: true}))]);
+    return tool.modelParts(input);
+  }};
 }
 /** Fails the test instead of hanging when `promise` waits on the slow MCP. */
 const promptly = (promise, what) => Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject(new Error(`${what} waited for the part meshes`)), 5000))]);
@@ -71,14 +76,17 @@ async function setup(t, {runner = {}, outcomes = []} = {}) {
       summary: 'Made as the original is: black letters in a wood-colour base. Prints as one piece in two colours.',
       partColours: [{name: 'bar', colour: '#B0855D'}, {name: 'letters and inscription', colour: '#111111'}]};
   };
-  const service = new ObjectService({store, runTouchup, stlInfo: async () => [195.7, 19.9, 100.5], claudePath: '/unused',
+  const make = runner => new ObjectService({store, runTouchup, stlInfo: async () => [195.7, 19.9, 100.5], claudePath: '/unused',
     handoff: {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true'}}, passTimings: new PassTimings(join(root, 'timings.json')),
     print: {services: {store: undefined, relay: undefined, runner: {backend: 'bambu-printer-mcp', runBundle: async () => { throw new Error('unused'); }, ...runner}}},
     runPublished: async () => ({status: 'needs_file', reason: 'test'}), events: {emit: async draft => { events.push(draft); }}});
+  const service = make(runner);
   t.after(() => service.close());
+  /** The companion started again over the same projects, with this printer MCP runner. */
+  const restart = async next => { await service.close(); const again = make(next); t.after(() => again.close()); return again; };
   // #874 P1-1: parts are made after the project is ready; a settled project's parts have landed once partsMeshed resolves.
   const settle = async id => { await service.settled(id); await service.partsMeshed(); return service.get(id); };
-  return {service, store, root, events, settle};
+  return {service, store, root, events, settle, restart};
 }
 
 // The MCP names parts and filaments (ids are its keys, never parsed); a designed 3MF from counterpart_make_3mf without
@@ -343,4 +351,78 @@ test('#874 P3: sealing into a folder sealed before copies the parts it lacks, so
   assert.equal(again.id, first.id, 'the same folder, reused');
   assert.deepEqual(again.result.parts.map(part => part.mesh), [`versions/${first.id}/parts/part-1.stl`, `versions/${first.id}/parts/part-2.stl`]);
   for (const part of again.result.parts) assert.ok(existsSync(join(root, part.mesh)), `${part.mesh} is on disk`);
+});
+
+test('#874 re-check P2-2: closing stops a part-mesh job and waits for it, with no false log and nothing left behind', async t => {
+  const logged = [];
+  t.mock.method(console, 'error', line => { logged.push(String(line)); });
+  const tool = slowTool(DAD);
+  const f = await setup(t, {runner: {modelParts: tool.modelParts}});
+  const object = await f.service.create('A replica of this DAD desk thing', 'copy');
+  await f.service.start(object.id);
+  await promptly(f.service.settled(object.id), 'the pass\'s end');
+  await promptly(f.service.close(), 'closing');
+  assert.equal(tool.asked.length, 0, 'the call never finished');
+  assert.ok(!logged.some(line => line.includes('couldn’t keep this design’s parts')), 'stopping is not a failure');
+  assert.deepEqual((await readdir(join(f.store.dir(object.id), 'current'))).filter(name => name.startsWith('.parts-')), []);
+  assert.equal((await f.store.get(object.id)).current.parts, undefined);
+});
+
+test('#874 re-check P2-2: at start, a stopped job\'s folders are swept and a 3MF design with no parts is meshed again', async t => {
+  const f = await setup(t);
+  const object = await f.service.create('A replica of this DAD desk thing', 'copy');
+  await f.service.start(object.id);
+  await f.settle(object.id);
+  const current = join(f.store.dir(object.id), 'current');
+  for (const name of ['.parts-mcp-1', '.parts-next-2', '.parts-old-3']) { await mkdir(join(current, name)); await writeFile(join(current, name, 'part-1.stl'), STL); }
+  const tool = partsTool(DAD);
+  const again = await f.restart({modelParts: tool.modelParts});
+  await again.resume();
+  assert.deepEqual((await readdir(current)).filter(name => name.startsWith('.parts-')), [], 'swept before anything else');
+  await again.partsMeshed();
+  const ready = await again.get(object.id);
+  assert.deepEqual(ready.current.parts.map(part => [part.id, part.colour]), [['1/1', '#B0855D'], ['1/2', '#111111']], 'meshed again, in the pass\'s colours');
+  // A design that already has its parts, and an MCP without the tool, are left alone.
+  const third = await f.restart({modelParts: async () => { throw new Error('not asked'); }});
+  await third.resume();
+  await third.partsMeshed();
+  assert.equal((await third.get(object.id)).current.parts.length, 2);
+});
+
+test('#874 re-check P3-2: a build that fails clears the old parts too, so no unlisted folder stays behind', async t => {
+  const logged = [];
+  t.mock.method(console, 'error', line => { logged.push(String(line)); });
+  let calls = 0;
+  const tool = partsTool(DAD);
+  const modelParts = async input => { const answer = await tool.modelParts(input); return ++calls > 1 ? {...answer, skipped: ['Huge base']} : answer; };
+  const f = await setup(t, {runner: {modelParts}, outcomes: [{}, {}]});
+  const object = await f.service.create('A replica of this DAD desk thing', 'copy');
+  await f.service.start(object.id);
+  assert.equal((await f.settle(object.id)).current.parts.length, 2);
+  await f.service.correct(object.id, 'Make the letters thicker');
+  const revised = await f.settle(object.id);
+  assert.equal(revised.current.parts, undefined);
+  assert.ok(!existsSync(join(f.store.dir(object.id), 'current', 'parts')), 'the first design\'s parts are gone with it');
+  assert.ok(logged.some(line => line.includes('couldn’t mesh Huge base')));
+  await f.service.correct(object.id, 'Once more');
+  assert.ok(await f.settle(object.id), 'a later job for the project still runs');
+});
+
+test('#874 re-check P3-1: sealed copies are made before the swap, so a failure there leaves the record and the folder in agreement', async t => {
+  t.mock.method(console, 'error', () => {});
+  const tool = slowTool(DAD);
+  const f = await setup(t, {runner: {modelParts: tool.modelParts}});
+  const object = await f.service.create('A replica of this DAD desk thing', 'copy');
+  await f.service.start(object.id);
+  const ready = await promptly(f.service.settled(object.id), 'the pass\'s end');
+  const version = join(f.store.dir(object.id), 'versions', ready.versions.at(-1).id);
+  await chmod(version, 0o555);
+  try {
+    tool.release();
+    await f.service.partsMeshed();
+    const after = await f.store.get(object.id);
+    assert.equal(after.current.parts, undefined, 'not listed');
+    assert.ok(!existsSync(join(f.store.dir(object.id), 'current', 'parts')), 'and not swapped in');
+    assert.equal(after.versions.at(-1).result.parts, undefined);
+  } finally { await chmod(version, 0o755); }
 });

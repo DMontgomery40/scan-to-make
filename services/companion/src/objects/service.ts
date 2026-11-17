@@ -641,6 +641,9 @@ export class ObjectService {
     this.#closed = true;
     this.#deps.camera?.close();
     for (const controller of this.#controllers.values()) controller.abort();
+    // #874 re-check P2-2: part-mesh jobs stop and are waited for; the next start makes them again.
+    for (const stop of this.#partsStops) stop.abort();
+    await this.partsMeshed();
     // Monitors stop watching; their saved state lets the next start carry on.
     for (const monitor of this.#monitors.values()) monitor.controller.abort();
     await Promise.allSettled([...this.#monitors.values()].map(monitor => monitor.done));
@@ -2384,7 +2387,9 @@ export class ObjectService {
 
   /** After a restart: resume watching dispatched prints; a print still being prepared was interrupted. */
   async resume(): Promise<void> {
-    for (let object of await this.#deps.store.list()) {
+    const objects = await this.#deps.store.list();
+    await this.#resumeParts(objects);
+    for (let object of objects) {
       // A printer's question lives only as long as the process that asked it: none survives a restart.
       if (object.printConfirmation) object = this.#changed(await this.#deps.store.update(object.id, o => ({...o, printConfirmation: undefined})));
       if (object.state !== 'printing' || !object.print) continue;
@@ -2584,9 +2589,10 @@ export class ObjectService {
     return false;
   }
 
-  /** Part meshes being made (#691), newest request per project, and the jobs running (tests wait on them). */
+  /** Part meshes being made (#691), newest request per project, and the jobs running with their stops (tests wait on them). */
   readonly #partsWanted = new Map<string, symbol>();
   readonly #partsRunning = new Set<Promise<void>>();
+  readonly #partsStops = new Set<AbortController>();
   /** Waits until every part-mesh job has landed or given up (tests). */
   async partsMeshed(): Promise<void> { while (this.#partsRunning.size) await Promise.allSettled([...this.#partsRunning]); }
 
@@ -2594,23 +2600,53 @@ export class ObjectService {
    * #691, #874 P1-1: a model's parts are made out of band, after the model is kept and the project is ready, so a slow
    * printer MCP never holds a pass's end or a plate choice. The newest request for a project wins; its parts land only
    * while that model is still the project's (same path, same bytes), with an update event so clients redraw. A 3MF
-   * design that has them also gives them to the sealed design of the same bytes that has none yet.
+   * design that has them also gives them to the sealed design of the same bytes that has none yet. A job that fails
+   * lands as no parts (the old folder goes, logged); one stopped by `close()` lands nothing and the next start makes it
+   * again (#874 re-check P2-2, P3-2).
    */
-  #queueParts(id: string, model: string, declared?: {name?: string; colour?: string}[]): void {
-    const token = Symbol(model);
+  #queueParts(id: string, model: string, declared?: {name?: string; colour?: string}[]): Promise<void> {
+    const token = Symbol(model), stop = new AbortController();
     this.#partsWanted.set(id, token);
+    this.#partsStops.add(stop);
+    const newest = () => this.#partsWanted.get(id) === token;
+    const said = (error: unknown) => console.error(`project ${id}: couldn’t keep this design’s parts in their colours, so it shows as one piece: ${error instanceof Error ? error.message : String(error)}`);
     const job = (async () => {
-      const built = await this.#buildParts(id, model, declared);
+      let built: BuiltParts | undefined;
       try {
-        if (this.#partsWanted.get(id) !== token) return;
-        await this.#gate(id, () => this.#landParts(id, model, built, () => this.#partsWanted.get(id) === token));
+        try { built = await this.#buildParts(id, model, declared, stop.signal); }
+        catch (error) { if (stop.signal.aborted || this.#closed) return; said(error); }
+        if (!newest() || this.#closed) return;
+        await this.#gate(id, () => this.#landParts(id, model, built, newest));
       } finally {
         if (built) await rm(built.folder, {recursive: true, force: true});
-        if (this.#partsWanted.get(id) === token) this.#partsWanted.delete(id);
+        if (newest()) this.#partsWanted.delete(id);
+        this.#partsStops.delete(stop);
       }
-    })().catch(error => console.error(`project ${id}: couldn’t keep this design’s parts in their colours, so it shows as one piece: ${error instanceof Error ? error.message : String(error)}`));
+    })().catch(error => { if (!this.#closed) said(error); });
     const running = job.finally(() => this.#partsRunning.delete(running));
     this.#partsRunning.add(running);
+    return running;
+  }
+
+  /**
+   * #874 re-check P2-2: at start, the part-mesh work a stopped companion left: its folders under `current/` are swept,
+   * and a 3MF design with no parts is meshed again, one project at a time in the background, never during a pass or a
+   * print (only where the printer MCP lists the tool: the job asks it and lands nothing otherwise).
+   */
+  async #resumeParts(objects: StmObject[]): Promise<void> {
+    const again: StmObject[] = [];
+    for (const object of objects) {
+      const current = join(this.dir(object.id), 'current');
+      for (const name of await readdir(current).catch(() => [] as string[]))
+        if (/^\.parts-(?:mcp|next|old)-/.test(name)) await rm(join(current, name), {recursive: true, force: true});
+      if (object.current?.model.toLowerCase().endsWith('.3mf') && !object.current.parts && object.state !== 'touching-up' && object.state !== 'printing') again.push(object);
+    }
+    void (async () => {
+      for (const object of again) {
+        if (this.#closed) return;
+        await this.#queueParts(object.id, object.current!.model, object.current!.filaments);
+      }
+    })();
   }
 
   /**
@@ -2622,7 +2658,7 @@ export class ObjectService {
    * a part the MCP skipped, a mesh over 64 MiB or 256 MiB in all, any other model, an MCP without the tool, or a
    * failure leaves no parts, and a skip or failure is logged. Counterpart meshes nothing itself.
    */
-  async #buildParts(id: string, model: string, declared?: {name?: string; colour?: string}[]): Promise<BuiltParts | undefined> {
+  async #buildParts(id: string, model: string, declared?: {name?: string; colour?: string}[], stop?: AbortSignal): Promise<BuiltParts | undefined> {
     if (!model.toLowerCase().endsWith('.3mf')) return undefined;
     const object = await this.#deps.store.get(id).catch(() => undefined);
     if (!object) return undefined;
@@ -2634,8 +2670,10 @@ export class ObjectService {
     const sha256 = createHash('sha256').update(bytes).digest('hex');
     const staging = join(dir, 'current', `.parts-mcp-${randomUUID()}`), folder = join(dir, 'current', `.parts-next-${randomUUID()}`);
     try {
+      stop?.throwIfAborted();
       await mkdir(staging, {recursive: true, mode: 0o700});
-      const listed = await runner.modelParts({modelPath: join(dir, model), outputDir: staging, signal: AbortSignal.timeout(120_000)});
+      const listed = await runner.modelParts({modelPath: join(dir, model), outputDir: staging, signal: stop ? AbortSignal.any([AbortSignal.timeout(120_000), stop]) : AbortSignal.timeout(120_000)});
+      stop?.throwIfAborted();
       if (!listed || listed.parts.length < 2) return undefined;
       if (listed.skipped.length) throw new Error(`the printer service couldn’t mesh ${listed.skipped.slice(0, 3).join(', ')}${listed.skipped.length > 3 ? ` and ${listed.skipped.length - 3} more` : ''}`);
       // #874 P2-3: sizes before any read, all or nothing.
@@ -2649,6 +2687,7 @@ export class ObjectService {
       await mkdir(folder, {recursive: true, mode: 0o700});
       const parts: NonNullable<NonNullable<StmObject['current']>['parts']> = [];
       for (const [index, part] of listed.parts.entries()) {
+        stop?.throwIfAborted();
         if (!await isValidStl(part.stlPath)) throw new Error(`the mesh of part ${part.name ?? part.id} isn’t a complete STL`);
         const name = `part-${index + 1}.stl`;
         await copyFile(part.stlPath, join(folder, name));
@@ -2674,33 +2713,39 @@ export class ObjectService {
     if (!object?.current || object.current.model !== model) return;
     if (built && createHash('sha256').update(await readFile(join(dir, model)).catch(() => Buffer.alloc(0))).digest('hex') !== built.sha256) return;
     const target = join(dir, 'current', 'parts');
-    if (!built) {
-      await rm(target, {recursive: true, force: true});
-      if (!object.current.parts) return;
-    } else {
-      const old = join(dir, 'current', `.parts-old-${randomUUID()}`);
-      await rename(target, old).catch(error => { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; });
-      await rename(built.folder, target);
-      await rm(old, {recursive: true, force: true});
-    }
-    // A sealed design of the same bytes, sealed before its parts came, gets its own copy of them.
-    const versions: Record<string, NonNullable<NonNullable<StmObject['current']>['parts']>> = {};
-    for (const version of built ? object.versions ?? [] : []) {
-      if (version.modelSha256 !== built!.sha256 || version.result.parts) continue;
-      const folder = join(dir, 'versions', version.id, 'parts'), temp = `${folder}.sealing`;
-      await rm(temp, {recursive: true, force: true});
-      await mkdir(temp, {recursive: true});
-      for (const part of built!.parts) await copyFile(join(dir, part.mesh), join(temp, basename(part.mesh)));
-      await rm(folder, {recursive: true, force: true});
-      await rename(temp, folder);
-      versions[version.id] = built!.parts.map(part => ({...part, mesh: join('versions', version.id, 'parts', basename(part.mesh))}));
-    }
-    const updated = await store.update(id, o => {
+    const write = (versions: Record<string, ModelParts> = {}) => store.update(id, o => {
       if (o.current?.model !== model) return o;
       const {parts: _old, ...rest} = o.current;
       return {...o, current: built ? {...rest, parts: built.parts} : rest,
         ...(Object.keys(versions).length ? {versions: o.versions?.map(v => versions[v.id] ? {...v, result: {...v.result, parts: versions[v.id]}} : v)} : {})};
     }, {keepUpdatedAt: true});
+    // #874 re-check P3-1: no window where the record and the folder disagree. No parts: the record first, then the folder.
+    if (!built) {
+      if (!object.current.parts) { await rm(target, {recursive: true, force: true}); return; }
+      const updated = await write();
+      await rm(target, {recursive: true, force: true});
+      this.#deps.onChange?.(updated);
+      await this.#emit({id: randomUUID(), type: 'project.updated', projectId: id, data: {keys: ['current']}});
+      return;
+    }
+    // A sealed design of the same bytes, sealed before its parts came, gets its own copy of them, made before the swap.
+    const versions: Record<string, ModelParts> = {};
+    for (const version of object.versions ?? []) {
+      if (version.modelSha256 !== built.sha256 || version.result.parts) continue;
+      const folder = join(dir, 'versions', version.id, 'parts'), temp = `${folder}.sealing`;
+      await rm(temp, {recursive: true, force: true});
+      await mkdir(temp, {recursive: true});
+      for (const part of built.parts) await copyFile(join(built.folder, basename(part.mesh)), join(temp, basename(part.mesh)));
+      await rm(folder, {recursive: true, force: true});
+      await rename(temp, folder);
+      versions[version.id] = built.parts.map(part => ({...part, mesh: join('versions', version.id, 'parts', basename(part.mesh))}));
+    }
+    // Then the swap and the record, back to back; the old folder goes after.
+    const old = join(dir, 'current', `.parts-old-${randomUUID()}`);
+    await rename(target, old).catch(error => { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; });
+    await rename(built.folder, target);
+    const updated = await write(versions);
+    await rm(old, {recursive: true, force: true});
     this.#deps.onChange?.(updated);
     await this.#emit({id: randomUUID(), type: 'project.updated', projectId: id, data: {keys: ['current', ...(Object.keys(versions).length ? ['versions'] : [])]}});
   }
