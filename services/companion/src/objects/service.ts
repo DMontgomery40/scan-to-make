@@ -2751,7 +2751,8 @@ export class ObjectService {
       }
       const updated = await write();
       await rm(target, {recursive: true, force: true});
-      this.#deps.onChange?.(updated);
+      // #858: parts that go are drawn away (the part picture, and its sealed design's) like parts that come.
+      this.#changed(updated);
       await this.#emit({id: randomUUID(), type: 'project.updated', projectId: id, data: {keys: ['current']}});
       return;
     }
@@ -2773,7 +2774,8 @@ export class ObjectService {
     await rename(built.folder, target);
     const updated = await write(versions);
     await rm(old, {recursive: true, force: true});
-    this.#deps.onChange?.(updated);
+    // #858 (the DAD replay): the part picture, and the sealed design's, are drawn again part by part in their colours.
+    this.#changed(updated);
     await this.#emit({id: randomUUID(), type: 'project.updated', projectId: id, data: {keys: ['current', ...(Object.keys(versions).length ? ['versions'] : [])]}});
   }
 

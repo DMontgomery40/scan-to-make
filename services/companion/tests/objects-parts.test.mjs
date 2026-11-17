@@ -225,7 +225,7 @@ test('the parts fixture names the merged mesh as project-gallery.json does (#869
   const drawn = test => gallery.cases.find(c => test(c.project.current ?? {}) && c.entries?.[0]?.kind === 'part')?.entries[0].drawing.model;
   // An STL design turns as the companion's alias for its current model; a 3MF design as its merged mesh.
   const stl = drawn(current => current.model === 'current/model.stl' && !current.mergedMesh);
-  const merged = drawn(current => current.model === 'current/model.3mf' && current.mergedMesh);
+  const merged = drawn(current => current.model === 'current/model.3mf' && current.mergedMesh && !current.parts);
   assert.equal(stl, 'model.stl');
   assert.equal(merged, 'current/model.stl');
   assert.deepEqual(fixture.cases.find(c => c.name.startsWith('a sealed')).draw, [{mesh: stl, colour: 'neutral'}]);

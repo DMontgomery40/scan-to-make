@@ -109,11 +109,18 @@ export function pictureSpecs(object: StmObject): Partial<Record<PictureRole, Pic
 }
 
 /**
- * The project's picture (the gallery's first entry): its result, else its scan, else a photo's subject. A copy before
- * a spool is chosen leads with its scan in its own colours, the truest picture of it (the mockup's potato).
+ * Whether a copy still leads with its scan: until its result is drawn in its real colours, the scan in its own colours is
+ * the truest picture of it (the mockup's potato). It is drawn in them once a spool is chosen, or (#858, #691: the DAD
+ * replay's copy led with its scan, turntable and all, though its parts were black letters in a wood-colour bar) once
+ * the printer MCP's parts carry their colours.
  */
-export function leadPicture(names: ProjectPictureNames | undefined, object?: Pick<StmObject, 'kind' | 'print'>): string | undefined {
-  if (object?.kind === 'copy' && !spoolColour(object) && names?.scan) return names.scan;
+export function copyLeadsWithScan(object: Pick<StmObject, 'kind' | 'print' | 'current'>): boolean {
+  return object.kind === 'copy' && !spoolColour(object) && !object.current?.parts?.some(part => hex(part.colour));
+}
+
+/** The project's picture (the gallery's first entry): its result, else its scan, else a photo's subject; a copy as above. */
+export function leadPicture(names: ProjectPictureNames | undefined, object?: Pick<StmObject, 'kind' | 'print' | 'current'>): string | undefined {
+  if (object && copyLeadsWithScan(object) && names?.scan) return names.scan;
   return names?.part ?? names?.scan ?? names?.photo;
 }
 
@@ -166,6 +173,8 @@ export class ProjectPictures {
   /** Per project: the inputs last tried (role → name wanted), so `ensure` does nothing until they change. */
   readonly #attempted = new Map<string, string>();
   readonly #pending = new Set<string>();
+  /** Projects that changed while their pictures were being drawn: drawn again once that drawing ends (#858). */
+  readonly #again = new Set<string>();
   #queue: Promise<unknown> = Promise.resolve();
 
   constructor(draw: DrawPicture | undefined, save: (id: string, names: ProjectPictureNames, object: StmObject, states: ProjectPictureStates) => Promise<void>,
@@ -176,7 +185,9 @@ export class ProjectPictures {
   /** Queues whatever of the project's pictures is missing or out of date. Never waits for the drawing. */
   ensure(object: StmObject, dir: string): void {
     const draw = this.#draw;
-    if (!draw || this.#pending.has(object.id)) return;
+    if (!draw) return;
+    // #858 (the DAD replay): parts that landed while the picture was drawn from the 3MF's one colour were never drawn.
+    if (this.#pending.has(object.id)) { this.#again.add(object.id); return; }
     this.#pending.add(object.id);
     // Takes down a picture of an earlier file at once, not when the queue reaches this project.
     const takenDown = this.#takeDownStale(object, dir).catch(() => undefined);
@@ -213,7 +224,10 @@ export class ProjectPictures {
           if (!keep.has(`pictures/${file}`) && !file.endsWith('.drawing.png')) await rm(join(dir, 'pictures', file), {force: true});
         if (sameNames(have, drawn) && sameNames(haveStates, states) && fresh.picture === leadPicture(drawn, fresh)) return;
         await this.#save(object.id, drawn, fresh, states);
-      } finally { this.#pending.delete(object.id); }
+      } finally {
+        this.#pending.delete(object.id);
+        if (this.#again.delete(object.id)) { const latest = await this.#read(object.id).catch(() => undefined); if (latest) this.ensure(latest, dir); }
+      }
     }).catch(() => undefined);
   }
 
@@ -240,8 +254,11 @@ export class ProjectPictures {
     if (changed) await this.#save(object.id, names, object, states);
   }
 
-  /** Waits for every queued drawing (tests, shutdown). */
-  async idle(): Promise<void> { for (let i = 0; i < 3; i++) { await new Promise(resolve => setTimeout(resolve, 10)); await this.#queue; } }
+  /** Waits for every queued drawing, and any it queued again (tests, shutdown). */
+  async idle(): Promise<void> {
+    for (let i = 0; i < 3; i++) { await new Promise(resolve => setTimeout(resolve, 10)); await this.#queue; }
+    for (let queue = this.#queue; ; queue = this.#queue) { await queue; await new Promise(resolve => setTimeout(resolve, 10)); if (queue === this.#queue) return; }
+  }
 }
 
 const exists = async (dir: string, file: string) => stat(join(dir, file)).then(info => info.size > 0, () => false);
@@ -268,11 +285,14 @@ export function macDrawPicture(binary: string): DrawPicture {
 export class VersionPictures {
   #queue: Promise<unknown> = Promise.resolve();
   readonly #pending = new Set<string>();
+  readonly #again = new Set<string>();
   readonly #attempted = new Map<string, string>();
   constructor(private draw: DrawPicture | undefined, private read: (id: string) => Promise<StmObject>,
     private save: (id: string, versionId: string, names: ProjectPictureNames, states: ProjectPictureStates) => Promise<void>) {}
   ensure(object: StmObject, dir: string): void {
-    if (!this.draw || this.#pending.has(object.id) || !object.versions?.length) return;
+    if (!this.draw || !object.versions?.length) return;
+    // #858: a sealed design whose parts landed while its picture was drawn is drawn again, part by part.
+    if (this.#pending.has(object.id)) { this.#again.add(object.id); return; }
     this.#pending.add(object.id);
     this.#queue = this.#queue.then(async () => {
       const fresh = await this.read(object.id);
@@ -294,7 +314,10 @@ export class VersionPictures {
         }
         if (!sameNames(version.pictures ?? {}, names) || !sameNames(version.pictureStates ?? {}, states)) await this.save(object.id, version.id, names, states);
       }
-    }).catch(() => undefined).finally(() => this.#pending.delete(object.id));
+    }).catch(() => undefined).finally(async () => {
+      this.#pending.delete(object.id);
+      if (this.#again.delete(object.id)) { const latest = await this.read(object.id).catch(() => undefined); if (latest) this.ensure(latest, dir); }
+    });
   }
-  async idle(): Promise<void> { await this.#queue; }
+  async idle(): Promise<void> { for (let queue = this.#queue; ; queue = this.#queue) { await queue; await new Promise(resolve => setTimeout(resolve, 10)); if (queue === this.#queue) return; } }
 }
