@@ -56,7 +56,9 @@ class ProjectGalleryTests {
                         assertEquals(name, a["object"]!!.jsonPrimitive.content, d.obj)
                         assertEquals(name, a["seats"]!!.jsonPrimitive.int, d.seats.size)
                     }
-                    is ProjectGallery.Drawing.Parts -> org.junit.Assert.fail("$name: no gallery case has parts (project-parts.json does)")
+                    is ProjectGallery.Drawing.Parts -> assertEquals(name,
+                        drawing["parts"]!!.jsonArray.map { it.jsonObject["mesh"]!!.jsonPrimitive.content to it.jsonObject["colour"]!!.jsonPrimitive.content },
+                        d.parts.map { it.mesh to when (val c = it.colour) { is ProjectGallery.Colour.Spool -> c.hex; else -> "neutral" } })
                 }
             }
         }

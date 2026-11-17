@@ -344,6 +344,96 @@
    ]
   },
   {
+   "name": "a copy whose result the printer MCP drew part by part in its colours leads with that result, not its scan (#858, #691: the beta 8 DAD replay led with the scan, turntable and all)",
+   "project": {
+    "id": "11111111-1111-4111-8111-111111111111",
+    "createdAtMs": 1,
+    "updatedAtMs": 2,
+    "photos": [
+     "front.jpg"
+    ],
+    "passes": [],
+    "state": "ready",
+    "kind": "copy",
+    "scan": "scan.usdz",
+    "current": {
+     "model": "current/model.3mf",
+     "renders": [],
+     "sizeMm": [
+      194.3,
+      19.6,
+      102.1
+     ],
+     "mergedMesh": "current/model.stl",
+     "filaments": [
+      {
+       "name": "Bar",
+       "colour": "#C9A26B"
+      },
+      {
+       "name": "Letters and inscription",
+       "colour": "#1A1A1A"
+      }
+     ],
+     "parts": [
+      {
+       "id": "1/1",
+       "name": "Bar",
+       "colour": "#C9A26B",
+       "mesh": "current/parts/part-1.stl"
+      },
+      {
+       "id": "1/2",
+       "name": "Letters and inscription",
+       "colour": "#1A1A1A",
+       "mesh": "current/parts/part-2.stl"
+      }
+     ]
+    }
+   },
+   "entries": [
+    {
+     "id": "result",
+     "kind": "part",
+     "label": "Your copy",
+     "drawing": {
+      "parts": [
+       {
+        "mesh": "current/parts/part-1.stl",
+        "colour": "#C9A26B"
+       },
+       {
+        "mesh": "current/parts/part-2.stl",
+        "colour": "#1A1A1A"
+       }
+      ]
+     },
+     "colour": "own",
+     "measures": "Part",
+     "sizeMm": [
+      194.3,
+      19.6,
+      102.1
+     ],
+     "ar": "current/parts/part-1.stl"
+    },
+    {
+     "id": "scan-0",
+     "kind": "scan",
+     "label": "What you scanned",
+     "drawing": {
+      "model": "scan/scan.usdz"
+     },
+     "colour": "own",
+     "measures": "Scan",
+     "photos": [
+      "photos/front.jpg"
+     ],
+     "ar": "scan/scan.usdz"
+    }
+   ]
+  },
+  {
    "name": "a multi-colour design turns in 3D from the merged mesh beside its 3MF (current/model.stl), neutral until the MCPs report each part's colour (#769, #645); the pass's picture is its still",
    "project": {
     "id": "11111111-1111-4111-8111-111111111111",

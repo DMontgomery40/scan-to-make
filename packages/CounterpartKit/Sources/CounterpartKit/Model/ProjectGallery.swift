@@ -101,9 +101,11 @@ public struct ProjectGallery: Equatable, Sendable {
             entries.append(Entry(id: "scan-\(index)", kind: .scan, label: scans.count > 1 ? "Scan \(index + 1)" : "What you scanned",
                                  drawing: .model(scan), colour: .own, measures: "Scan", sizeMm: nil, photos: project.scanPhotos))
         }
-        // A copy before a spool is chosen: the scanned object in its own colours is the truest picture of it (the
-        // mockup's potato), so it leads, and the project's picture is the same (§5.1). A spool puts the copy first.
-        if project.usesCopyWorkflow, project.spoolColour == nil, let scan = entries.firstIndex(where: { $0.kind == .scan }) {
+        // A copy before its result is shown in its real colours: the scanned object in its own colours is the truest
+        // picture of it (the mockup's potato), so it leads, and the project's picture is the same (§5.1). A spool, or
+        // parts the printer MCP drew in their colours (#858, #691: the DAD replay led with the scan, turntable and all),
+        // puts the copy first, as the companion's `copyLeadsWithScan` has it.
+        if project.copyLeadsWithScan, let scan = entries.firstIndex(where: { $0.kind == .scan }) {
             entries.insert(entries.remove(at: scan), at: 0)
         }
         // What each entry's AR opens (`Entry.ar`).
@@ -175,6 +177,12 @@ extension Project {
         // Several parts are several colours: neutral, never one spool's, until the MCPs report each part's (#645).
         let colour: ProjectGallery.Colour = preservesPublishedFilaments ? .neutral : spoolColour.map { .spool($0) } ?? .neutral
         return [PrintablePart(id: "result", label: label, drawing: .model(mesh), colour: colour, sizeMm: current.sizeMm)]
+    }
+
+    /// A copy leads with its scan until its result is shown in its real colours: a spool chosen, or any part with a colour
+    /// (#858, #691; the companion's `copyLeadsWithScan`, the shared case in `project-gallery.json`).
+    public var copyLeadsWithScan: Bool {
+        usesCopyWorkflow && spoolColour == nil && !(current?.parts ?? []).contains { $0.colour.flatMap(Self.hex) != nil }
     }
 
     /// #691: the design's parts to draw, in order, each in its colour (`neutral` without one). Only `plate`'s parts when a

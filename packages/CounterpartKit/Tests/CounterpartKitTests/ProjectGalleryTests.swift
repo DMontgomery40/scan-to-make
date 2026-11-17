@@ -49,7 +49,9 @@ final class ProjectGalleryTests: XCTestCase {
                     XCTAssertEqual(want["part"] as? String, part, name)
                     XCTAssertEqual(want["object"] as? String, object, name)
                     XCTAssertEqual(want["seats"] as? Int, seats.count, name)
-                case .parts: XCTFail("\(name): project-gallery.json has no parts; they are project-parts.json's cases")
+                // #691, #858: a design drawn part by part, each mesh with its colour ("neutral" without one), as Android compares it.
+                case .parts(let parts):
+                    XCTAssertEqual(parts.map { ["mesh": $0.mesh, "colour": $0.colour.hex ?? "neutral"] }, drawing["parts"] as? [[String: String]], name)
                 }
             }
         }
@@ -278,6 +280,25 @@ final class ProjectGalleryTests: XCTestCase {
         let fitTogether = try XCTUnwrap(ProjectGallery(project: fit).entries.first { $0.kind == .together }, "a fit keeps its Together")
         guard case .assembly(let mesh, let scan, let fitSeats) = fitTogether.drawing else { return XCTFail("a fit's Together is the part with the object in its seats") }
         XCTAssertEqual(mesh, "current/model.stl", "the merged mesh"); XCTAssertEqual(scan, "scan/scan.usdz"); XCTAssertEqual(fitSeats.count, 1)
+    }
+
+    /// #858, #691 (the companion's `copyLeadsWithScan`): a copy leads with its scan only while no spool is chosen and none
+    /// of its parts has a colour; a part list that can't be read is no parts, so it still leads with its scan.
+    func testACopyLeadsWithItsScanUntilItsResultIsShownInItsColours() throws {
+        func copy(_ parts: [[String: Any]]?) throws -> Project {
+            var current: [String: Any] = ["model": "current/model.3mf", "mergedMesh": "current/model.stl", "renders": []]
+            if let parts { current["parts"] = parts }
+            let object: [String: Any] = ["id": "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a94", "createdAtMs": 1.0, "updatedAtMs": 2.0, "state": "ready",
+                                         "kind": "copy", "scan": "scan.usdz", "photos": [String](), "current": current]
+            return try JSONDecoder().decode(Project.self, from: JSONSerialization.data(withJSONObject: object))
+        }
+        let coloured = [["id": "1/1", "colour": "#C9A26B", "mesh": "current/parts/part-1.stl"], ["id": "1/2", "mesh": "current/parts/part-2.stl"]]
+        XCTAssertEqual(ProjectGallery(project: try copy(coloured)).first?.kind, .part, "one part with a colour: the copy leads")
+        let plain = [["id": "1/1", "mesh": "current/parts/part-1.stl"], ["id": "1/2", "mesh": "current/parts/part-2.stl"]]
+        XCTAssertEqual(ProjectGallery(project: try copy(plain)).first?.kind, .scan, "parts with no colour: the scan leads")
+        XCTAssertEqual(ProjectGallery(project: try copy(nil)).first?.kind, .scan, "no parts: the scan leads")
+        let unreadable = [["id": "1/1", "colour": "#C9A26B", "mesh": "current/parts/part-1.stl"], ["id": "1/2", "colour": "#1A1A1A"]]
+        XCTAssertEqual(ProjectGallery(project: try copy(unreadable)).first?.kind, .scan, "a part list that can't be read: the scan leads")
     }
 
     /// The stage stays dark for every colour (David, Nov 11: "we just entered light mode without a flashbang
