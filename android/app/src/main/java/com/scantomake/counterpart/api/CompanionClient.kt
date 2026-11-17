@@ -418,25 +418,24 @@ class CompanionClient(
                 if (index >= 0) resource = "original/$index"
             }
         }
-        // The library first: its copy of this version is the file, with no network.
         val active = library?.takeIf { it.isActive }
-        val kept = active?.takeIf { !revalidate && it.keep.keeps(OnDeviceLibrary.Kind.of(name)) }
-        kept?.file(project.id, name, project.mediaVersion, filename)?.let { return it }
+        val keeps = active?.takeIf { it.keep.keeps(OnDeviceLibrary.Kind.of(name)) }
         // A refusal for size is remembered for any file, kept or not, so it is never asked for again.
         if (active?.isTooLarge(project.id, name, project.mediaVersion, filename) == true) throw CompanionException("file-too-large", "This file is too large for this phone.")
         val target = File(folder, filename)
-        if (target.exists() && revalidate) {
-            val reply = send("GET", "/v1/objects/${project.id}/${encodePath(resource)}", limit = SCAN_LIMIT, ifNoneMatch = cachedValidator(target))
-            if (reply.status == 304) return target
-            if (reply.status != 200 || reply.body.isEmpty())
-                throw if (reply.status == 404) CompanionException("not-found", "This is no longer on your computer.") else CompanionException("download-failed", "That file couldn't be saved on this phone.")
-            val temp = File(folder, "$filename.part")
-            try { temp.writeBytes(reply.body); temp.renameTo(target) } catch (_: Exception) {
-                throw CompanionException("download-failed", "That file couldn't be saved on this phone.")
+        if (revalidate) {
+            // The copy the phone has is asked about by its own validator: this version's cached copy, else the library's
+            // newest, else an older version's cached copy.
+            val copy = when {
+                target.exists() -> Copy(target, cachedValidator(target), null)
+                else -> keeps?.latest(project.id, name)?.first?.let { Copy(it, keeps.validator(project.id, name, filename), keeps) }
+                    ?: olderCopy(filename, folder)?.let { Copy(it, cachedValidator(it), null) }
             }
-            reply.header("ETag")?.let { setCachedValidator(it, target) } ?: File(target.path + ".etag").delete()
-            return target
+            if (copy != null) return revalidateCopy(project, name, filename, resource, copy, active, target)
         }
+        // The library first: its copy of this version is the file, with no network.
+        val kept = keeps
+        kept?.file(project.id, name, project.mediaVersion, filename)?.let { return it }
         if (target.exists()) {
             if (kept == null) return target
             // Fetched before this kind was kept: into the library as it is, with its validator (as the iPhone's
@@ -484,6 +483,37 @@ class CompanionClient(
             throw CompanionException("download-failed", "That file couldn't be saved on this phone.")
         }
         reply.header("ETag")?.let { setCachedValidator(it, target) }
+        return target
+    }
+
+    /**
+     * [download]'s `revalidate` with a copy on the phone ([copy]: the cache's, an older version's, or the library's):
+     * 304 keeps it, new bytes replace it where it lives, 404 says it is gone, and a 413 is remembered as too large, as any
+     * download's is. Anything else (the computer away, a timeout, a failing answer) draws the copy the phone has (review
+     * of #869, P2-1): a part seen before never needs the computer to be drawn again.
+     */
+    /** A copy of a file the phone has, its validator, and the library when that is where it is kept. */
+    private class Copy(val file: File, val validator: String?, val library: OnDeviceLibrary?)
+
+    private suspend fun revalidateCopy(project: Project, name: String, filename: String, resource: String, copy: Copy,
+                                       active: OnDeviceLibrary?, target: File): File {
+        val reply = try { send("GET", "/v1/objects/${project.id}/${encodePath(resource)}", limit = SCAN_LIMIT, ifNoneMatch = copy.validator) }
+            catch (e: CompanionException) { if (e.code == "invalid-request") throw e; return copy.file }
+        if (reply.status == 304) return copy.library?.revalidated(project.id, name, project.mediaVersion, filename) ?: copy.file
+        if (reply.status == 404) throw CompanionException("not-found", "This is no longer on your computer.")
+        if (reply.status == 413 && active != null && reply.body.decodeToString().contains("file-too-large")) {
+            active.markTooLarge(project.id, name, project.mediaVersion, filename)
+            throw CompanionException("file-too-large", "This file is too large for this phone.")
+        }
+        if (reply.status != 200 || reply.body.isEmpty()) return copy.file
+        copy.library?.let { library ->
+            return try { library.commit(reply.body, project.id, name, project.mediaVersion, filename, reply.header("ETag"), replace = true) } catch (_: Exception) { copy.file }
+        }
+        val folder = target.parentFile ?: return copy.file
+        val temp = File(folder, "$filename.part")
+        try { folder.mkdirs(); temp.writeBytes(reply.body); if (!temp.renameTo(target)) return copy.file } catch (_: Exception) { return copy.file }
+        reply.header("ETag")?.let { setCachedValidator(it, target) } ?: File(target.path + ".etag").delete()
+        if (copy.file != target) pruneOlder(filename, folder)
         return target
     }
 
