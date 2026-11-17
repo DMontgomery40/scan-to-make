@@ -512,6 +512,12 @@ const MiB = 1024 * 1024, PART_MESH_LIMIT = 64 * MiB, PART_MESHES_LIMIT = 256 * M
 type ModelParts = NonNullable<NonNullable<StmObject['current']>['parts']>;
 /** A design's parts, made and checked, in a folder beside `current/parts` until they land. */
 interface BuiltParts {folder: string; sha256: string; parts: ModelParts}
+/** What a part-mesh job learned about a model (the project's `partsChecked`, without the path). */
+type PartsCheck = Omit<NonNullable<StmObject['partsChecked']>, 'model'>;
+/** A part-mesh job that failed on what the MCP gave it: the model was still checked. */
+class PartsFailure extends Error {
+  constructor(cause: unknown, readonly check: PartsCheck) { super(cause instanceof Error ? cause.message : String(cause)); }
+}
 
 /** #858: a 3MF a design pass made here (`current/model.3mf`) carries its whole mesh; a designer's file keeps the import limits. */
 function madeByPass(object: Pick<StmObject, 'current' | 'files'>): boolean {
@@ -2611,12 +2617,17 @@ export class ObjectService {
     const newest = () => this.#partsWanted.get(id) === token;
     const said = (error: unknown) => console.error(`project ${id}: couldn’t keep this design’s parts in their colours, so it shows as one piece: ${error instanceof Error ? error.message : String(error)}`);
     const job = (async () => {
-      let built: BuiltParts | undefined;
+      let built: BuiltParts | undefined, check: PartsCheck | undefined;
       try {
-        try { built = await this.#buildParts(id, model, declared, stop.signal); }
-        catch (error) { if (stop.signal.aborted || this.#closed) return; said(error); }
+        try { ({built, check} = await this.#buildParts(id, model, declared, stop.signal)); }
+        catch (error) {
+          // A stopped job checked nothing: the next start asks again.
+          if (stop.signal.aborted || this.#closed) return;
+          said(error);
+          if (error instanceof PartsFailure) check = error.check;
+        }
         if (!newest() || this.#closed) return;
-        await this.#gate(id, () => this.#landParts(id, model, built, newest));
+        await this.#gate(id, () => this.#landParts(id, model, built, newest, check));
       } finally {
         if (built) await rm(built.folder, {recursive: true, force: true});
         if (newest()) this.#partsWanted.delete(id);
@@ -2639,7 +2650,15 @@ export class ObjectService {
       const current = join(this.dir(object.id), 'current');
       for (const name of await readdir(current).catch(() => [] as string[]))
         if (/^\.parts-(?:mcp|next|old)-/.test(name)) await rm(join(current, name), {recursive: true, force: true});
-      if (object.current?.model.toLowerCase().endsWith('.3mf') && !object.current.parts && object.state !== 'touching-up' && object.state !== 'printing') again.push(object);
+      if (!object.current?.model.toLowerCase().endsWith('.3mf') || object.current.parts || object.state === 'touching-up' || object.state === 'printing') continue;
+      // #874: only a design that changed, was never checked (an interrupted job, one from before the marker), met an MCP
+      // without the tool (a cheap question, no meshing), or met another MCP version than the one now known.
+      const checked = object.partsChecked, destination = this.#destinationId(object);
+      const known = destination ? this.#deps.printers?.capabilities(destination)?.server?.version : undefined;
+      const sha256 = checked?.model === object.current.model
+        ? await readFile(join(this.dir(object.id), object.current.model)).then(bytes => createHash('sha256').update(bytes).digest('hex'), () => undefined) : undefined;
+      if (!checked || checked.model !== object.current.model || checked.sha256 !== sha256 || checked.outcome === 'unlisted'
+        || (checked.server !== undefined && known !== undefined && known !== checked.server)) again.push(object);
     }
     void (async () => {
       for (const object of again) {
@@ -2658,23 +2677,26 @@ export class ObjectService {
    * a part the MCP skipped, a mesh over 64 MiB or 256 MiB in all, any other model, an MCP without the tool, or a
    * failure leaves no parts, and a skip or failure is logged. Counterpart meshes nothing itself.
    */
-  async #buildParts(id: string, model: string, declared?: {name?: string; colour?: string}[], stop?: AbortSignal): Promise<BuiltParts | undefined> {
-    if (!model.toLowerCase().endsWith('.3mf')) return undefined;
+  async #buildParts(id: string, model: string, declared?: {name?: string; colour?: string}[], stop?: AbortSignal): Promise<{built?: BuiltParts; check?: PartsCheck}> {
+    if (!model.toLowerCase().endsWith('.3mf')) return {};
     const object = await this.#deps.store.get(id).catch(() => undefined);
-    if (!object) return undefined;
+    if (!object) return {};
     const dir = this.dir(id), destination = this.#destinationId(object);
     const runner = (destination ? this.#deps.print?.destinations?.get(destination) : undefined)?.runner ?? this.#deps.print?.services.runner;
-    if (!runner?.modelParts) return undefined;
+    if (!runner?.modelParts) return {};
     const bytes = await readFile(join(dir, model)).catch(() => undefined);
-    if (!bytes) return undefined;
+    if (!bytes) return {};
     const sha256 = createHash('sha256').update(bytes).digest('hex');
+    const server = destination ? this.#deps.printers?.capabilities(destination)?.server?.version : undefined;
+    const checked = (outcome: PartsCheck['outcome']): PartsCheck => ({sha256, outcome, ...(server ? {server} : {})});
     const staging = join(dir, 'current', `.parts-mcp-${randomUUID()}`), folder = join(dir, 'current', `.parts-next-${randomUUID()}`);
     try {
       stop?.throwIfAborted();
       await mkdir(staging, {recursive: true, mode: 0o700});
       const listed = await runner.modelParts({modelPath: join(dir, model), outputDir: staging, signal: stop ? AbortSignal.any([AbortSignal.timeout(120_000), stop]) : AbortSignal.timeout(120_000)});
       stop?.throwIfAborted();
-      if (!listed || listed.parts.length < 2) return undefined;
+      if (!listed) return {check: checked('unlisted')};
+      if (listed.parts.length < 2) return {check: checked('none')};
       if (listed.skipped.length) throw new Error(`the printer service couldn’t mesh ${listed.skipped.slice(0, 3).join(', ')}${listed.skipped.length > 3 ? ` and ${listed.skipped.length - 3} more` : ''}`);
       // #874 P2-3: sizes before any read, all or nothing.
       let total = 0;
@@ -2696,10 +2718,11 @@ export class ObjectService {
         parts.push({id: part.id, ...(part.name ? {name: part.name} : {}), ...(colour ? {colour} : {}), ...(part.plate !== undefined ? {plate: part.plate} : {}),
           ...(part.painted ? {painted: true} : {}), mesh: join('current', 'parts', name)});
       }
-      return {folder, sha256, parts};
+      return {built: {folder, sha256, parts}, check: checked('parts')};
     } catch (error) {
       await rm(folder, {recursive: true, force: true});
-      throw error;
+      if (stop?.aborted) throw error;
+      throw new PartsFailure(error, checked('none'));
     } finally { await rm(staging, {recursive: true, force: true}); }
   }
 
@@ -2707,7 +2730,7 @@ export class ObjectService {
    * Lands a part-mesh job inside the project's gate: only for the newest request and while `model` is still the
    * project's model with the same bytes. The parts folder is swapped in whole; with no parts, the old folder goes.
    */
-  async #landParts(id: string, model: string, built: BuiltParts | undefined, newest: () => boolean): Promise<void> {
+  async #landParts(id: string, model: string, built: BuiltParts | undefined, newest: () => boolean, check?: PartsCheck): Promise<void> {
     if (!newest()) return;
     const store = this.#deps.store, dir = this.dir(id), object = await store.get(id).catch(() => undefined);
     if (!object?.current || object.current.model !== model) return;
@@ -2716,12 +2739,16 @@ export class ObjectService {
     const write = (versions: Record<string, ModelParts> = {}) => store.update(id, o => {
       if (o.current?.model !== model) return o;
       const {parts: _old, ...rest} = o.current;
-      return {...o, current: built ? {...rest, parts: built.parts} : rest,
+      return {...o, current: built ? {...rest, parts: built.parts} : rest, ...(check ? {partsChecked: {model, ...check}} : {}),
         ...(Object.keys(versions).length ? {versions: o.versions?.map(v => versions[v.id] ? {...v, result: {...v.result, parts: versions[v.id]}} : v)} : {})};
     }, {keepUpdatedAt: true});
     // #874 re-check P3-1: no window where the record and the folder disagree. No parts: the record first, then the folder.
     if (!built) {
-      if (!object.current.parts) { await rm(target, {recursive: true, force: true}); return; }
+      if (!object.current.parts) {
+        await rm(target, {recursive: true, force: true});
+        if (check) await store.update(id, o => o.current?.model === model ? {...o, partsChecked: {model, ...check}} : o, {keepUpdatedAt: true});
+        return;
+      }
       const updated = await write();
       await rm(target, {recursive: true, force: true});
       this.#deps.onChange?.(updated);

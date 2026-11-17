@@ -260,6 +260,12 @@ export interface StmObject {
   failure?: string;
   /** The pass (its `startedAtMs`) whose ending is `failure`. Dropped by `update` when anything else changes the failure. */
   failedPass?: number;
+  /**
+   * #874: the last model a part-mesh job checked (its path, its bytes' SHA-256, what came of it and the printer MCP's
+   * version when known), so a start only asks the MCP again about a design that changed, was never checked, met an MCP
+   * without the tool, or met another MCP version. Store only: never sent to clients.
+   */
+  partsChecked?: {model: string; sha256: string; outcome: 'parts' | 'none' | 'unlisted'; server?: string};
   /** The last print; `uncertain` when it may have reached the printer and must not be sent again by itself. */
   print?: {versionId?: string; plate?: import('./plates.js').PlateIdentity; bundleId: string; uncertain?: boolean; destination?: {id: string; name: string}; printerStatus?: {state: string; job?: string; checkedAtMs: number; percent?: number; remainingMinutes?: number}; sliced?: boolean; estimate?: {seconds?: number; grams?: number}; events?: {atMs: number; message: string}[];
     /** PRD §8.5: one uuid per print, from Print. */

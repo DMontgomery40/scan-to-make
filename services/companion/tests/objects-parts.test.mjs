@@ -10,7 +10,7 @@ import {createServer} from 'node:http';
 import {ObjectStore} from '../dist/objects/store.js';
 import {ObjectService} from '../dist/objects/service.js';
 import {PassTimings} from '../dist/touchup/stages.js';
-import {createObjectRoutes} from '../dist/objects/http.js';
+import {createObjectRoutes, publicObject} from '../dist/objects/http.js';
 import {tempDir} from './support/temp.mjs';
 
 const {zipSync, strToU8} = createRequire(new URL('../../printer-handoff/package.json', import.meta.url))('fflate');
@@ -425,4 +425,76 @@ test('#874 re-check P3-1: sealed copies are made before the swap, so a failure t
     assert.ok(!existsSync(join(f.store.dir(object.id), 'current', 'parts')), 'and not swapped in');
     assert.equal(after.versions.at(-1).result.parts, undefined);
   } finally { await chmod(version, 0o755); }
+});
+
+/** A part-mesh tool that counts the times it is asked. */
+function counted(answer) { const tool = partsTool(answer); return {...tool, calls: () => tool.asked.length}; }
+
+test('#874 marker: a one-part design is not asked again on the next start, and the marker never reaches a client', async t => {
+  const first = counted([{id: '1/1', name: 'Body', colour: '#FF0000'}]);
+  const f = await setup(t, {runner: {modelParts: first.modelParts}});
+  const object = await f.service.create('A replica of this DAD desk thing', 'copy');
+  await f.service.start(object.id);
+  const ready = await f.settle(object.id);
+  assert.equal(first.calls(), 1);
+  assert.equal(ready.current.parts, undefined);
+  const stored = await f.store.get(object.id);
+  assert.equal(stored.partsChecked.model, 'current/model.3mf');
+  assert.equal(stored.partsChecked.outcome, 'none');
+  assert.match(stored.partsChecked.sha256, /^[0-9a-f]{64}$/);
+  assert.equal(publicObject(stored).partsChecked, undefined, 'store only');
+  const next = counted([{id: '1/1', name: 'Body', colour: '#FF0000'}]);
+  const again = await f.restart({modelParts: next.modelParts});
+  await again.resume();
+  await again.partsMeshed();
+  assert.equal(next.calls(), 0, 'not meshed and thrown away again');
+});
+
+test('#874 marker: a job a stop interrupted is asked again on the next start, and its parts land', async t => {
+  const slow = slowTool(DAD);
+  const f = await setup(t, {runner: {modelParts: slow.modelParts}});
+  const object = await f.service.create('A replica of this DAD desk thing', 'copy');
+  await f.service.start(object.id);
+  await promptly(f.service.settled(object.id), 'the pass\'s end');
+  await f.service.close();
+  assert.equal((await f.store.get(object.id)).partsChecked, undefined, 'a stopped job writes no marker');
+  const next = counted(DAD);
+  const again = await f.restart({modelParts: next.modelParts});
+  await again.resume();
+  await again.partsMeshed();
+  assert.equal(next.calls(), 1);
+  assert.equal((await again.get(object.id)).current.parts.length, 2);
+  assert.equal((await f.store.get(object.id)).partsChecked.outcome, 'parts');
+});
+
+test('#874 marker: a model whose bytes changed since it was checked is asked again', async t => {
+  const first = counted([{id: '1/1', name: 'Body'}]);
+  const f = await setup(t, {runner: {modelParts: first.modelParts}});
+  const object = await f.service.create('A replica of this DAD desk thing', 'copy');
+  await f.service.start(object.id);
+  await f.settle(object.id);
+  // A pass that wrote a new model and stopped before its parts job landed.
+  await writeFile(join(f.store.dir(object.id), 'current', 'model.3mf'), Buffer.from('PK\x03\x04 two parts, changed'));
+  const next = counted(DAD);
+  const again = await f.restart({modelParts: next.modelParts});
+  await again.resume();
+  await again.partsMeshed();
+  assert.equal(next.calls(), 1);
+  assert.equal((await again.get(object.id)).current.parts.length, 2);
+});
+
+test('#874 marker: a design checked against an MCP without the tool is asked again (a cheap question), so a newer MCP gets its chance', async t => {
+  let asked = 0;
+  const f = await setup(t, {runner: {modelParts: async () => { asked++; return undefined; }}});
+  const object = await f.service.create('A replica of this DAD desk thing', 'copy');
+  await f.service.start(object.id);
+  await f.settle(object.id);
+  assert.equal(asked, 1);
+  assert.equal((await f.store.get(object.id)).partsChecked.outcome, 'unlisted');
+  const next = counted(DAD);
+  const again = await f.restart({modelParts: next.modelParts});
+  await again.resume();
+  await again.partsMeshed();
+  assert.equal(next.calls(), 1, 'the MCP that now lists the tool meshes it');
+  assert.equal((await again.get(object.id)).current.parts.length, 2);
 });
