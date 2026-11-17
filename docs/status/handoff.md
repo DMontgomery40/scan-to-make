@@ -6,6 +6,38 @@ Updated in place; git history keeps the rest. This is the only handoff: no dated
 
 **What is running and owed this hour is the pinned issue [#610](https://github.com/DMontgomery40/scan-to-make/issues/610), which the lead updates at every wake. Read it first.**
 
+## Update (2026-11-17, 09:30Z): beta 8 is published
+
+- **Released:** [`v2.0-beta.8`](https://github.com/DMontgomery40/scan-to-make/releases/tag/v2.0-beta.8), a pre-release from main `c77318a1`, carrying three trains: #870, #874 and #880 (scope and plan in #863).
+  - **Mac:** 2.0 (202611170622), notarized, on the production appcast; beta 7 Macs are offered it through Check for Updates.
+  - **Android:** version code 5.
+  - **Linux:** `.deb` and AppImage, with bundled Python (#856), so there's no more `pip install usd-core`.
+  - **MCPs:** bambu-printer-mcp 1.1.98 and mcp-3d-printer-server 1.2.80 (and 1.1.97 / 1.2.79 before them).
+- **What it does:**
+  - a design pass's two-colour 3MF is kept (#858);
+  - each part is drawn in its colour on every layout (#691), and a coloured copy leads with its result;
+  - no-AMS two-colour slices are refused or flagged in the MCPs;
+  - an honest pass estimate and `scripts/pass_watch.py` (#859);
+  - Mac first-run polish (#829, #851);
+  - large text and the empty stage (#848, #842, #871);
+  - a kind is sent only when chosen (#867).
+- **iPhone and iPad:** TestFlight 2.0 (8) is processed and in Counterpart Team. **Public distribution waits for David's password.** The fastlane session (`~/.config/scan-to-make/fastlane-spaceship/` on agents-173) means no 2FA until about mid-December. 2.0 (7) went to Counterpart Team by itself from the pre-fix `ebee345c`; 2.0 (8) supersedes it.
+- **The bar it passed:**
+  - a clean-Mac run of B: fresh install from Downloads, the bundled npm, first run, a diagnostics plant, beta 7 → 8 through Check for Updates with exactly one restart, A → B, a hand-replace, colours with no printer;
+  - the Local Network recovery line, verified in two clones;
+  - the DAD acceptance replay on the final main, with two colours, the coloured lead, and 17.4 min;
+  - a review and a gate per train.
+
+  Receipts are in `~/scan-to-make-work/release-v2.0-beta.8/` on the Mac.
+- **Known issues** (in the notes; fix in beta 9):
+  - "Don't Allow" on Local Network isn't explained in the app (#883);
+  - no-AMS detection needs a reachable Bambu printer;
+  - each scan rebuild leaks about 1.5 GB of photogrammetry scratch (#881);
+  - an imported designer 3MF is titled "Scan, date".
+- **Not yet on a clean Mac:** adding a printer, pairing a phone, printing. David's P1S nozzle is broken (Nov 16).
+- **Found while publishing:** the front page's Download buttons had served beta 6 since beta 7 (#885); fixed in this publish, and the preflight now refuses old-beta links.
+- **The Fable rule** still applies: important calls get a Fable 5.2 advisor. Two were used for beta 8: the scope, and publishing with the Local Network known issue.
+
 ## Update (2026-11-15, 21:00Z): beta 7 is published
 
 - **Released:** [`v2.0-beta.7`](https://github.com/DMontgomery40/scan-to-make/releases/tag/v2.0-beta.7), a pre-release from main `473ba920`, carrying trains #836, #849 and #855.
