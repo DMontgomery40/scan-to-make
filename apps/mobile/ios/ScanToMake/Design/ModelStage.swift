@@ -22,6 +22,9 @@ struct ModelStage: View {
     /// millimetre frame), turned and framed with the part as one.
     var object: URL? = nil
     var seats: [[Double]] = []
+    /// #691: a multi-part design, each part's STL (all in the 3MF's build frame, so they line up) in its own colour. When
+    /// set, `url` is the first part's file and the stage draws them all.
+    var parts: [StagePart] = []
     /// The size of what is drawn, in millimetres (width, depth, height), once it is loaded: the size chip's numbers.
     var measured: (([Double]) -> Void)? = nil
     /// What the stage shows until the model is drawn, and if it can't be: the Mac's picture of it, never an empty stage.
@@ -60,7 +63,7 @@ struct ModelStage: View {
     @State private var starts = BodyKick()
     @State private var urlTrace = BodyKick()
 
-    private var identity: String { "\(url?.absoluteString ?? "empty")#\(tint?.description ?? "default")#\(twoTone)#\(yaw)#\(pitch)#\(fit)#\(object?.absoluteString ?? "")#\(seats.count)" }
+    private var identity: String { "\(url?.absoluteString ?? "empty")#\(tint?.description ?? "default")#\(twoTone)#\(yaw)#\(pitch)#\(fit)#\(object?.absoluteString ?? "")#\(seats.count)#\(StagePart.key(parts))" }
     /// One load per model, scene and Try Again.
     private var startKey: String { "\(identity)#\(scenePhase)#\(retryGeneration)" }
     private func tag(_ identity: String) -> String { String(String(UInt(bitPattern: identity.hashValue), radix: 16).prefix(8)) }
@@ -155,12 +158,13 @@ struct ModelStage: View {
         loadJob?.cancel()
         let key = startKey, starts = starts
         let (tint, twoTone, object, seats, yaw, pitch, fit, interactive, hasPlaceholder) = (self.tint, self.twoTone, self.object, self.seats, self.yaw, self.pitch, self.fit, self.interactive, self.placeholder != nil)
+        let parts = self.parts
         let stillWanted = { [self] in wantedIdentity == wanted }
         let job = Task { @MainActor in
             await MediaTrace.$context.withValue(MediaTrace.Context(file: url, scene: "active")) {
                 MediaTrace.record("stage.begin", ["scene": "active", "stage": instance, "identity": tag(wanted)])
                 defer { MediaTrace.record(stillWanted() && !Task.isCancelled ? "stage.end" : "stage.superseded", ["scene": "active"]) }
-                let loaded = await Self.load(url, tint: tint, twoTone: twoTone, object: object, seats: seats)
+                let loaded = await Self.load(url, tint: tint, twoTone: twoTone, object: object, seats: seats, parts: parts)
                 // Only a newer start (or the scene leaving) cancels this job, and its load then returns nil: superseded, not
                 // failed (#805). At launch `body` claims the inactive and the active scene's keys, both deferred starts run
                 // once the scene is active, and the first one's nil used to leave the stage "failed" after the second loaded.
@@ -223,7 +227,7 @@ struct ModelStage: View {
                 // Its own trace context (#769): a live load says which stage it came from.
                 let loaded = await MediaTrace.$context.withValue(MediaTrace.Context(file: url, scene: "active")) {
                     MediaTrace.record("stage.live", ["stage": instance])
-                    return await Self.load(url, tint: tint, twoTone: twoTone, object: object, seats: seats)
+                    return await Self.load(url, tint: tint, twoTone: twoTone, object: object, seats: seats, parts: parts)
                 }
                 guard !Task.isCancelled, live, scenePhase == .active else { return }
                 guard let model = loaded else { failed = true; return }
@@ -253,10 +257,20 @@ struct ModelStage: View {
 
     /// The gallery turns between a part, its scan and the two together: keep those three loaded, not one.
     @MainActor private static let cache = ModelEntityCache(limit: 3)
-    @MainActor static func load(_ url: URL, tint: UIColor?, twoTone: Bool, object: URL? = nil, seats: [[Double]] = []) async -> Entity? {
-        let key = "\(url.absoluteString)#\(tint?.description ?? "default")#\(twoTone)#\(object?.absoluteString ?? "")#\(seats.map { $0.map { String($0) }.joined(separator: ",") }.joined(separator: ";"))"
+    @MainActor static func load(_ url: URL, tint: UIColor?, twoTone: Bool, object: URL? = nil, seats: [[Double]] = [], parts: [StagePart] = []) async -> Entity? {
+        let key = "\(url.absoluteString)#\(tint?.description ?? "default")#\(twoTone)#\(object?.absoluteString ?? "")#\(seats.map { $0.map { String($0) }.joined(separator: ",") }.joined(separator: ";"))#\(StagePart.key(parts))"
         return await cache.load(key: key) {
             let model: Entity?
+            // #691: each part in its own colour, together in the frame they share; one that can't be drawn leaves the stage
+            // to say so rather than show a design with a part missing.
+            if !parts.isEmpty {
+                let whole = Entity()
+                for part in parts {
+                    guard let drawn = await stl(part.url, tint: part.tint, twoTone: false) else { return nil }
+                    whole.addChild(drawn)
+                }
+                return whole
+            }
             switch url.pathExtension.lowercased() {
             case "usdz", "usd", "usdc", "reality": model = try? await Entity(contentsOf: url)
             case "stl": model = await stl(url, tint: tint, twoTone: twoTone)
@@ -354,6 +368,13 @@ extension View {
     func stageChip() -> some View {
         self.foregroundStyle(Color.primary).glassEffect(.regular, in: .capsule)
     }
+}
+
+/// One part of a multi-part design on the stage (#691): its STL, and its colour (nil: the neutral material).
+struct StagePart: Equatable {
+    var url: URL
+    var tint: UIColor?
+    static func key(_ parts: [StagePart]) -> String { parts.map { "\($0.url.absoluteString)@\($0.tint?.description ?? "neutral")" }.joined(separator: "|") }
 }
 
 /// Keeps the pivot between RealityView's make and update closures.

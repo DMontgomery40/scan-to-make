@@ -88,7 +88,7 @@ class CompanionClient(
                     if (m("/v1/objects(?:/printers)?") || m(one) || m("$one/passes/(0|[1-9][0-9]{0,15})/activity")) return "projects:read"
                     if (m("/healthz")) return "generation:health"
                     if (m("/v1/events") || m("/v1/settings") || m("/v1/settings/cad") || m("/v1/devices")) return "projects:read"
-                    if (m("$one/(model\\.stl|reconstruction-preview\\.stl|renders/[^/]+|photos/[^/]+|capture/[^/]+|scan/[^/]+|pictures/[^/]+|original/[0-9]+|asks/[^/]+|prints/[^/]+/frames/[^/]+|versions/[^/]+/(?:(?:renders|pictures)/)?[^/]+)")) return "projects:read"
+                    if (m("$one/(model\\.stl|reconstruction-preview\\.stl|renders/[^/]+|photos/[^/]+|capture/[^/]+|scan/[^/]+|pictures/[^/]+|current/parts/[^/]+|original/[0-9]+|asks/[^/]+|prints/[^/]+/frames/[^/]+|versions/[^/]+/(?:(?:renders|pictures|parts)/)?[^/]+)")) return "projects:read"
                     if (m("$one/(filaments|colour-mapping|camera\\.jpg)") || m("/v1/objects/printers/[^/]+/camera\\.jpg")) return "printer-handoff:use"
                     if (m("/v1/objects/printers/[A-Za-z0-9_-]{1,256}/route")) return "printer-handoff:use"
                 }
@@ -391,13 +391,18 @@ class CompanionClient(
 
     // MARK: Files
 
-    private val allowed = Pattern("""original/[0-9]+|model\.stl|renders/[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.png|asks/[a-f0-9-]{36}\.(jpg|png)|prints/[a-f0-9-]{36}/frames/[a-f0-9-]{36}\.jpg|(?:photos|capture|scan)/[A-Za-z0-9][A-Za-z0-9._ -]{0,127}|pictures/[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.png|versions/[a-f0-9-]{36}/(?:(?:renders|pictures)/)?[A-Za-z0-9][A-Za-z0-9._-]{0,120}""")
+    private val allowed = Pattern("""original/[0-9]+|model\.stl|renders/[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.png|asks/[a-f0-9-]{36}\.(jpg|png)|prints/[a-f0-9-]{36}/frames/[a-f0-9-]{36}\.jpg|(?:photos|capture|scan)/[A-Za-z0-9][A-Za-z0-9._ -]{0,127}|pictures/[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.png|current/parts/[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.stl|versions/[a-f0-9-]{36}/(?:(?:renders|pictures|parts)/)?[A-Za-z0-9][A-Za-z0-9._-]{0,120}""")
 
     /** The newest copy of this file the phone keeps, of any version: drawn at once, before (and whether or not) the computer answers. */
     fun stored(project: Project, name: String): File? = library?.latest(project.id, name)?.first
 
     /** Downloads one project file into the library (or the cache, for kinds not kept), once per project version, and returns where it is. */
-    suspend fun download(project: Project, name: String): File {
+    /**
+     * [revalidate]: ask the computer every time, with the copy's validator, and never serve the library's or the cache's
+     * copy unasked. For files whose bytes can change under the same name and media version: a part's mesh (#691) is
+     * remade after the project is ready, with no new pass (a 304 keeps the copy).
+     */
+    suspend fun download(project: Project, name: String, revalidate: Boolean = false): File {
         if (!Pattern(UUID).matches(project.id) || !allowed.matches(name) || name.contains("..")) throw CompanionException.transport("invalid-request")
         val version = project.mediaVersion.toString()
         val folder = File(File(cache, project.id), version)
@@ -413,13 +418,24 @@ class CompanionClient(
                 if (index >= 0) resource = "original/$index"
             }
         }
-        // The library first: its copy of this version is the file, with no network.
         val active = library?.takeIf { it.isActive }
-        val kept = active?.takeIf { it.keep.keeps(OnDeviceLibrary.Kind.of(name)) }
-        kept?.file(project.id, name, project.mediaVersion, filename)?.let { return it }
+        val keeps = active?.takeIf { it.keep.keeps(OnDeviceLibrary.Kind.of(name)) }
         // A refusal for size is remembered for any file, kept or not, so it is never asked for again.
         if (active?.isTooLarge(project.id, name, project.mediaVersion, filename) == true) throw CompanionException("file-too-large", "This file is too large for this phone.")
         val target = File(folder, filename)
+        if (revalidate) {
+            // The copy the phone has is asked about by its own validator: this version's cached copy, else the library's
+            // newest, else an older version's cached copy.
+            val copy = when {
+                target.exists() -> Copy(target, cachedValidator(target), null)
+                else -> keeps?.latest(project.id, name)?.first?.let { Copy(it, keeps.validator(project.id, name, filename), keeps) }
+                    ?: olderCopy(filename, folder)?.let { Copy(it, cachedValidator(it), null) }
+            }
+            if (copy != null) return revalidateCopy(project, name, filename, resource, copy, active, target)
+        }
+        // The library first: its copy of this version is the file, with no network.
+        val kept = keeps
+        kept?.file(project.id, name, project.mediaVersion, filename)?.let { return it }
         if (target.exists()) {
             if (kept == null) return target
             // Fetched before this kind was kept: into the library as it is, with its validator (as the iPhone's
@@ -467,6 +483,37 @@ class CompanionClient(
             throw CompanionException("download-failed", "That file couldn't be saved on this phone.")
         }
         reply.header("ETag")?.let { setCachedValidator(it, target) }
+        return target
+    }
+
+    /**
+     * [download]'s `revalidate` with a copy on the phone ([copy]: the cache's, an older version's, or the library's):
+     * 304 keeps it, new bytes replace it where it lives, 404 says it is gone, and a 413 is remembered as too large, as any
+     * download's is. Anything else (the computer away, a timeout, a failing answer) draws the copy the phone has (review
+     * of #869, P2-1): a part seen before never needs the computer to be drawn again.
+     */
+    /** A copy of a file the phone has, its validator, and the library when that is where it is kept. */
+    private class Copy(val file: File, val validator: String?, val library: OnDeviceLibrary?)
+
+    private suspend fun revalidateCopy(project: Project, name: String, filename: String, resource: String, copy: Copy,
+                                       active: OnDeviceLibrary?, target: File): File {
+        val reply = try { send("GET", "/v1/objects/${project.id}/${encodePath(resource)}", limit = SCAN_LIMIT, ifNoneMatch = copy.validator) }
+            catch (e: CompanionException) { if (e.code == "invalid-request") throw e; return copy.file }
+        if (reply.status == 304) return copy.library?.revalidated(project.id, name, project.mediaVersion, filename) ?: copy.file
+        if (reply.status == 404) throw CompanionException("not-found", "This is no longer on your computer.")
+        if (reply.status == 413 && active != null && reply.body.decodeToString().contains("file-too-large")) {
+            active.markTooLarge(project.id, name, project.mediaVersion, filename)
+            throw CompanionException("file-too-large", "This file is too large for this phone.")
+        }
+        if (reply.status != 200 || reply.body.isEmpty()) return copy.file
+        copy.library?.let { library ->
+            return try { library.commit(reply.body, project.id, name, project.mediaVersion, filename, reply.header("ETag"), replace = true) } catch (_: Exception) { copy.file }
+        }
+        val folder = target.parentFile ?: return copy.file
+        val temp = File(folder, "$filename.part")
+        try { folder.mkdirs(); temp.writeBytes(reply.body); if (!temp.renameTo(target)) return copy.file } catch (_: Exception) { return copy.file }
+        reply.header("ETag")?.let { setCachedValidator(it, target) } ?: File(target.path + ".etag").delete()
+        if (copy.file != target) pruneOlder(filename, folder)
         return target
     }
 

@@ -231,6 +231,11 @@ fn referenced(o: &Value, path: &str) -> bool {
             }
         }
     }
+    // #691: each part's own mesh, as the project lists it (the companion's file route serves the same ones).
+    let part_mesh = |parts: &Value| parts.as_array().into_iter().flatten().any(|part| part["mesh"].as_str() == Some(path));
+    if part_mesh(&o["current"]["parts"]) || o["versions"].as_array().into_iter().flatten().any(|v| part_mesh(&v["result"]["parts"])) {
+        return true;
+    }
     for pointer in ["/current/renders", "/photos", "/requestPhotos"] {
         if let Some(list) = o.pointer(pointer).and_then(Value::as_array) {
             if list.iter().any(|v| {
@@ -839,6 +844,13 @@ mod tests {
     #[test]
     fn a_sealed_designs_listed_files_are_readable_and_nothing_else_under_versions() {
         let id = "10000000-0000-4000-8000-000000000001";
+        // #691: the part meshes a project lists, current and sealed, and nothing else under parts/.
+        let parts = json!({"current":{"model":"current/model.3mf","renders":[],"parts":[{"id":"1/1","mesh":"current/parts/part-1.stl"}]},
+            "versions":[{"id":id,"result":{"model":format!("versions/{id}/model.3mf"),"renders":[],"parts":[{"id":"1/1","mesh":format!("versions/{id}/parts/part-1.stl")}]}}]});
+        assert!(referenced(&parts, "current/parts/part-1.stl"));
+        assert!(referenced(&parts, &format!("versions/{id}/parts/part-1.stl")));
+        assert!(!referenced(&parts, "current/parts/part-2.stl"));
+        assert!(!referenced(&parts, "current/parts/../../object.json"));
         let o = json!({"versions":[{"id":id,"result":{"model":format!("versions/{id}/model.stl"),"renders":[format!("versions/{id}/renders/front.png")]},
             "picture":format!("versions/{id}/pictures/part.png"),"pictures":{"part":format!("versions/{id}/pictures/part.png"),"scan":format!("versions/{id}/pictures/scan.png")}}]});
         for p in ["model.stl", "renders/front.png", "pictures/part.png", "pictures/scan.png"] {

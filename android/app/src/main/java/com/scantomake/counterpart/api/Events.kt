@@ -22,7 +22,12 @@ data class CounterpartEvent(
         val progress: Double? = null, val remainingSec: Double? = null, val endsAt: String? = null, val layer: Int? = null,
         val totalLayers: Int? = null, val state: String? = null, val stage: String? = null, val askId: String? = null,
         val confirmationId: String? = null, val mcpId: String? = null, val fromVersion: String? = null, val toVersion: String? = null,
+        /** `project.updated`: what changed (`status`, `archived`, `print`; `current` and `versions` when a design's parts land, #691). */
+        val keys: List<String>? = null,
     )
+
+    /** #691: a design's parts landed (after the project was ready): its stage draws them again, even under the same names. */
+    val changesDesign: Boolean get() = type == "project.updated" && data?.keys.orEmpty().any { it == "current" || it == "versions" }
 
     companion object {
         /** An event this version can't read is skipped; it never costs the page. */

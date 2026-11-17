@@ -26,6 +26,8 @@ export interface PictureSpec {
   seats?: number[][];
   /** A project path: a photo whose subject is cut out, when there is no model yet. */
   photo?: string;
+  /** #691: a multi-part design drawn part by part, each mesh (a project path) in its `#RRGGBB` colour, or neutral. */
+  parts?: {mesh: string; colour?: string}[];
 }
 
 /** The pictures a project can have: its result, its scan, the two together, and a photo's subject before any model. */
@@ -86,7 +88,16 @@ export function pictureSpecs(object: StmObject): Partial<Record<PictureRole, Pic
   if (current && model && /\.(stl|3mf)$/i.test(model) && !ownPlatePictures) {
     const tint = threeMF ? firstColour(object) : spoolColour(object);
     specs.part = {model, zUp: true, ...(tint ? {tint} : {})};
-    if (!published && !threeMF && scan && /\.usdz$/i.test(scan) && current.seats?.length) specs.together = {...specs.part, object: scan, seats: current.seats.map(seat => seatMatrix(seat))};
+    // #691: the MCP meshed the design's parts: drawn part by part, each in its colour (a designer's kit: the chosen plate).
+    const plate = published ? object.publishedSelection?.plateIndex : undefined;
+    const parts = (current.parts ?? []).filter(part => plate === undefined || part.plate === undefined || part.plate === plate)
+      .map(part => ({mesh: part.mesh, ...(hex(part.colour) ? {colour: hex(part.colour)} : {})}));
+    if (parts.length) specs.part = {model, zUp: true, parts};
+    if (!published && (!threeMF || parts.length) && scan && /\.usdz$/i.test(scan) && current.seats?.length) {
+      // A copy's Together is the part in the scan's place (#691): the scan (its turntable, its loose bits) isn't drawn
+      // over it. A fit's Together is the part with the scanned object in each seat.
+      specs.together = object.kind === 'copy' ? {...specs.part} : {...specs.part, object: scan, seats: current.seats.map(seat => seatMatrix(seat))};
+    }
   }
   if (scan && object.kind !== 'published') specs.scan = /\.stl$/i.test(scan) ? {model: scan, zUp: true} : {model: scan};
   // No model yet (photos still uploading, a rebuild still running): a photo's subject, cut out of its room.
@@ -116,7 +127,7 @@ const PICTURE_VERSION = 5;
  * told apart from one only drawn in another colour.
  */
 export async function pictureName(dir: string, role: PictureRole, spec: PictureSpec): Promise<string | undefined> {
-  const sources = [spec.model, spec.object, spec.photo].filter((path): path is string => !!path);
+  const sources = [spec.model, spec.object, spec.photo, ...(spec.parts ?? []).map(part => part.mesh)].filter((path): path is string => !!path);
   if (!sources.length) return undefined;
   const files = [];
   for (const source of sources) {
@@ -243,7 +254,8 @@ export function macDrawPicture(binary: string): DrawPicture {
   const run = promisify(execFile);
   return async (dir, spec, output) => {
     const args = ['picture', output, '--pixels', '720'];
-    if (spec.model) args.push('--model', join(dir, spec.model), ...(spec.zUp ? ['--z-up'] : []), ...(spec.tint ? ['--tint', spec.tint.slice(1)] : []));
+    if (spec.parts?.length) args.push(...(spec.zUp ? ['--z-up'] : []), ...spec.parts.flatMap(part => ['--part', join(dir, part.mesh), ...(part.colour ? ['--part-tint', part.colour.slice(1)] : [])]));
+    else if (spec.model) args.push('--model', join(dir, spec.model), ...(spec.zUp ? ['--z-up'] : []), ...(spec.tint ? ['--tint', spec.tint.slice(1)] : []));
     if (spec.object && spec.seats?.length) args.push('--object', join(dir, spec.object), ...spec.seats.flatMap(matrix => ['--seat', matrix.map(value => Number(value.toFixed(6))).join(',')]));
     else if (spec.photo) args.push('--photo', join(dir, spec.photo));
     try { await run(binary, args, {timeout: 120_000}); return (await stat(output)).size > 0; }

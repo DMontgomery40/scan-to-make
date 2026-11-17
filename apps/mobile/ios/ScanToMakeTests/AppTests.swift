@@ -946,6 +946,64 @@ private actor HeldDownload {
         return data
     }
 
+    /// #691 (#866 at 08415f69): parts arrive after the project is ready, in a `project.updated`. The same page then wants
+    /// the part meshes (so they download and the stage redraws without leaving it); before, the stage wanted only the
+    /// merged mesh and never asked for them. A one-part 3MF records no parts and keeps its merged mesh.
+    func testPartsThatArriveAfterTheProjectIsReadyAreWantedOnTheSamePage() throws {
+        let data = try Data(contentsOf: URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appending(path: "packages/contracts/fixtures/project-parts.json"))
+        let doc = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        var object = try XCTUnwrap((doc["cases"] as? [[String: Any]])?.first?["object"] as? [String: Any])
+        for (key, value) in ["id": "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a96", "createdAtMs": 1.0, "updatedAtMs": 2.0, "state": "ready",
+                             "photos": [String]()] as [String: Any] { object[key] = value }
+        let withParts = try JSONDecoder().decode(Project.self, from: JSONSerialization.data(withJSONObject: object))
+        var current = try XCTUnwrap(object["current"] as? [String: Any]); current["parts"] = nil; object["current"] = current
+        let ready = try JSONDecoder().decode(Project.self, from: JSONSerialization.data(withJSONObject: object))
+        let before = ProjectGallery(project: ready).entries.first { $0.kind == .part }
+        let after = ProjectGallery(project: withParts).entries.first { $0.kind == .part }
+        XCTAssertEqual(before?.id, after?.id, "the same entry on the same page")
+        XCTAssertEqual(ProjectGalleryView.partMeshes(before), [], "ready, before its parts: the merged mesh, nothing more wanted")
+        XCTAssertEqual(ProjectGalleryView.partMeshes(after), ["current/parts/part-1.stl", "current/parts/part-2.stl"], "the update brings them: both wanted")
+    }
+
+    /// #691: a two-colour design on the stage is its two parts, each in its own colour (a dark one floored, as the stage
+    /// floors every colour), lined up in the frame they share; and AR (#845) gets one USDZ of both at true size.
+    func testATwoColourDesignIsDrawnPartByPartAndGoesToARAsOneFile() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let bar = folder.appendingPathComponent("part-1.stl"), letters = folder.appendingPathComponent("part-2.stl")
+        try Self.boxSTL([150, 20, 8]).write(to: bar)
+        try Self.boxSTL([120, 8, 40]).write(to: letters)
+        let wood = UIColor(red: 0.69, green: 0.52, blue: 0.36, alpha: 1)
+        let parts = [StagePart(url: bar, tint: wood), StagePart(url: letters, tint: nil)]
+        let loaded = await ModelStage.load(bar, tint: nil, twoTone: false, parts: parts)
+        let drawn = try XCTUnwrap(loaded)
+        let models = drawn.children.flatMap { [$0] + Array($0.children) }.compactMap { $0 as? ModelEntity }
+        XCTAssertEqual(models.count, 2, "one mesh per part")
+        let colours = models.compactMap { ($0.model?.materials.first as? PhysicallyBasedMaterial)?.baseColor.tint }
+        XCTAssertEqual(colours.count, 2)
+        // The material keeps its colour through RealityKit's colour space: compared by component, not by identity.
+        func near(_ a: UIColor, _ b: UIColor) -> Bool {
+            var r1: CGFloat = 0, g1: CGFloat = 0, b1: CGFloat = 0, a1: CGFloat = 0, r2: CGFloat = 0, g2: CGFloat = 0, b2: CGFloat = 0, a2: CGFloat = 0
+            a.getRed(&r1, green: &g1, blue: &b1, alpha: &a1); b.getRed(&r2, green: &g2, blue: &b2, alpha: &a2)
+            return abs(r1 - r2) < 0.02 && abs(g1 - g2) < 0.02 && abs(b1 - b2) < 0.02
+        }
+        XCTAssertTrue(colours.contains { near($0, wood) }, "the bar in its filament's colour: \(colours)")
+        XCTAssertTrue(colours.contains { near($0, ModelStage.neutral) }, "a part with no colour in the neutral material: \(colours)")
+        let extents = drawn.visualBounds(relativeTo: nil).extents
+        XCTAssertEqual(extents.y, 0.040, accuracy: 0.0005, "both, in one frame: the taller part's 40 mm")
+
+        let written = await ARModel.usdz(fromParts: [bar, letters], tints: ["#B0855D", nil])
+        let made = try XCTUnwrap(written)
+        XCTAssertTrue(PartUSDZ.isUSDZ(made))
+        XCTAssertEqual(made, ARModel.target(forParts: [bar, letters], tints: ["#B0855D", nil]))
+        XCTAssertNotEqual(made, ARModel.target(forParts: [bar, letters], tints: ["#B0855D", "#111111"]), "a new colour writes a new file")
+        let entity = try await Entity(contentsOf: made)
+        XCTAssertEqual(entity.visualBounds(relativeTo: nil).extents.x, 0.150, accuracy: 0.0005, "true size")
+    }
+
     /// The file AR Quick Look gets is the USDZ its name says, Quick Look can preview it, it is the part at true size in
     /// its spool's colour, and the Reality file an earlier build wrote beside it is gone.
     func testAPartsARFileIsARealUSDZThatQuickLookOpensAtTrueSize() async throws {

@@ -25,7 +25,7 @@ import {PrinterSetupError, type PrinterSetup} from '../printing/setup.js';
 const READ: RemoteScope = 'projects:read', WRITE: RemoteScope = 'captures:import', PRINT: RemoteScope = 'printer-handoff:use';
 const MAX_SCAN = 64 * 1024 * 1024, MAX_PHOTO = 25 * 1024 * 1024, MAX_JSON = 16 * 1024;
 const MAX_DEPTH = 8 * 1024 * 1024;
-const PATH = /^\/v1\/objects(?:\/([0-9a-f-]{36})(?:\/(scan|model|ask|plate-selection|settings|duplicate|make-from-scan|locate|photos|capture|capture-manifest|capture-depth|capture-camera|reconstruction|reconstruction-preview\.stl|start|corrections|closeup|print|print\/pause|print\/resume|print\/cancel|estimate|camera\.jpg|prints\/[0-9a-f-]{36}\/frames\/[0-9a-f-]{36}\.jpg|asks\/[0-9a-f-]{36}\.jpg|filaments|colour-mapping|print-confirmation|printer|model\.stl|current\/[^/]+|original\/[0-9]+|passes\/[^/]+\/activity|(?:renders|photos|capture|scan|pictures)\/[^/]+|versions\/[0-9a-f-]{36}\/(?:[^/]+|(?:renders|pictures)\/[^/]+)))?)?$/;
+const PATH = /^\/v1\/objects(?:\/([0-9a-f-]{36})(?:\/(scan|model|ask|plate-selection|settings|duplicate|make-from-scan|locate|photos|capture|capture-manifest|capture-depth|capture-camera|reconstruction|reconstruction-preview\.stl|start|corrections|closeup|print|print\/pause|print\/resume|print\/cancel|estimate|camera\.jpg|prints\/[0-9a-f-]{36}\/frames\/[0-9a-f-]{36}\.jpg|asks\/[0-9a-f-]{36}\.jpg|filaments|colour-mapping|print-confirmation|printer|model\.stl|current\/(?:parts\/)?[^/]+|original\/[0-9]+|passes\/[^/]+\/activity|(?:renders|photos|capture|scan|pictures)\/[^/]+|versions\/[0-9a-f-]{36}\/(?:[^/]+|(?:renders|pictures|parts)\/[^/]+)))?)?$/;
 const PRINTER_CAMERA = /^\/v1\/objects\/printers\/([A-Za-z0-9_-]{1,256})\/camera\.jpg$/;
 /** Settings -> Printers: the printer MCP's connection (`route`) and which MCP a printer uses (`mcp`). */
 const PRINTER_CHOICE = /^\/v1\/objects\/printers\/([A-Za-z0-9_-]{1,256})\/(route|mcp)$/;
@@ -144,7 +144,7 @@ export function publicObject(stored: StmObject): PublicObject {
   // Never null: until a title is generated (or backfilled for an older project), the request's first words.
   // The companion's decision (copy, new design or published), so neither app re-derives it.
   // Local bookkeeping, like the passes' recovery fields below.
-  const {failedPass: _failedPass, checkedSizes: _checkedSizes, ...shown} = object;
+  const {failedPass: _failedPass, checkedSizes: _checkedSizes, partsChecked: _partsChecked, ...shown} = object;
   return {...shown, ...(keptFile(object) ? {plates: projectPlates(object)} : {}), kind: passKind(object), title: projectTitle(object), failure, canRetryCleanup, status: objectStatus({...object, ...(failure !== undefined ? {failure} : {})}, object.updatedAtMs),
     settings: projectSettingsView(object),
     // The sender's own id for a message is how a repeat is recognised here; no client reads it back.
@@ -431,7 +431,9 @@ export function createObjectRoutes(service: ObjectService, options: {printerSetu
           // served here (renders by name under renders/). model.stl stays the file that prints.
           const model = object.current?.model;
           // For a multi-part design only the merged mesh: its 3MF comes from model.stl, as the doc says (review of #770).
-          const allowed = !model?.startsWith('current/') ? [] : model.toLowerCase().endsWith('.3mf') ? (object.kind !== 'published' ? ['current/model.stl'] : []) : [model];
+          const allowed = [...(!model?.startsWith('current/') ? [] : model.toLowerCase().endsWith('.3mf') ? (object.kind !== 'published' ? ['current/model.stl'] : []) : [model]),
+            // #691: each part's own mesh, drawn in its colour (a designer's 3MF's too).
+            ...(object.current?.parts ?? []).map(part => part.mesh)];
           if (!allowed.includes(action)) throw new HttpFailure(404, 'not-found');
           await exportFile(response, service.dir(id), action, {'content-type': action.toLowerCase().endsWith('.3mf') ? 'model/3mf' : 'model/stl', 'cache-control': 'private, no-store', 'x-content-type-options': 'nosniff'}, header('if-none-match'));
           return;
@@ -441,7 +443,8 @@ export function createObjectRoutes(service: ObjectService, options: {printerSetu
           await authorize(READ);
           const object = await service.get(id);
           // A sealed design's own files: its model (and the merged STL sealed beside a multi-part 3MF), renders and pictures.
-          const allowed = object.versions?.flatMap(v => [v.result.model, `${v.result.model.split('/').slice(0, -1).join('/')}/model.stl`, ...v.result.renders, ...Object.values(v.pictures ?? {})]);
+          const allowed = object.versions?.flatMap(v => [v.result.model, `${v.result.model.split('/').slice(0, -1).join('/')}/model.stl`, ...v.result.renders, ...Object.values(v.pictures ?? {}),
+            ...(v.result.parts ?? []).map(part => part.mesh)]);
           if (!allowed?.includes(action)) throw new HttpFailure(404, 'not-found');
           await exportFile(response, service.dir(id), action, {'content-type': action.endsWith('.png') ? 'image/png' : action.endsWith('.3mf') ? 'model/3mf' : 'model/stl', 'cache-control': 'private, max-age=86400', 'x-content-type-options': 'nosniff'});
           return;

@@ -21,6 +21,9 @@ public struct PictureSpec {
     public var seats: [[Double]] = []
     /// A photo, when there is no model yet: its subject cut out of the room by Vision, alone on the stage.
     public var photo: URL?
+    /// #691: a multi-part design drawn part by part, each STL (millimetres, Z up, all in the 3MF's build frame, so they line
+    /// up) in its own colour (nil: neutral), in place of `model`.
+    public var parts: [(url: URL, tint: NSColor?)] = []
     public var pixels = 900
     public init() {}
 }
@@ -104,6 +107,13 @@ private func loadNode(_ url: URL, zUp: Bool, tint: NSColor?, own: Bool) throws -
         if zUp { node.eulerAngles.x = -.pi / 2 }
         return node
     }
+    // An STL whose facet normals are all zero (exporters needn't write them) drew black: it is drawn flat from its faces'
+    // winding, as a 3MF's meshes are. A file's own normals are kept.
+    if url.pathExtension.lowercased() == "stl", let mesh = unlitSTL(url) {
+        let node = try threeMFNode(ThreeMF(meshes: [mesh]), tint: tint)
+        if zUp { node.eulerAngles.x = -.pi / 2 }
+        return node
+    }
     let asset = MDLAsset(url: url)
     asset.loadTextures()
     let scene = SCNScene(mdlAsset: asset)
@@ -125,6 +135,28 @@ private func loadNode(_ url: URL, zUp: Bool, tint: NSColor?, own: Bool) throws -
     }
     if zUp { holder.eulerAngles.x = -.pi / 2 }
     return holder
+}
+
+/// A binary STL whose every facet normal is zero, as one mesh (millimetres, Z up); nil for any other file.
+func unlitSTL(_ url: URL) -> ThreeMF.Mesh? {
+    guard let data = try? Data(contentsOf: url, options: .mappedIfSafe), data.count >= 84 else { return nil }
+    let count = Int(data.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: 80, as: UInt32.self).littleEndian })
+    guard count > 0, data.count >= 84 + count * 50 else { return nil }
+    var positions: [SIMD3<Float>] = [], triangles: [SIMD3<UInt32>] = []
+    positions.reserveCapacity(count * 3); triangles.reserveCapacity(count)
+    let lit = data.withUnsafeBytes { raw -> Bool in
+        func float(_ at: Int) -> Float { Float(bitPattern: raw.loadUnaligned(fromByteOffset: at, as: UInt32.self).littleEndian) }
+        for i in 0..<count {
+            let at = 84 + i * 50
+            if abs(float(at)) + abs(float(at + 4)) + abs(float(at + 8)) > 1e-6 { return true }
+            let base = UInt32(positions.count)
+            for k in 0..<3 { positions.append(SIMD3(float(at + 12 + k * 12), float(at + 16 + k * 12), float(at + 20 + k * 12))) }
+            triangles.append(SIMD3(base, base + 1, base + 2))
+        }
+        return false
+    }
+    return lit ? nil : ThreeMF.Mesh(name: url.deletingPathExtension().lastPathComponent, positions: positions, triangles: triangles,
+                                    colours: Array(repeating: nil, count: triangles.count))
 }
 
 /// Scene lights for a printed part: a key from above and in front, a fill, a rim, and enough ambient that black PLA
@@ -166,12 +198,19 @@ private func drawnPlastic(_ colour: NSColor) -> NSColor {
 public func renderPicture(_ spec: PictureSpec, to output: URL) throws {
     let size = spec.pixels
     guard let context = stage(size, light: false) else { throw HandheldError.io("no drawing context") }
-    if let model = spec.model {
+    if let model = spec.parts.first?.url ?? spec.model {
         let scene = SCNScene()
         scene.background.contents = NSColor.clear
-        let own = !spec.zUp && spec.tint == nil
+        let own = spec.parts.isEmpty && !spec.zUp && spec.tint == nil
         let root = SCNNode()
-        let part = try loadNode(model, zUp: false, tint: spec.tint, own: own)
+        let part: SCNNode
+        if spec.parts.isEmpty {
+            part = try loadNode(model, zUp: false, tint: spec.tint, own: own)
+        } else {
+            // #691: each part in its own colour, where it sits in the build.
+            part = SCNNode()
+            for each in spec.parts { part.addChildNode(try loadNode(each.url, zUp: false, tint: each.tint, own: false)) }
+        }
         let frame = SCNNode()
         frame.addChildNode(part)
         if let object = spec.object, !spec.seats.isEmpty {
@@ -188,7 +227,8 @@ public func renderPicture(_ spec: PictureSpec, to output: URL) throws {
         if spec.zUp { frame.eulerAngles.x = -.pi / 2 }
         root.addChildNode(frame)
         scene.rootNode.addChildNode(root)
-        if !own { addLights(scene.rootNode, dark: luminance(spec.tint) < 0.2, bright: luminance(spec.tint) > 0.8) }
+        let lit = spec.parts.isEmpty ? spec.tint : spec.parts.map(\.tint).max { luminance($0) < luminance($1) } ?? nil
+        if !own { addLights(scene.rootNode, dark: luminance(lit) < 0.2, bright: luminance(lit) > 0.8) }
         let (low, high) = root.boundingBox
         let lowW = root.convertPosition(low, to: nil), highW = root.convertPosition(high, to: nil)
         let centre = SIMD3<Double>(Double(lowW.x + highW.x) / 2, Double(lowW.y + highW.y) / 2, Double(lowW.z + highW.z) / 2)

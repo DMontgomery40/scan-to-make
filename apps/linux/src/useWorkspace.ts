@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { call } from "./bridge";
-import { ReadOrder, newerProject, mcpUpdateNotices, mcpWaitClock, mcpPhase, MCP_UNHEARD, type McpPhase } from "./domain";
+import { ReadOrder, newerProject, noteDesignChanges, withDesignRevision, mcpUpdateNotices, mcpWaitClock, mcpPhase, MCP_UNHEARD, type McpPhase } from "./domain";
 import type { Project, Printer, RawQuestion } from "./types";
 export function useWorkspace(enabled: boolean) {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -34,6 +34,8 @@ export function useWorkspace(enabled: boolean) {
   const order = useRef(new ReadOrder());
   const reading = useRef(false);
   const cursor = useRef(0);
+  // #691: per project, the events that said its design files changed in place; each read carries it to the stage.
+  const designRevisions = useRef<Record<string, number>>({});
   const refresh = useCallback(async () => {
     if (reading.current) return;
     reading.current = true;
@@ -46,9 +48,12 @@ export function useWorkspace(enabled: boolean) {
       if (order.current.accept(ticket)) {
         setProjects((old) =>
           a.objects.map((p) =>
-            newerProject(
-              old.find((x) => x.id === p.id),
-              p,
+            withDesignRevision(
+              newerProject(
+                old.find((x) => x.id === p.id),
+                p,
+              ),
+              designRevisions.current,
             ),
           ),
         );
@@ -68,9 +73,12 @@ export function useWorkspace(enabled: boolean) {
     order.current.invalidate();
     setProjects((all) =>
       [
-        newerProject(
-          all.find((p) => p.id === project.id),
-          project,
+        withDesignRevision(
+          newerProject(
+            all.find((p) => p.id === project.id),
+            project,
+          ),
+          designRevisions.current,
         ),
         ...all.filter((p) => p.id !== project.id),
       ].sort((a, b) => b.createdAtMs - a.createdAtMs),
@@ -129,7 +137,7 @@ export function useWorkspace(enabled: boolean) {
         try {
           const page = await call<{
             next: number;
-            events: { type: string; title: string; body: string; data?: {mcpId?: string} }[];
+            events: { type: string; title: string; body: string; projectId?: string; data?: {mcpId?: string; keys?: string[]} }[];
             reset?: boolean;
             truncated?: boolean;
           }>("events.wait", {
@@ -139,6 +147,7 @@ export function useWorkspace(enabled: boolean) {
           });
           if (!live) return;
           cursor.current = page.next;
+          designRevisions.current = noteDesignChanges(designRevisions.current, page.events);
           if (page.events.length || page.reset || page.truncated) {
             await refresh();
             await confirmations();

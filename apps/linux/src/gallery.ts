@@ -11,7 +11,10 @@ export type Seat = { name?: string; translationMm: number[]; rotationDeg: number
 export type Drawing =
   | { model: string }
   | { picture: string }
-  | { assembly: { part: string; object: string; seats: Seat[] } };
+  | { assembly: { part: string; object: string; seats: Seat[] } }
+  /** #691: a multi-part design, each part's mesh in its own colour ("neutral" for none), all in one frame. */
+  | { parts: DrawnPart[] };
+export type DrawnPart = { mesh: string; colour: Colour };
 /** "neutral", "own", or the spool's `#RRGGBB`. */
 export type Colour = string;
 export interface GalleryEntry {
@@ -50,14 +53,20 @@ export function spoolColour(p: Project): string | undefined {
 
 export function printableParts(p: Project): PrintablePart[] {
   const plates = p.plates ?? [];
-  // Every plate the file has is an entry; one whose picture the MCP didn't send shows the placeholder ("").
+  // Every plate the file has is an entry; one whose picture the MCP didn't send shows the placeholder (""). With the
+  // file's parts meshed (#691), a plate turns in 3D, its own parts in their colours (CounterpartKit).
   if (plates.length > 1)
-    return plates.map((plate, index) => ({
-      id: `plate-${plate.id}`, label: plate.name || `Plate ${index + 1}`, drawing: { picture: plate.thumbnail ?? "" }, colour: "own", plate: true,
-    }));
+    return plates.map((plate, index) => {
+      const parts = drawnParts(p, index);
+      return { id: `plate-${plate.id}`, label: plate.name || `Plate ${index + 1}`, drawing: parts ? { parts } : { picture: plate.thumbnail ?? "" }, colour: "own", plate: true };
+    });
   const current = p.current;
   if (!current) return [];
   const label = p.kind === "copy" ? "Your copy" : p.kind === "published" ? "Model" : "Your part";
+  // #691: a multi-part design whose parts the printer MCP meshed turns part by part, each in its own colour. A designer's
+  // kit shows the plate it prints (`publishedSelection.plateIndex`).
+  const parts = drawnParts(p, p.kind === "published" ? p.publishedSelection?.plateIndex : undefined);
+  if (parts) return [{ id: "result", label, drawing: { parts }, colour: "own", sizeMm: current.sizeMm }];
   const mesh = partMesh(p);
   if (!mesh) {
     // A designer's 3MF has no merged mesh: the computer's drawing of all the file's objects first, as on the other
@@ -68,6 +77,26 @@ export function printableParts(p: Project): PrintablePart[] {
   // A multi-part design turns from its merged mesh, neutral until the MCPs report each part's colour (#769, #645).
   const multipart = current.model.toLowerCase().endsWith(".3mf");
   return [{ id: "result", label, drawing: { model: mesh }, colour: multipart ? "neutral" : spoolColour(p) ?? "neutral", sizeMm: current.sizeMm }];
+}
+
+/**
+ * What the stage turns for a multi-part design (#691; project-parts.json `draw`): each part's mesh with its own colour,
+ * or "neutral" for a part with none. Only `plate`'s parts (0-based) when one is given; a part with no plate is on every
+ * plate. Undefined without parts: the merged mesh turns, neutral, as before. All or nothing (review of #869, P2-4): one
+ * unreadable entry (no safe mesh path, a plate that isn't a number) means no parts, never a design with one missing.
+ */
+export function drawnParts(p: Project, plate?: number): DrawnPart[] | undefined {
+  const all: unknown = p.current?.parts;
+  if (!Array.isArray(all) || !all.length) return undefined;
+  const readable = (part: unknown): part is NonNullable<NonNullable<Project["current"]>["parts"]>[number] => {
+    if (!part || typeof part !== "object") return false;
+    const { mesh, plate: on } = part as { mesh?: unknown; plate?: unknown };
+    return typeof mesh === "string" && !!mesh && !mesh.startsWith("/") && !mesh.split("/").includes("..")
+      && (on === undefined || (typeof on === "number" && Number.isInteger(on)));
+  };
+  if (!all.every(readable)) return undefined;
+  const shown = all.filter((part) => plate === undefined || part.plate === undefined || part.plate === plate);
+  return shown.length ? shown.map((part) => ({ mesh: part.mesh, colour: hex(part.colour) ?? "neutral" })) : undefined;
 }
 
 /**
@@ -94,6 +123,8 @@ export function partMesh(p: Project): string | undefined {
  * names the phone's preview under a too-large rebuild, which Linux, with no AR control, has no use for.
  */
 export function ar(entry: GalleryEntry): string | undefined {
+  // #845: a design drawn part by part (a part, or a kit's plate) opens AR from its parts; `ar` names the first.
+  if ("parts" in entry.drawing) return entry.kind === "part" || entry.kind === "plate" ? entry.drawing.parts[0]?.mesh : undefined;
   if (!("model" in entry.drawing)) return undefined;
   const path = entry.drawing.model, lower = path.toLowerCase();
   if (entry.kind === "part") return lower.endsWith(".stl") ? path : undefined;
@@ -113,9 +144,16 @@ export function gallery(p: Project, parts: PrintablePart[] = printableParts(p)):
   const scans = scanModels(p);
   const seats = p.current?.seats ?? [];
   // Only where it is drawn right today: a USDZ scan. A handheld STL scan gets no Together until the project carries its frame.
-  if (parts.length === 1 && "model" in parts[0]!.drawing && seats.length && scans.length && scans[0]!.toLowerCase().endsWith(".usdz"))
-    entries.push({ id: "together", kind: "together", label: "Together", drawing: { assembly: { part: parts[0]!.drawing.model, object: scans[0]!, seats } },
-      colour: parts[0]!.colour, measures: "Together" });
+  const only = parts.length === 1 ? parts[0]! : undefined;
+  if (only && seats.length && scans.length && scans[0]!.toLowerCase().endsWith(".usdz")) {
+    const turns = "model" in only.drawing || "parts" in only.drawing;
+    // A copy's Together is the part in the scan's place (#691, CounterpartKit): the part as it is drawn, never the scan
+    // drawn over it. A fit's is the part (its merged mesh, when drawn part by part) with the object in each seat.
+    const model = "model" in only.drawing ? only.drawing.model : "parts" in only.drawing ? partMesh(p) : undefined;
+    if (turns && p.kind === "copy") entries.push({ id: "together", kind: "together", label: "Together", drawing: only.drawing, colour: only.colour, measures: "Together" });
+    else if (model) entries.push({ id: "together", kind: "together", label: "Together", drawing: { assembly: { part: model, object: scans[0]!, seats } },
+      colour: only.colour, measures: "Together" });
+  }
   const photos = p.photos.length ? p.photos.map((name) => `photos/${name}`) : (p.capture ?? []).map((name) => `capture/${name}`);
   scans.forEach((scan, index) =>
     entries.push({ id: `scan-${index}`, kind: "scan", label: scans.length > 1 ? `Scan ${index + 1}` : "What you scanned", drawing: { model: scan },
@@ -154,6 +192,8 @@ export function pictureFor(p: Project, entry: GalleryEntry): string | undefined 
   if ("picture" in entry.drawing) return entry.drawing.picture || undefined;
   if (entry.kind === "part") return p.pictures?.part ?? (p.current?.renders[0] ? renderPath(p.current.renders[0]) : undefined);
   if (entry.kind === "together") return p.pictures?.together;
+  // A plate drawn by its parts (#691) keeps its own picture as the still.
+  if (entry.kind === "plate") return p.plates?.find((plate) => `plate-${plate.id}` === entry.id)?.thumbnail || undefined;
   return p.pictures?.scan ?? p.pictures?.photo;
 }
 

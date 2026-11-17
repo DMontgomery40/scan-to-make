@@ -249,6 +249,17 @@ struct ProjectDetail: View {
                 } else { still(entry) }
             case .picture:
                 still(entry)
+            case .parts(let meshes):
+                // #691: each part in its own colour once every part's mesh is on this Mac; its picture until then.
+                let files = meshes.compactMap { part in stageObject.projectFile(part.mesh).flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0 : nil } }
+                if files.count == meshes.count, let first = files.first {
+                    ModelStage(url: first, version: FileVersion.of(first, else: stageObject.updatedAtMs), fit: 0.15,
+                               accessibilityText: "\(entry.label), \(meshes.count) parts in their colours. Drag to turn it, scroll to zoom.",
+                               poster: stageObject.pictures?["part"].flatMap(stageObject.projectFile) ?? Self.poster(stageObject),
+                               parts: zip(files, meshes).map { (url: $0, tint: Self.colour($1.colour)) },
+                               measured: { measured[entry.id] = $0 })
+                    .id(entry.id)
+                } else { still(entry) }
             }
         } else if let photo = stageObject.photoPicture {
             // Photos sent, no scan model or result yet: the subject this Mac cut out, as the sidebar shows it.

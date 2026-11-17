@@ -518,12 +518,15 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
         /// #788: a draft, never a finished design: the design engine's last valid run of a pass that ended with no run it
         /// let the designer make final, with the printer MCP's own reasons (none from an MCP before engine round 4).
         public var draft: DesignDraft?
+        /// #691: each printable part of a multi-part 3MF as its own mesh, from the printer MCP's `counterpart_part_meshes`
+        /// (packages/contracts/fixtures/project-parts.json). Absent from an MCP without the tool: the merged mesh, neutral.
+        public var parts: [ResultPart]?
         public init(model: String, renders: [String], sizeMm: [Double]? = nil, summary: String? = nil, changes: [Change]? = nil, ownSettings: Bool? = nil,
-                    filaments: [DeclaredFilament]? = nil, seats: [Seat]? = nil, mergedMesh: String? = nil, draft: DesignDraft? = nil) {
+                    filaments: [DeclaredFilament]? = nil, seats: [Seat]? = nil, mergedMesh: String? = nil, draft: DesignDraft? = nil, parts: [ResultPart]? = nil) {
             self.model = model; self.renders = renders; self.sizeMm = sizeMm; self.summary = summary; self.changes = changes; self.ownSettings = ownSettings
-            self.filaments = filaments; self.seats = seats; self.mergedMesh = mergedMesh; self.draft = draft
+            self.filaments = filaments; self.seats = seats; self.mergedMesh = mergedMesh; self.draft = draft; self.parts = parts
         }
-        private enum CodingKeys: String, CodingKey { case model, renders, sizeMm, summary, changes, engine, ownSettings, filaments, seats, mergedMesh, draft }
+        private enum CodingKeys: String, CodingKey { case model, renders, sizeMm, summary, changes, engine, ownSettings, filaments, seats, mergedMesh, draft, parts }
         /// A malformed optional (say, `changes`) is left out; the model and renders still show.
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -538,8 +541,27 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
             seats = (try? c.decodeIfPresent([Seat].self, forKey: .seats)) ?? nil
             mergedMesh = (try? c.decodeIfPresent(String.self, forKey: .mergedMesh)) ?? nil
             draft = (try? c.decodeIfPresent(DesignDraft.self, forKey: .draft)) ?? nil
+            // All or nothing (review of #872, P2-4): one malformed part and the design is drawn as if it had no parts (the
+            // merged mesh, neutral), never with a piece silently missing. Android and Linux read it the same way.
+            let decoded = (try? c.decodeIfPresent([ResultPart].self, forKey: .parts)) ?? nil
+            parts = decoded?.isEmpty == false ? decoded : nil
         }
     }
+
+    /// One part of a multi-part design (#691): `id` the MCP's key (never parsed), `mesh` a project path to its STL in the
+    /// 3MF's build frame (millimetres; the parts line up drawn together), `colour` `#RRGGBB` or none, `plate` 0-based.
+    public struct ResultPart: Codable, Equatable, Sendable {
+        public var id: String
+        public var name: String?
+        public var colour: String?
+        public var plate: Int?
+        public var painted: Bool?
+        public var mesh: String
+        public init(id: String, name: String? = nil, colour: String? = nil, plate: Int? = nil, painted: Bool? = nil, mesh: String) {
+            self.id = id; self.name = name; self.colour = colour; self.plate = plate; self.painted = painted; self.mesh = mesh
+        }
+    }
+
 
     /// #788: why a design is a draft, in the printer MCP's own words (`final_refused`, or its failing purpose
     /// requirements), shown as given and never interpreted. Empty from an MCP before engine round 4.

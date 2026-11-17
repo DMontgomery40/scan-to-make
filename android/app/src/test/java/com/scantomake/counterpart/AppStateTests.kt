@@ -68,6 +68,48 @@ class AppStateTests {
         dispatcher.scheduler.runCurrent()
     }
 
+    /** #691: a design's parts land after the project is ready, with `project.updated` (keys `current`): the project is read
+     *  again and the stage's parts revision moves, so the open page draws them without the person leaving it. */
+    @Test fun partsThatLandAfterTheProjectIsReadyAreReadAgainAndRedrawn() {
+        val id = "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a95"
+        fun record(parts: Boolean) = mapOf("id" to id, "createdAtMs" to 1, "updatedAtMs" to 2, "state" to "ready", "kind" to "copy", "photos" to emptyList<Any>(),
+            "passes" to emptyList<Any>(), "current" to mapOf("model" to "current/model.3mf", "renders" to emptyList<Any>(), "mergedMesh" to "current/model.stl") +
+                (if (parts) mapOf("parts" to listOf(mapOf("id" to "1/1", "colour" to "#B0855D", "mesh" to "current/parts/part-1.stl"),
+                    mapOf("id" to "1/2", "colour" to "#111111", "mesh" to "current/parts/part-2.stl"))) else emptyMap()))
+        var landed = false
+        var reads = 0
+        transport.answer = { request, _ ->
+            val uri = java.net.URI(request.url)
+            when (uri.path) {
+                "/v1/objects" -> json(value = mapOf("objects" to listOf(record(landed))))
+                "/v1/objects/$id" -> json(value = mapOf("object" to record(landed)))
+                "/v1/objects/printers" -> json(value = mapOf("destinations" to emptyList<Any>()))
+                "/healthz" -> json(value = mapOf("name" to "Test computer"))
+                "/v1/events" -> when (reads++) {
+                    0 -> json(value = mapOf("next" to 5, "events" to emptyList<Any>()))
+                    1 -> { landed = true; json(value = mapOf("next" to 6, "events" to listOf(mapOf("seq" to 6, "id" to "e6", "type" to "project.updated", "projectId" to id,
+                        "title" to "Desk sign", "body" to "Project updated", "notify" to "none", "data" to mapOf("keys" to listOf("current")))))) }
+                    else -> HttpReply(503, ByteArray(0))
+                }
+                else -> json(404, mapOf("error" to "not-found"))
+            }
+        }
+        pair()
+        state.startFollowing()
+        // The reads finish off the main thread: run what they queue until the event's read has landed (or 5 s pass).
+        val deadline = System.currentTimeMillis() + 5_000
+        while (System.currentTimeMillis() < deadline &&
+            (state.designRevisions.value[id] == null || state.projects.value.singleOrNull { it.id == id }?.current?.parts.isNullOrEmpty())) {
+            dispatcher.scheduler.runCurrent(); Thread.sleep(20)
+        }
+        assertTrue("the events were read: ${transport.paths}", reads >= 2)
+        val shown = state.projects.value.single { it.id == id }
+        assertEquals("requests: ${transport.paths.map { java.net.URI(it).path }}; revision ${state.designRevisions.value}", listOf("current/parts/part-1.stl", "current/parts/part-2.stl"), shown.current!!.parts.map { it.mesh })
+        assertEquals(6, state.designRevisions.value[id])
+        // The gallery now draws the design part by part.
+        assertTrue(com.scantomake.counterpart.api.ProjectGallery.of(shown).first!!.drawing is com.scantomake.counterpart.api.ProjectGallery.Drawing.Parts)
+    }
+
     @Test fun pairingWhileVisibleLoadsProjectsWithoutAScreenCallbackOrRelaunch() {
         state.startFollowing()
         pair()

@@ -994,6 +994,14 @@ test("a designer's six-plate 3MF lists its six plates and their pictures from th
   assert.deepEqual((await f.calls()).filter(entry => entry.tool).map(entry => entry.tool), ['list_3mf_plates']);
 });
 
+test('#691: an MCP without the part-mesh tool meshes no parts, and nothing is called for them', async t => {
+  const f = await setup(t);
+  const path = join(f.root, 'kit.3mf');
+  await writeFile(path, sixPlates());
+  assert.equal(await f.runner.modelParts({modelPath: path, outputDir: f.root}), undefined, 'drawn as today: the merged mesh, neutral');
+  assert.deepEqual((await f.calls()).filter(entry => entry.tool).map(entry => entry.tool), []);
+});
+
 test('an MCP without list_3mf_plates is one to update, for listing and for printing a plate', async t => {
   const f = await setup(t, {noPlates: true});
   const path = join(f.root, 'kit.3mf');

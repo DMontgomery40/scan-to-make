@@ -136,7 +136,28 @@ data class Project(
                                     /** #769: the merged mesh beside a multi-part design's 3MF, listed only while the file is there. */
                                     val mergedMesh: String? = null,
                                     /** #788: a draft, never a finished design: the design engine's last valid run of a pass with no final run. */
-                                    val draft: Draft? = null)
+                                    val draft: Draft? = null,
+                                    /** #691: each part of a multi-part design as its own mesh and colour, read leniently ([parts]). */
+                                    @SerialName("parts") val partsRaw: JsonElement? = null) {
+        /**
+         * #691: the parts the printer MCP meshed (`counterpart_part_meshes`, packages/contracts/fixtures/project-parts.json):
+         * each mesh a project path in the 3MF's build frame, so all of them line up drawn together. All or nothing (review
+         * of #869, P2-4): one unreadable entry (no safe mesh path, a plate that isn't a number) makes the whole list none
+         * and the stage turns the merged mesh as before, never a design with a part silently missing.
+         */
+        val parts: List<Part> get() {
+            val list = partsRaw as? kotlinx.serialization.json.JsonArray ?: return emptyList()
+            return list.map { item ->
+                val o = item as? JsonObject ?: return emptyList()
+                fun text(key: String) = (o[key] as? JsonPrimitive)?.takeIf { it.isString }?.content
+                val mesh = text("mesh")?.takeIf { it.isNotEmpty() && !it.startsWith("/") && ".." !in it.split("/") } ?: return emptyList()
+                val plate = o["plate"]?.let { (it as? JsonPrimitive)?.takeIf { p -> !p.isString }?.content?.toIntOrNull() ?: return emptyList() }
+                Part(text("id") ?: mesh, text("name"), text("colour"), plate, mesh)
+            }
+        }
+    }
+    /** One part of a multi-part design (#691): `plate` is 0-based, absent for a plain 3MF (on every plate). */
+    data class Part(val id: String, val name: String?, val colour: String?, val plate: Int?, val mesh: String)
     /**
      * #788: why a design is a draft, in the printer MCP's own words (`final_refused`, or its failing purpose requirements),
      * shown as given and never interpreted. None from an MCP before engine round 4. Reasons that aren't words are left out.

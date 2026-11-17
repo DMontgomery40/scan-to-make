@@ -75,6 +75,43 @@ final class ThreeMFTests: XCTestCase {
         XCTAssertGreaterThan(try drawnPixels(image), 1500, "the objects are drawn, not an empty stage")
     }
 
+    /// #691: a design drawn part by part, each STL in its own colour where it sits: the bar in red under the letters in
+    /// blue, both on the picture, neither one colour for the whole.
+    func testAMultiPartDesignIsDrawnEachPartInItsOwnColour() throws {
+        func stl(_ size: SIMD3<Float>, at origin: SIMD3<Float>) -> Data {
+            let c: [SIMD3<Float>] = (0..<8).map { i in origin + SIMD3(Float(i & 1), Float((i >> 1) & 1), Float((i >> 2) & 1)) * size }
+            let faces = [[0, 2, 3, 1], [4, 5, 7, 6], [0, 1, 5, 4], [2, 6, 7, 3], [0, 4, 6, 2], [1, 3, 7, 5]]
+            let triangles = faces.flatMap { f in [[c[f[0]], c[f[1]], c[f[2]]], [c[f[0]], c[f[2]], c[f[3]]]] }
+            var data = Data(count: 80)
+            withUnsafeBytes(of: UInt32(triangles.count).littleEndian) { data.append(contentsOf: $0) }
+            for t in triangles {
+                for v in [SIMD3<Float>(0, 0, 0)] + t { for x in [v.x, v.y, v.z] { withUnsafeBytes(of: x.bitPattern.littleEndian) { data.append(contentsOf: $0) } } }
+                data.append(contentsOf: [0, 0])
+            }
+            return data
+        }
+        let bar = folder.appendingPathComponent("part-1.stl"), letters = folder.appendingPathComponent("part-2.stl")
+        try stl([150, 20, 10], at: [0, 0, 0]).write(to: bar)
+        try stl([120, 10, 50], at: [15, 5, 10]).write(to: letters)
+        var spec = PictureSpec(); spec.zUp = true; spec.pixels = 256
+        spec.parts = [(bar, NSColor(srgbRed: 0.9, green: 0.1, blue: 0.1, alpha: 1)), (letters, NSColor(srgbRed: 0.1, green: 0.2, blue: 0.95, alpha: 1))]
+        let output = folder.appendingPathComponent("parts.png")
+        try renderPicture(spec, to: output)
+        let image = try XCTUnwrap(NSImage(contentsOf: output)?.cgImage(forProposedRect: nil, context: nil, hints: nil))
+        var bytes = [UInt8](repeating: 0, count: 256 * 256 * 4)
+        let context = try XCTUnwrap(CGContext(data: &bytes, width: 256, height: 256, bitsPerComponent: 8, bytesPerRow: 256 * 4,
+            space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.draw(image, in: CGRect(x: 0, y: 0, width: 256, height: 256))
+        var red = 0, blue = 0
+        for i in stride(from: 0, to: bytes.count, by: 4) {
+            let r = Int(bytes[i]), g = Int(bytes[i + 1]), b = Int(bytes[i + 2])
+            if r > 90 && r > 2 * g && r > 2 * b { red += 1 }
+            if b > 90 && b > 2 * r && b > g + 30 { blue += 1 }
+        }
+        XCTAssertGreaterThan(red, 300, "the bar, in its red")
+        XCTAssertGreaterThan(blue, 300, "the letters, in their blue")
+    }
+
     func testBlackFilamentKeepsADarkBackdropAndAVisiblePart() throws {
         let url = try package("black", ["3D/3dmodel.model": model(box(1, "part"), build: "<item objectid=\"1\"/>")])
         XCTAssertFalse(wantsLightStage(.black))

@@ -50,7 +50,7 @@ usage: mac-reconstruct <images-folder> <output.usdz> [reduced|medium|full|raw] [
        mac-reconstruct backdrop <images-folder> [--save-masks <dir>]
        mac-reconstruct stl <model.usdz> <output.stl> [--render <overview.png>] [--remove-support]
        mac-reconstruct samples <images-folder> <output.usdz> [reduced|medium|full|raw] [--masks <dir> | --no-masks] [--save-masks <dir> [--masks-only]]
-       mac-reconstruct picture <output.png> [--model <file> [--z-up] [--tint RRGGBB]] [--object <scan.usdz> --seat m00,…,m33 …] [--photo <file>] [--pixels N]
+       mac-reconstruct picture <output.png> [--model <file> [--z-up] [--tint RRGGBB]] [--part <file.stl> [--part-tint RRGGBB] …] [--object <scan.usdz> --seat m00,…,m33 …] [--photo <file>] [--pixels N]
 
 """
 var args = Array(CommandLine.arguments.dropFirst())
@@ -74,6 +74,16 @@ if args.first == "picture" {
         spec.tint = NSColor(srgbRed: CGFloat((rgb >> 16) & 255) / 255, green: CGFloat((rgb >> 8) & 255) / 255, blue: CGFloat(rgb & 255) / 255, alpha: 1)
     }
     while let seat = value("--seat") { spec.seats.append(seat.split(separator: ",").compactMap { Double($0) }) }
+    // #691: `--part <stl> [--part-tint RRGGBB]`, once per part, in order; a part's tint follows it, or it is neutral.
+    while let i = rest.firstIndex(of: "--part"), i + 1 < rest.count {
+        let url = URL(fileURLWithPath: rest[i + 1]); rest.removeSubrange(i...(i + 1))
+        var tint: NSColor?
+        if i + 1 < rest.count, rest[i] == "--part-tint", let rgb = Int(rest[i + 1].trimmingCharacters(in: CharacterSet(charactersIn: "#")).prefix(6), radix: 16) {
+            tint = NSColor(srgbRed: CGFloat((rgb >> 16) & 255) / 255, green: CGFloat((rgb >> 8) & 255) / 255, blue: CGFloat(rgb & 255) / 255, alpha: 1)
+            rest.removeSubrange(i...(i + 1))
+        }
+        spec.parts.append((url, tint))
+    }
     spec.zUp = rest.contains("--z-up"); rest.removeAll { $0 == "--z-up" }
     guard rest.count == 1 else { FileHandle.standardError.write(Data(usage.utf8)); exit(2) }
     do { try renderPicture(spec, to: URL(fileURLWithPath: rest[0])); emit(["done": rest[0]]); exit(0) }

@@ -40,6 +40,41 @@ final class PartUSDZTests: XCTestCase {
 
     /// The old export: RealityKit's `Entity.write(to:)` named `.usdz`. It is a zip too, and must not pass for USDZ, so the
     /// app replaces the ones it wrote before.
+    /// #691, #845: a design in two colours goes to AR as one file with each part in its own colour, the parts where they
+    /// sit together (the bar under the letters), resting on the floor as a whole.
+    @MainActor func testTwoPartsGoToARInOneFileEachInItsOwnColour() async throws {
+        let folder = try folder()
+        let bar = Self.box([150, 20, 8])
+        let letters = Self.box([120, 8, 40]).map { ($0.0 + [15, 6, 8], $0.1 + [15, 6, 8], $0.2 + [15, 6, 8]) }
+        let layer = folder.appendingPathComponent("parts.usda")
+        XCTAssertEqual(try PartUSDZ.usda([(bar, [0.69, 0.52, 0.36]), (letters, [0.07, 0.07, 0.07])], to: layer), 24)
+        let text = try String(contentsOf: layer, encoding: .utf8)
+        XCTAssertTrue(text.contains("def Mesh \"Mesh1\"") && text.contains("def Mesh \"Mesh2\""), "a mesh per part")
+        XCTAssertTrue(text.contains("</Part/Materials/Filament1>") && text.contains("</Part/Materials/Filament2>"), "each bound to its own colour")
+        XCTAssertTrue(text.contains("color3f inputs:diffuseColor = (\(String(format: "%.4f", PartUSDZ.linear(0.69)))"), "the bar's colour, linear")
+        let target = folder.appendingPathComponent("parts.ar.usdz")
+        try PartUSDZ.write(parts: [(bar, [0.69, 0.52, 0.36]), (letters, [0.07, 0.07, 0.07])], to: target)
+        XCTAssertTrue(PartUSDZ.isUSDZ(target))
+        let entity = try await Entity(contentsOf: target)
+        let bounds = entity.visualBounds(relativeTo: nil)
+        XCTAssertEqual(bounds.min.y, 0, accuracy: 0.0005, "the whole rests on the floor")
+        XCTAssertEqual(bounds.extents.y, 0.048, accuracy: 0.0005, "the letters stand on the bar: 8 + 40 mm")
+        XCTAssertEqual(bounds.extents.x, 0.150, accuracy: 0.0005)
+    }
+
+    /// Review of #872: a part with no triangle that can be drawn fails the whole file, so AR isn't offered, rather than an
+    /// AR file with that part quietly missing.
+    func testAPartWithNothingToDrawFailsTheFileRatherThanGoingMissing() throws {
+        let folder = try folder()
+        let target = folder.appendingPathComponent("parts.ar.usdz")
+        let flat: [PartUSDZ.Triangle] = [([0, 0, 0], [0, 0, 0], [0, 0, 0]), ([1, 1, 1], [2, 2, 2], [3, 3, 3])]
+        XCTAssertThrowsError(try PartUSDZ.write(parts: [(Self.box(), [1, 0, 0]), (flat, [0, 0, 1])], to: target)) { error in
+            XCTAssertEqual(error as? PartUSDZ.Failure, .empty)
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: target.path), "no file with a piece missing")
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: folder.path), [], "and no scratch left")
+    }
+
     @MainActor func testARealityFileNamedUSDZIsNotAUSDZ() async throws {
         let folder = try folder()
         let reality = folder.appendingPathComponent("model.usdz")
