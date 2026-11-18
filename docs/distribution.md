@@ -130,6 +130,11 @@ to the app target, not AgentKit. Verify a downloaded copy on a clean Mac, includ
 the Local Network permission prompt, companion startup, cleanup workers, printer
 MCP discovery, update path and same-account phone pairing before sharing the link.
 
+## Keep the shipped archives
+
+Every build that ships keeps its Xcode archive, so its crash reports can be symbolicated later. That means each Mac release on the appcast and each TestFlight build uploaded. Copy its `.xcarchive` (with its dSYMs) to
+`/Volumes/Spillover/counterpart-release-archives/<mac|ios>-<version>-<build>/`, next to the folder's README, as part of the release. It holds Mac betas 6–8 and TestFlight 2.0 (5)–(8) as of Nov 18. This folder is never cleaned up. Every other build folder is removed when the release is done (operations.md, "Clean up when you finish").
+
 ## Beta information and public link
 
 Beta App Description saved in App Store Connect November 7:
